@@ -1,0 +1,269 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  moduleFormat    = "cjs"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  name         String
+  role         String // "ADMIN", "LEAD_AUDITOR", "AUDITOR", "AUDITEE"
+  passwordHash String? // bcrypt hash; null until an admin sets a password for this user
+  departmentId String?
+  department   Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  groupId      String?
+  group        UserGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  documents    Document[]
+  findings     Finding[]
+  reports      Report[]
+  projects     AuditProject[] @relation("ProjectAuditors")
+
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UserGroup {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  description String?
+  role        String       @default("AUDITEE") // RBAC role inherited by group members
+  users       User[]
+  permissions Permission[] // granular per-API-action grants for members of this group
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Permission {
+  key         String      @id // e.g. "audit-projects:create" - matches @RequirePermission() in code
+  description String
+  groups      UserGroup[]
+}
+
+model AuditProject {
+  id              String   @id @default(uuid())
+  name            String
+  code            String   @unique
+  status          String // "PLANNING", "IN_PROGRESS", "REPORTING", "ARCHIVED"
+  workflowStage   String   @default("DRAFTING") // "DRAFTING", "REVIEW", "PENDING_PIC", "APPROVED"
+  deptPicIds      String   @default("") // Comma-separated list of User IDs representing department PICs
+  departments     String   @default("") // Comma-separated list of Department IDs/Names
+  scope           String
+  planningDetails String
+  startDate       DateTime
+  endDate         DateTime
+  leadAuditorId   String?
+  auditorNames    String   @default("")
+
+  // Custom Scoping details fields
+  objectives      String @default("")
+  riskProcess     String @default("")
+  riskClass       String @default("")
+  opEx            String @default("")
+  fieldwork       String @default("")
+  outcome         String @default("")
+  dataRequestType String @default("")
+  focusArea       String @default("")
+  opExTimeline    String @default("")
+  approvals       String @default("")
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  documents          Document[]
+  reports            Report[]
+  attachments        Attachment[]
+  auditors           User[]              @relation("ProjectAuditors")
+  executionSchedules ExecutionSchedule[]
+  openMeetings       OpenMeeting[]
+
+  annualPlanId        String?
+  auditPlanId         String?
+  auditPlan           AuditPlan? @relation(fields: [auditPlanId], references: [id])
+}
+
+model Attachment {
+  id        String       @id @default(uuid())
+  fileName  String
+  fileSize  Int
+  fileType  String
+  fileData  String // Base64-encoded file data
+  projectId String
+  project   AuditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+}
+
+model Document {
+  id         String       @id @default(uuid())
+  title      String
+  content    String
+  projectId  String
+  project    AuditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploaderId String
+  uploader   User         @relation(fields: [uploaderId], references: [id])
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+model Finding {
+  id                  String            @id @default(uuid())
+  title               String
+  description         String
+  status              String // "OPEN", "UNDER_REVIEW", "CLOSED"
+  severity            String // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  recommendation      String
+  executionScheduleId String
+  executionSchedule   ExecutionSchedule @relation(fields: [executionScheduleId], references: [id], onDelete: Cascade)
+  auditorId           String
+  auditor             User              @relation(fields: [auditorId], references: [id])
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+model Report {
+  id        String       @id @default(uuid())
+  title     String
+  summary   String
+  status    String // "DRAFT", "FINAL"
+  projectId String
+  project   AuditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creatorId String
+  creator   User         @relation(fields: [creatorId], references: [id])
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model ExecutionSchedule {
+  id                    String       @id @default(uuid())
+  projectId             String
+  project               AuditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  findings              Finding[]
+  departments           String       @default("")
+  address               String
+  visitNumber           String       @default("01")
+  actualVisitDate       String
+  auditPeriod           String
+  leadExecution         String
+  teamMembers           String       @default("") // Comma-separated list of names
+  additionalAttendees   String       @default("")
+  attendeeConfirmations String       @default("{}")
+  standards             String       @default("Work Procedure, work instruction, and policy")
+  language              String       @default("English")
+  status                String       @default("DRAFT")
+  objectives            String       @default("")
+  scope                 String       @default("")
+  departmentConcern     String       @default("")
+  scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
+  attachments           String       @default("[]") // JSON serialized array of attachments
+  ownerName             String       @default("Sarah Jenkins")
+  lastModifiedBy        String       @default("Sarah Jenkins")
+  qrToken               String       @default(uuid())
+  departmentConsents    String       @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+}
+
+model OpenMeeting {
+  id                    String             @id @default(uuid())
+  projectId             String
+  project               AuditProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  departments           String             @default("")
+  address               String             @default("HQ Main Conference Room / Virtual Meeting")
+  visitNumber           String             @default("01")
+  actualVisitDate       String
+  auditPeriod           String
+  leadExecution         String
+  teamMembers           String             @default("") // Comma-separated list of names
+  additionalAttendees   String             @default("")
+  attendeeConfirmations String             @default("{}")
+  standards             String             @default("Work Procedure, work instruction, and policy")
+  status                String             @default("DRAFT")
+  objectives            String             @default("")
+  scope                 String             @default("")
+  departmentConcern     String             @default("")
+  scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
+  attachments           String             @default("[]") // JSON serialized array of attachments
+  ownerName             String             @default("Sarah Jenkins")
+  lastModifiedBy        String             @default("Sarah Jenkins")
+  qrToken               String             @default(uuid())
+  departmentConsents    String             @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
+  isDeleted             Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  userEmail String
+  userName  String
+  action    String
+  details   String
+  createdAt DateTime @default(now())
+}
+
+model SmtpConfig {
+  id        String   @id @default("default")
+  host      String   @default("smtp.mailtrap.io")
+  port      Int      @default(2525)
+  username  String   @default("")
+  password  String   @default("")
+  secure    Boolean  @default(false)
+  fromEmail String   @default("alerts@auditdesk.com")
+  updatedAt DateTime @updatedAt
+}
+
+model EmailTemplate {
+  id        String   @id
+  subject   String
+  body      String
+  updatedAt DateTime @updatedAt
+}
+
+model DocumentSequence {
+  key        String   @id // e.g. "AP-2026", "ES-2026", "FD-2026"
+  currentVal Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+model AnnualPlan {
+  id        String      @id @default(uuid())
+  planName  String
+  period    String      @default("")
+  comment   String      @default("")
+  status    String      @default("DRAFT")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  auditPlans AuditPlan[]
+}
+
+model AuditPlan {
+  id            String     @id @default(uuid())
+  annualPlanId  String
+  annualPlan    AnnualPlan @relation(fields: [annualPlanId], references: [id], onDelete: Cascade)
+  no            String
+  topic         String
+  type          String     @default("OE")
+  revieweeIds   String
+  conductDate   DateTime
+  endDate       DateTime
+  durationDay   Int
+  purpose       String
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  auditProjects AuditProject[]
+}
+

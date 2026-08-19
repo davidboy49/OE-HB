@@ -1,0 +1,57 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies (npm workspaces - node_modules can appear at root and per-package)
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+backend/coverage
+
+# next.js (frontend)
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+
+# nest build output (backend)
+backend/dist/
+
+# shared package build output
+shared/dist/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (each package documents its own .env.example instead)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# vercel
+.vercel
+
+# local sqlite artifacts from the pre-split app (backend now uses Postgres)
+*.db
+*.db-journal
+
+# typescript
+*.tsbuildinfo
+
+# prisma generated client
+backend/src/generated/prisma
+frontend/src/generated/prisma
