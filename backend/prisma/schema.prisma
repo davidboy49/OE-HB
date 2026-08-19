@@ -41,7 +41,7 @@ model UserGroup {
   id          String       @id @default(uuid())
   name        String       @unique
   description String?
-  role        String       @default("AUDITEE") // RBAC role inherited by group members
+  role        String       @default("AUDITEE") // Unused legacy column, kept to avoid a migration - access is controlled by `permissions` below
   users       User[]
   permissions Permission[] // granular per-API-action grants for members of this group
   createdAt   DateTime     @default(now())

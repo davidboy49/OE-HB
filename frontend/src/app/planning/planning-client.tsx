@@ -1076,7 +1076,9 @@ export default function PlanningClient({ initialProjects, users, departments, an
     return false;
   };
 
-  const canModify = true;
+  const canCreateProject = RBAC.can(currentUser, "audit-projects:create");
+  const canUpdateProject = RBAC.can(currentUser, "audit-projects:update");
+  const canDeleteProject = RBAC.can(currentUser, "audit-projects:delete");
   const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
   const leadAuditors = users.filter(u => u.role === "LEAD_AUDITOR" || u.role === "ADMIN");
 
@@ -1308,16 +1310,16 @@ export default function PlanningClient({ initialProjects, users, departments, an
         
         {/* ActionToolbar */}
         <ActionToolbar
-          onCreate={canModify ? openNewProjectModal : undefined}
-          onEdit={selectedProjectId && projects.find(p => p.id === selectedProjectId) ? () => {
+          onCreate={canCreateProject ? openNewProjectModal : undefined}
+          onEdit={canUpdateProject && selectedProjectId && projects.find(p => p.id === selectedProjectId) ? () => {
             const proj = projects.find(p => p.id === selectedProjectId);
             if (proj) openProjectEditor(proj);
           } : undefined}
-          onCopy={selectedProjectId && projects.find(p => p.id === selectedProjectId) ? () => {
+          onCopy={canCreateProject && selectedProjectId && projects.find(p => p.id === selectedProjectId) ? () => {
             const proj = projects.find(p => p.id === selectedProjectId);
             if (proj) openCopyProjectModal(proj);
           } : undefined}
-          onDelete={selectedProjectId && projects.find(p => p.id === selectedProjectId) && (currentUser.role === "ADMIN" || isProjectMember(projects.find(p => p.id === selectedProjectId)!)) ? () => {
+          onDelete={canDeleteProject && selectedProjectId && projects.find(p => p.id === selectedProjectId) ? () => {
             handleDeleteProject(selectedProjectId);
           } : undefined}
           onRefresh={() => {
@@ -1502,7 +1504,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
                 {editStatus === "SUBMITTED_FOR_APPROVAL" && (
                   <>
-                    {canModify && (
+                    {canUpdateProject && (
                       <button
                         type="button"
                         onClick={handleReopenPlan}
@@ -1511,7 +1513,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         <RotateCcw className="w-3.5 h-3.5" /> Reopen Plan
                       </button>
                     )}
-                    {(currentUser.role === "ADMIN" || currentUser.role === "LEAD_AUDITOR") ? (
+                    {canUpdateProject ? (
                       <>
                         <button
                           type="button"
@@ -1529,7 +1531,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         </button>
                       </>
                     ) : (
-                      !canModify && (
+                      !canUpdateProject && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                           <Clock className="w-3.5 h-3.5 text-slate-400" /> Waiting for Approval (Locked)
                         </span>
@@ -1543,7 +1545,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                       <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" /> Approved & Released (Locked)
                     </span>
-                    {(currentUser.role === "ADMIN" || currentUser.role === "LEAD_AUDITOR") && (
+                    {canUpdateProject && (
                       <button
                         type="button"
                         onClick={handleClosePlan}
@@ -1561,7 +1563,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                       <CheckCircle className="w-3.5 h-3.5 text-slate-500" /> Closed & Archived (Locked)
                     </span>
-                    {(currentUser.role === "ADMIN" || currentUser.role === "LEAD_AUDITOR") && (
+                    {canUpdateProject && (
                       <button
                         type="button"
                         onClick={handleReopenClosedPlan}
@@ -2233,7 +2235,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   <h3 className="flex items-center gap-1.5 text-xs font-sans font-bold uppercase tracking-wider text-slate-400">
                     <FileText className="w-4 h-4" /> Plan Attachments & Files
                   </h3>
-                  {!isReadOnly && (
+                  {!isReadOnly && RBAC.can(currentUser, "attachments:create") && (
                     <div>
                       <input
                         type="file"
@@ -2285,7 +2287,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            {!isReadOnly && (
+                            {!isReadOnly && RBAC.can(currentUser, "attachments:delete") && (
                               <button
                                 type="button"
                                 onClick={() => handleDeleteFile(file.id)}

@@ -4,9 +4,8 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PrismaService } from '../../prisma/prisma.service';
 import { REQUIRE_PERMISSION_KEY } from '../decorators/require-permission.decorator';
-import { DEFAULT_PERMISSIONS_BY_ROLE } from '../permissions';
+import { PermissionsResolverService } from '../permissions-resolver.service';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 
 /**
@@ -22,7 +21,7 @@ import type { AuthenticatedUser } from '../../auth/auth.types';
 export class PermissionsGuard {
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -38,29 +37,13 @@ export class PermissionsGuard {
     }
     if (user.role === 'ADMIN') return true;
 
-    const grantedKeys = await this.resolveGrantedPermissions(user);
+    const grantedKeys = await this.permissionsResolver.getEffectivePermissions(
+      user.sub,
+      user.role,
+    );
     if (!grantedKeys.includes(requiredPermission)) {
       throw new ForbiddenException('Access Denied');
     }
     return true;
-  }
-
-  private async resolveGrantedPermissions(
-    user: AuthenticatedUser,
-  ): Promise<string[]> {
-    const dbUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { groupId: true },
-    });
-
-    if (!dbUser?.groupId) {
-      return DEFAULT_PERMISSIONS_BY_ROLE[user.role] ?? [];
-    }
-
-    const group = await this.prisma.userGroup.findUnique({
-      where: { id: dbUser.groupId },
-      select: { permissions: { select: { key: true } } },
-    });
-    return group?.permissions.map((p) => p.key) ?? [];
   }
 }

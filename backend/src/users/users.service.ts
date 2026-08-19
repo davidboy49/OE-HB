@@ -35,18 +35,12 @@ export class UsersService {
     groupId: string | null,
     password?: string,
   ): Promise<User> {
-    const group = groupId
-      ? await this.prisma.userGroup.findUnique({
-          where: { id: groupId },
-          select: { role: true },
-        })
-      : null;
     const passwordHash = password ? await bcrypt.hash(password, 10) : undefined;
     const u = await this.prisma.user.create({
       data: {
         name,
         email,
-        role: group?.role || role,
+        role,
         departmentId,
         groupId,
         passwordHash,
@@ -70,15 +64,9 @@ export class UsersService {
     departmentId: string | null,
     groupId: string | null,
   ): Promise<User | null> {
-    const group = groupId
-      ? await this.prisma.userGroup.findUnique({
-          where: { id: groupId },
-          select: { role: true },
-        })
-      : null;
     const u = await this.prisma.user.update({
       where: { id: userId },
-      data: { name, email, role: group?.role || role, departmentId, groupId },
+      data: { name, email, role, departmentId, groupId },
     });
     return {
       id: u.id,
@@ -95,19 +83,9 @@ export class UsersService {
     departmentId: string | null,
     groupId: string | null,
   ): Promise<User | null> {
-    const group = groupId
-      ? await this.prisma.userGroup.findUnique({
-          where: { id: groupId },
-          select: { role: true },
-        })
-      : null;
     const u = await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        departmentId,
-        groupId,
-        ...(group ? { role: group.role } : {}),
-      },
+      data: { departmentId, groupId },
     });
     return {
       id: u.id,

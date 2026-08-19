@@ -30,6 +30,7 @@ import {
 import type { User } from "@auditdesk/shared";
 import { getActiveAlertsCount } from "@auditdesk/shared";
 import { apiFetch } from "@/lib/apiClient";
+import { RBAC } from "@/lib/auth";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -163,8 +164,10 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
     { name: "Departments", href: "/departments", icon: Building },
   ];
 
-  if (currentUser.role === "ADMIN") {
+  if (RBAC.can(currentUser, "activity-logs:view")) {
     menuItems.push({ name: "Activity Logs", href: "/logs", icon: History });
+  }
+  if (RBAC.can(currentUser, "notifications:configure")) {
     menuItems.push({ name: "System Settings", href: "/settings", icon: SettingsIcon });
   }
 

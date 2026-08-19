@@ -11,8 +11,16 @@ export async function getCurrentUserServer(): Promise<User | null> {
   }
 }
 
-// Role authorization rules (UI-only - the backend's RolesGuard is the real enforcement point).
+// Role authorization rules (UI-only - the backend's PermissionsGuard is the real enforcement point).
 export const RBAC = {
+  /**
+   * Checks a granular permission key (see backend/src/common/permissions.ts) against
+   * the user's effective grants from GET /auth/me. Prefer this over the named
+   * role-based helpers below for anything gating a specific create/update/delete action.
+   */
+  can(user: User | null, permissionKey: string): boolean {
+    return user?.permissions?.includes(permissionKey) ?? false;
+  },
   isAdmin(user: User): boolean {
     return user.role === "ADMIN";
   },
