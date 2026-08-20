@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { PermissionsCommonModule } from './common/permissions-common.module';
 import { AuthModule } from './auth/auth.module';
 import { ActivityLogsModule } from './activity-logs/activity-logs.module';
 import { DepartmentsModule } from './departments/departments.module';
@@ -24,6 +25,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    PermissionsCommonModule,
     ActivityLogsModule,
     AuthModule,
     DepartmentsModule,

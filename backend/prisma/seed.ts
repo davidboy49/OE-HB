@@ -59,23 +59,23 @@ async function main() {
 
   console.log("Departments seeded.");
 
-  // 2. Seed User Groups
+  // 2. Seed User Groups (groups are pure permission bundles - see grants below;
+  // a group no longer carries or assigns a role to its members)
   const group1 = await prisma.userGroup.create({
-    data: { id: "group-1", name: "Internal Audit Team", description: "Certified internal auditors and leads", role: "AUDITOR" }
+    data: { id: "group-1", name: "Internal Audit Team", description: "Certified internal auditors and leads" }
   });
   const group2 = await prisma.userGroup.create({
-    data: { id: "group-2", name: "Risk Management Committee", description: "Executive oversight for enterprise risks", role: "LEAD_AUDITOR" }
+    data: { id: "group-2", name: "Risk Management Committee", description: "Executive oversight for enterprise risks" }
   });
   const group3 = await prisma.userGroup.create({
-    data: { id: "group-3", name: "External Auditing Partner", description: "Contracted external compliance specialists", role: "AUDITOR" }
+    data: { id: "group-3", name: "External Auditing Partner", description: "Contracted external compliance specialists" }
   });
 
   console.log("User Groups seeded.");
 
-  // Seed every known permission key, then grant each existing group the set
-  // matching its `role` - this reproduces pre-permissions-system behavior
-  // exactly, so migrating this in doesn't lock anyone out. Admins narrow
-  // access per group from here via PATCH /user-groups/:id/permissions.
+  // Seed every known permission key, then grant each existing group a starter
+  // set matching what its name implies (auditor-tier vs lead-tier access) -
+  // admins narrow access per group from here via PATCH /user-groups/:id/permissions.
   await prisma.permission.deleteMany();
   await prisma.permission.createMany({ data: PERMISSIONS });
 

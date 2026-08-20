@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { AuthenticatedUser } from './auth.types';
 
 @Injectable()
@@ -9,6 +10,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   /** Used by LocalStrategy. Throws (not just returns null) so Passport surfaces a clean 401. */
@@ -48,6 +50,10 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
     }
+    const permissions = await this.permissionsResolver.getEffectivePermissions(
+      user.id,
+      user.role as AuthenticatedUser['role'],
+    );
     return {
       id: user.id,
       email: user.email,
@@ -57,6 +63,7 @@ export class AuthService {
       groupId: user.groupId,
       departmentName: user.department?.name ?? null,
       groupName: user.group?.name ?? null,
+      permissions,
     };
   }
 

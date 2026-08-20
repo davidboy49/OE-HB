@@ -43,7 +43,9 @@ export default function DepartmentsClient({
   // Feedback
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const canManage = RBAC.canManageUsers(currentUser);
+  const canCreate = RBAC.can(currentUser, "departments:create");
+  const canEdit = RBAC.can(currentUser, "departments:update");
+  const canDelete = RBAC.can(currentUser, "departments:delete");
 
   const openCreateModal = () => {
     setModalMode("create");
@@ -166,9 +168,9 @@ export default function DepartmentsClient({
         
         {/* ActionToolbar */}
         <ActionToolbar
-          onCreate={canManage ? openCreateModal : undefined}
-          onEdit={canManage && selectedDeptId ? openEditModal : undefined}
-          onDelete={canManage && selectedDeptId ? handleDeleteDepartment : undefined}
+          onCreate={canCreate ? openCreateModal : undefined}
+          onEdit={canEdit && selectedDeptId ? openEditModal : undefined}
+          onDelete={canDelete && selectedDeptId ? handleDeleteDepartment : undefined}
           onRefresh={() => {
             setSearchQuery("");
             setRoleFilter("ALL");

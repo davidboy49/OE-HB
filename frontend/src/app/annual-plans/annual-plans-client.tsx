@@ -78,8 +78,12 @@ export default function AnnualPlansClient({
   const [apEndDate, setApEndDate] = useState("");
   const [apPurpose, setApPurpose] = useState("");
 
-  const canManage = RBAC.canManageUsers(currentUser);
-  const canApprove = RBAC.canApproveAnnualPlan(currentUser);
+  const canCreatePlan = RBAC.can(currentUser, "annual-plans:create");
+  const canUpdatePlan = RBAC.can(currentUser, "annual-plans:update");
+  const canDeletePlan = RBAC.can(currentUser, "annual-plans:delete");
+  const canCreateChildPlan = RBAC.can(currentUser, "audit-plans:create");
+  const canUpdateChildPlan = RBAC.can(currentUser, "audit-plans:update");
+  const canDeleteChildPlan = RBAC.can(currentUser, "audit-plans:delete");
 
   const loadApprovedTopicCounts = () => {
     clientApi<Record<string, number>>("/annual-plans/approved-topic-counts").then(setApprovedTopicCounts).catch(console.error);
@@ -450,9 +454,9 @@ export default function AnnualPlansClient({
         
         {/* ActionToolbar */}
         <ActionToolbar
-          onCreate={canManage ? openCreateModal : undefined}
-          onEdit={selectedPlanId && annualPlans.find(p => p.id === selectedPlanId) ? () => openEditModal(annualPlans.find(p => p.id === selectedPlanId)!) : undefined}
-          onDelete={selectedPlanId && annualPlans.find(p => p.id === selectedPlanId)?.status !== "APPROVED" ? () => handleDeleteAnnualPlan(selectedPlanId) : undefined}
+          onCreate={canCreatePlan ? openCreateModal : undefined}
+          onEdit={canUpdatePlan && selectedPlanId && annualPlans.find(p => p.id === selectedPlanId) ? () => openEditModal(annualPlans.find(p => p.id === selectedPlanId)!) : undefined}
+          onDelete={canDeletePlan && selectedPlanId && annualPlans.find(p => p.id === selectedPlanId)?.status !== "APPROVED" ? () => handleDeleteAnnualPlan(selectedPlanId) : undefined}
           onRefresh={() => {
             setSearchQuery("");
             setSelectedPlanId(null);
@@ -511,7 +515,7 @@ export default function AnnualPlansClient({
               ))}
               {filteredPlans.length === 0 && (
                 <tr>
-                  <td colSpan={canManage ? 5 : 4} className="px-6 py-8 text-center text-slate-400 font-sans text-xs">
+                  <td colSpan={canDeletePlan || canUpdatePlan ? 5 : 4} className="px-6 py-8 text-center text-slate-400 font-sans text-xs">
                     No annual plans found.
                   </td>
                 </tr>
@@ -564,7 +568,7 @@ export default function AnnualPlansClient({
               <div className="flex items-center gap-4 self-start md:self-auto shrink-0 no-print">
                 {modalMode === "edit" && selectedPlanId && (
                   <>
-                    {(statusInput === "DRAFT" || statusInput === "REJECTED") && (
+                    {(statusInput === "DRAFT" || statusInput === "REJECTED") && canUpdatePlan && (
                       <button
                         type="button"
                         onClick={() => handleUpdateStatus("PENDING_APPROVAL")}
@@ -574,7 +578,7 @@ export default function AnnualPlansClient({
                         <Send className="w-3.5 h-3.5" /> Submit
                       </button>
                     )}
-                    {statusInput === "PENDING_APPROVAL" && canApprove && (
+                    {statusInput === "PENDING_APPROVAL" && canUpdatePlan && (
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -626,7 +630,10 @@ export default function AnnualPlansClient({
                     type="button"
                     onClick={handleSaveAnnualPlan}
                     className="flex items-center gap-1.5 px-4 py-2 bg-[#0a1128] dark:bg-accent text-white dark:text-slate-950 hover:opacity-90 text-xs font-bold rounded transition-colors cursor-pointer"
-                    disabled={statusInput !== "DRAFT" && statusInput !== "REJECTED" && modalMode !== "create"}
+                    disabled={
+                      (statusInput !== "DRAFT" && statusInput !== "REJECTED" && modalMode !== "create") ||
+                      (modalMode === "create" ? !canCreatePlan : !canUpdatePlan)
+                    }
                   >
                     <Save className="w-3.5 h-3.5" /> Save Plan
                   </button>
@@ -707,7 +714,7 @@ export default function AnnualPlansClient({
                   <h3 className="text-xs font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
                     Planned OE Engagements
                   </h3>
-                  {canManage && statusInput !== "APPROVED" && (
+                  {canCreateChildPlan && statusInput !== "APPROVED" && (
                     <button
                       type="button"
                       onClick={openChildCreateModal}
@@ -729,7 +736,7 @@ export default function AnnualPlansClient({
                         <th className="px-4 py-3">Conduct Date</th>
                         <th className="px-4 py-3">End Date</th>
                         <th className="px-4 py-3">Duration (Day)</th>
-                        {canManage && <th className="px-4 py-3 text-center w-20">Actions</th>}
+                        {(canUpdateChildPlan || canDeleteChildPlan) && <th className="px-4 py-3 text-center w-20">Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -757,18 +764,20 @@ export default function AnnualPlansClient({
                           <td className="px-4 py-3 text-slate-500">{ap.conductDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.endDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.durationDay}</td>
-                          {canManage && (
+                          {(canUpdateChildPlan || canDeleteChildPlan) && (
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => openChildEditModal(ap)}
-                                  className="text-slate-400 hover:text-[#0066cc]"
-                                  title={statusInput === "APPROVED" ? "View Planned Engagement" : "Edit Planned Engagement"}
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                {statusInput !== "APPROVED" && (
+                                {canUpdateChildPlan && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openChildEditModal(ap)}
+                                    className="text-slate-400 hover:text-[#0066cc]"
+                                    title={statusInput === "APPROVED" ? "View Planned Engagement" : "Edit Planned Engagement"}
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {statusInput !== "APPROVED" && canDeleteChildPlan && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteChildPlan(ap.id)}
@@ -785,7 +794,7 @@ export default function AnnualPlansClient({
                       ))}
                       {auditPlans.length === 0 && (
                         <tr>
-                          <td colSpan={canManage ? 8 : 7} className="px-4 py-6 text-center text-slate-400 text-xs italic">
+                          <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 8 : 7} className="px-4 py-6 text-center text-slate-400 text-xs italic">
                             No Planned Engagements added yet.
                           </td>
                         </tr>
