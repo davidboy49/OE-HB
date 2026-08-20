@@ -38,6 +38,22 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'audit-projects:create', description: 'Create audit projects' },
   { key: 'audit-projects:update', description: 'Edit audit projects' },
   { key: 'audit-projects:delete', description: 'Delete audit projects' },
+  {
+    key: 'audit-projects:submit',
+    description: 'Submit an individual audit plan for approval',
+  },
+  {
+    key: 'audit-projects:approve',
+    description: 'Approve, reject, or reopen a submitted individual audit plan',
+  },
+  {
+    key: 'audit-projects:close',
+    description: 'Close a released individual audit plan',
+  },
+  {
+    key: 'audit-projects:reopen',
+    description: 'Reopen a closed individual audit plan',
+  },
 
   // Execution Schedules
   {
@@ -70,6 +86,11 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'annual-plans:create', description: 'Create annual plans' },
   { key: 'annual-plans:update', description: 'Edit annual plans' },
   { key: 'annual-plans:delete', description: 'Delete annual plans' },
+  { key: 'annual-plans:submit', description: 'Submit an annual plan for approval' },
+  {
+    key: 'annual-plans:approve',
+    description: 'Approve or reject a submitted annual plan',
+  },
 
   // Audit Plans
   { key: 'audit-plans:create', description: 'Create audit plans' },
@@ -109,6 +130,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
   AUDITOR: [
     'audit-projects:create',
     'audit-projects:update',
+    'audit-projects:submit',
     'execution-schedules:create',
     'execution-schedules:update',
     'meetings:create',
@@ -119,6 +141,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'attachments:delete',
     'annual-plans:create',
     'annual-plans:update',
+    'annual-plans:submit',
     'audit-plans:create',
     'audit-plans:update',
     'notifications:send-test',

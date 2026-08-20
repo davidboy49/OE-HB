@@ -872,7 +872,7 @@ export default function ScheduleClient({
                   >
                     <option value="">Select OE Plan...</option>
                     {projects
-                      .filter(p => !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))
+                      .filter(p => p.status === "RELEASED" && !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))
                       .map(p => (
                         <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
                     ))}

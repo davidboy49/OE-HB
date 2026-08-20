@@ -16,6 +16,8 @@ import { UpdateAuditProjectDto } from './dto/update-audit-project.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('audit-projects')
 @ApiBearerAuth()
@@ -60,14 +62,24 @@ export class AuditProjectsController {
     );
   }
 
+  /**
+   * No blanket @RequirePermission here - this single endpoint handles both
+   * plain field edits and status transitions (submit/approve/close/reopen),
+   * each needing a different permission. assertUpdateAllowed resolves which
+   * one applies and throws ForbiddenException if the caller lacks it.
+   */
   @Patch(':id')
-  @RequirePermission('audit-projects:update')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'UPDATE_PROJECT',
     details: `Updated project ID: ${req.params.id}`,
   }))
-  update(@Param('id') id: string, @Body() dto: UpdateAuditProjectDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAuditProjectDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.auditProjectsService.assertUpdateAllowed(id, dto, user);
     return this.auditProjectsService.update(id, dto);
   }
 

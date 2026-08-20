@@ -956,7 +956,7 @@ export default function MeetingsClient({
                     <div className="px-4 h-full flex items-center flex-1 bg-white dark:bg-slate-950">
                       {modalMode === "create" ? (
                         <AuditPlanSelect
-                          projects={projects.filter(p => isProjectMember(p) && p.status !== "CLOSED")}
+                          projects={projects.filter(p => isProjectMember(p) && p.status === "RELEASED")}
                           selectedProjectId={selectedProjectId}
                           onSelect={handleProjectSelect}
                           placeholder="Choose OE Plan..."

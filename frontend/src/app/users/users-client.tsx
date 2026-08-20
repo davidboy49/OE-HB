@@ -658,7 +658,6 @@ export default function UsersClient({
                 <select
                   value={userRole}
                   onChange={(e) => setUserRole(e.target.value as UserRole)}
-                  disabled={Boolean(userGroup)}
                   className="w-full bg-muted border border-border rounded-md px-3 py-2 text-xs focus:outline-none cursor-pointer text-foreground"
                 >
                   <option value="AUDITEE">Auditee</option>
@@ -666,7 +665,6 @@ export default function UsersClient({
                   <option value="LEAD_AUDITOR">Lead Auditor</option>
                   <option value="ADMIN">Administrator</option>
                 </select>
-                {userGroup && <p className="text-[9px] text-muted-foreground">Role is inherited from the selected group.</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
