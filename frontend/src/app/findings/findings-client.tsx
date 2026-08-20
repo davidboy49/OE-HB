@@ -272,11 +272,13 @@ export default function FindingsClient({
     if (!schedId) {
       setSelectedProjectId("");
       setDepartmentsStr("");
+      setAddress("");
       setLeadExecution("");
       setTeamMembers("");
       setAdditionalAttendees("");
       setActualVisitDate("");
       setAuditPeriod("");
+      setStandards("");
       setObjectives("");
       setScope("");
       return;
@@ -288,11 +290,16 @@ export default function FindingsClient({
     // Carry over the parent project id so the finding stays linked to the plan
     setSelectedProjectId(execSched.projectId);
     setDepartmentsStr(execSched.departments || "");
+    // address/standards aren't editable in the findings UI, but the backend's
+    // execution-schedules DTO (this table doubles as the findings store, keyed by
+    // language: "finding") requires both non-empty - inherit them from the visit.
+    setAddress(execSched.address || "");
     setLeadExecution(execSched.leadExecution || "");
     setTeamMembers(execSched.teamMembers || "");
     setAdditionalAttendees(execSched.additionalAttendees || "");
     setActualVisitDate(""); // user fills in finding date separately
     setAuditPeriod(execSched.auditPeriod || "");
+    setStandards(execSched.standards || "");
 
     const proj = projects.find(p => p.id === execSched.projectId);
     setObjectives(proj?.objectives || "");

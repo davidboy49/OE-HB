@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
+import { assertProjectReleased } from '../common/assert-project-status';
 import {
   ExecutionSchedulesService,
   DepartmentConsentInput,
@@ -61,19 +62,6 @@ export class MeetingsService {
     private readonly prisma: PrismaService,
     private readonly executionSchedulesService: ExecutionSchedulesService,
   ) {}
-
-  /** Mirrors dbService.assertProjectNotClosed (dbService.ts:29-35). */
-  private async assertProjectNotClosed(projectId?: string): Promise<void> {
-    if (!projectId) return;
-    const proj = await this.prisma.auditProject.findUnique({
-      where: { id: projectId },
-    });
-    if (proj && proj.status === 'CLOSED') {
-      throw new Error(
-        'This Audit Plan is CLOSED. No modifications or new records can be linked to a closed audit plan.',
-      );
-    }
-  }
 
   private toDto(m: any): any {
     return {
@@ -246,7 +234,7 @@ export class MeetingsService {
   }
 
   async create(data: CreateOpenMeetingInput): Promise<any> {
-    await this.assertProjectNotClosed(data.projectId);
+    await assertProjectReleased(this.prisma, data.projectId);
     const m = await this.prisma.openMeeting.create({
       data: {
         projectId: data.projectId,

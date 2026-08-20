@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
+import { assertProjectReleased } from '../common/assert-project-status';
 
 export interface CreateExecutionScheduleInput {
   projectId: string;
@@ -61,19 +62,6 @@ export interface DepartmentConsentInput {
 @Injectable()
 export class ExecutionSchedulesService {
   constructor(private readonly prisma: PrismaService) {}
-
-  /** Mirrors dbService.assertProjectNotClosed (dbService.ts:29-35). */
-  private async assertProjectNotClosed(projectId?: string): Promise<void> {
-    if (!projectId) return;
-    const proj = await this.prisma.auditProject.findUnique({
-      where: { id: projectId },
-    });
-    if (proj && proj.status === 'CLOSED') {
-      throw new Error(
-        'This Audit Plan is CLOSED. No modifications or new records can be linked to a closed audit plan.',
-      );
-    }
-  }
 
   /**
    * Postgres-portable rewrite of dbService's module-level `getScheduleAttendeeConfirmations`
@@ -153,7 +141,7 @@ export class ExecutionSchedulesService {
   }
 
   async create(data: CreateExecutionScheduleInput): Promise<any> {
-    await this.assertProjectNotClosed(data.projectId);
+    await assertProjectReleased(this.prisma, data.projectId);
 
     const { attendeeConfirmations, ...createData } = data;
     const s = await this.prisma.executionSchedule.create({

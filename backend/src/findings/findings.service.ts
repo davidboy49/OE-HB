@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertProjectNotClosed } from '../common/assert-project-status';
 import type { Finding } from '@auditdesk/shared';
 
 const findingInclude = {
@@ -18,19 +19,6 @@ const findingInclude = {
 @Injectable()
 export class FindingsService {
   constructor(private readonly prisma: PrismaService) {}
-
-  /** Mirrors dbService.assertProjectNotClosed: blocks writes linked to a CLOSED audit project. */
-  private async assertProjectNotClosed(projectId?: string): Promise<void> {
-    if (!projectId) return;
-    const proj = await this.prisma.auditProject.findUnique({
-      where: { id: projectId },
-    });
-    if (proj && proj.status === 'CLOSED') {
-      throw new BadRequestException(
-        'This Audit Plan is CLOSED. No modifications or new records can be linked to a closed audit plan.',
-      );
-    }
-  }
 
   async findAll(): Promise<Finding[]> {
     const findings = await this.prisma.finding.findMany({
@@ -68,7 +56,12 @@ export class FindingsService {
     if (!sched) {
       throw new NotFoundException('Execution schedule not found.');
     }
-    await this.assertProjectNotClosed(sched.projectId);
+    if (sched.status !== 'RELEASED') {
+      throw new BadRequestException(
+        'This Execution Schedule must be RELEASED before findings can be logged against it.',
+      );
+    }
+    await assertProjectNotClosed(this.prisma, sched.projectId);
     const f = await this.prisma.finding.create({
       data: {
         title,

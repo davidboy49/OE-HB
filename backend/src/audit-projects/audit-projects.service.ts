@@ -1,9 +1,24 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CodeGeneratorService } from '../code-generator/code-generator.service';
 import { MeetingsService } from '../meetings/meetings.service';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { AuditProject } from '@auditdesk/shared';
 import type { UpdateAuditProjectDto } from './dto/update-audit-project.dto';
+import type { AuthenticatedUser } from '../auth/auth.types';
+
+/** PLANNING -> SUBMITTED_FOR_APPROVAL -> RELEASED -> CLOSED, plus reject/reopen loops back a step. */
+const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
+  'PLANNING->SUBMITTED_FOR_APPROVAL': 'audit-projects:submit',
+  'SUBMITTED_FOR_APPROVAL->RELEASED': 'audit-projects:approve',
+  'SUBMITTED_FOR_APPROVAL->PLANNING': 'audit-projects:approve',
+  'RELEASED->CLOSED': 'audit-projects:close',
+  'CLOSED->RELEASED': 'audit-projects:reopen',
+};
 
 /**
  * Ported from src/lib/dbService.ts (getProjects, createProject, updateProject,
@@ -16,6 +31,7 @@ export class AuditProjectsService {
     private readonly prisma: PrismaService,
     private readonly codeGenerator: CodeGeneratorService,
     private readonly meetingsService: MeetingsService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   async findAll(): Promise<AuditProject[]> {
@@ -166,6 +182,18 @@ export class AuditProjectsService {
       );
     }
 
+    if (auditPlanId) {
+      const parentAuditPlan = await this.prisma.auditPlan.findUnique({
+        where: { id: auditPlanId },
+        include: { annualPlan: true },
+      });
+      if (parentAuditPlan?.annualPlan?.status !== 'APPROVED') {
+        throw new BadRequestException(
+          'The parent Annual Plan must be APPROVED before an Individual Audit Plan can be created under it.',
+        );
+      }
+    }
+
     const p = await this.prisma.auditProject.create({
       data: {
         name,
@@ -267,6 +295,49 @@ export class AuditProjectsService {
         : [],
       attachments: [],
     };
+  }
+
+  /**
+   * The single PATCH endpoint handles both plain field edits and status
+   * transitions (the frontend always sends the full form body + `status`).
+   * A real status change requires the specific submit/approve/close/reopen
+   * permission for that transition instead of the generic `:update` key;
+   * anything else (no status field, or status unchanged) just needs `:update`.
+   */
+  async assertUpdateAllowed(
+    id: string,
+    updates: UpdateAuditProjectDto,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    const current = await this.prisma.auditProject.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    const isStatusChange =
+      updates.status !== undefined &&
+      current !== null &&
+      updates.status !== current.status;
+
+    if (!isStatusChange) {
+      await this.permissionsResolver.requirePermission(
+        user,
+        'audit-projects:update',
+      );
+      return;
+    }
+
+    const requiredKey =
+      STATUS_TRANSITION_PERMISSIONS[`${current!.status}->${updates.status}`];
+    if (!requiredKey) {
+      // Unmapped transition (shouldn't happen via the UI) - fall back to the
+      // generic edit permission rather than hard-blocking an unknown case.
+      await this.permissionsResolver.requirePermission(
+        user,
+        'audit-projects:update',
+      );
+      return;
+    }
+    await this.permissionsResolver.requirePermission(user, requiredKey);
   }
 
   async update(

@@ -1079,6 +1079,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const canCreateProject = RBAC.can(currentUser, "audit-projects:create");
   const canUpdateProject = RBAC.can(currentUser, "audit-projects:update");
   const canDeleteProject = RBAC.can(currentUser, "audit-projects:delete");
+  const canSubmitProject = RBAC.can(currentUser, "audit-projects:submit");
+  const canApproveProject = RBAC.can(currentUser, "audit-projects:approve");
+  const canCloseProject = RBAC.can(currentUser, "audit-projects:close");
+  const canReopenProject = RBAC.can(currentUser, "audit-projects:reopen");
   const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
   const leadAuditors = users.filter(u => u.role === "LEAD_AUDITOR" || u.role === "ADMIN");
 
@@ -1241,7 +1245,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               setNewAuditPlanId(""); // Reset audit plan when annual plan changes
                             }}
                             singleSelect={true}
-                            options={annualPlans?.map(plan => ({
+                            options={annualPlans?.filter(plan => plan.status === "APPROVED").map(plan => ({
                               value: plan.id,
                               label: `${plan.planName} (${plan.period})`
                             })) || []}
@@ -1492,19 +1496,21 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     >
                       <Save className="w-3.5 h-3.5" /> Save Plan
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleSubmitForApproval}
-                      className="flex items-center gap-1.5 px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded transition-colors cursor-pointer"
-                    >
-                      <Send className="w-3.5 h-3.5" /> Submit for Approval
-                    </button>
+                    {canSubmitProject && (
+                      <button
+                        type="button"
+                        onClick={handleSubmitForApproval}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded transition-colors cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" /> Submit for Approval
+                      </button>
+                    )}
                   </>
                 )}
 
                 {editStatus === "SUBMITTED_FOR_APPROVAL" && (
                   <>
-                    {canUpdateProject && (
+                    {canApproveProject && (
                       <button
                         type="button"
                         onClick={handleReopenPlan}
@@ -1513,7 +1519,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         <RotateCcw className="w-3.5 h-3.5" /> Reopen Plan
                       </button>
                     )}
-                    {canUpdateProject ? (
+                    {canApproveProject ? (
                       <>
                         <button
                           type="button"
@@ -1531,7 +1537,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         </button>
                       </>
                     ) : (
-                      !canUpdateProject && (
+                      !canApproveProject && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                           <Clock className="w-3.5 h-3.5 text-slate-400" /> Waiting for Approval (Locked)
                         </span>
@@ -1545,7 +1551,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                       <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" /> Approved & Released (Locked)
                     </span>
-                    {canUpdateProject && (
+                    {canCloseProject && (
                       <button
                         type="button"
                         onClick={handleClosePlan}
@@ -1563,7 +1569,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <span className="inline-flex items-center gap-1.5 text-xs font-sans font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 px-3 py-2 rounded border border-slate-200 dark:border-slate-700">
                       <CheckCircle className="w-3.5 h-3.5 text-slate-500" /> Closed & Archived (Locked)
                     </span>
-                    {canUpdateProject && (
+                    {canReopenProject && (
                       <button
                         type="button"
                         onClick={handleReopenClosedPlan}
@@ -1617,10 +1623,17 @@ export default function PlanningClient({ initialProjects, users, departments, an
                           }}
                           singleSelect={true}
                           disabled={isReadOnly}
-                          options={annualPlans?.map(plan => ({
-                            value: plan.id,
-                            label: `${plan.planName} (${plan.period})`
-                          })) || []}
+                          options={(() => {
+                            const filtered = annualPlans?.filter(plan => plan.status === "APPROVED") || [];
+                            if (editAnnualPlanId && !filtered.some(plan => plan.id === editAnnualPlanId)) {
+                              const target = annualPlans?.find(plan => plan.id === editAnnualPlanId);
+                              if (target) filtered.push(target);
+                            }
+                            return filtered.map(plan => ({
+                              value: plan.id,
+                              label: `${plan.planName} (${plan.period})`
+                            }));
+                          })()}
                           placeholder="Select Annual OE Plan..."
                         />
                       </div>

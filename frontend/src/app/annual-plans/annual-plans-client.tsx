@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   CalendarDays, 
   X,
@@ -61,6 +61,10 @@ export default function AnnualPlansClient({
 
   // Feedback
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  // setState re-renders are batched/async, so a fast double-click can fire the handler
+  // twice before isSavingPlan reflects true - this ref guards re-entrancy synchronously.
+  const isSavingPlanRef = useRef(false);
 
   // Child Plan (Audit Plan) states
   const [auditPlans, setAuditPlans] = useState<any[]>([]);
@@ -81,6 +85,8 @@ export default function AnnualPlansClient({
   const canCreatePlan = RBAC.can(currentUser, "annual-plans:create");
   const canUpdatePlan = RBAC.can(currentUser, "annual-plans:update");
   const canDeletePlan = RBAC.can(currentUser, "annual-plans:delete");
+  const canSubmitPlan = RBAC.can(currentUser, "annual-plans:submit");
+  const canApprovePlan = RBAC.can(currentUser, "annual-plans:approve");
   const canCreateChildPlan = RBAC.can(currentUser, "audit-plans:create");
   const canUpdateChildPlan = RBAC.can(currentUser, "audit-plans:update");
   const canDeleteChildPlan = RBAC.can(currentUser, "audit-plans:delete");
@@ -134,12 +140,15 @@ export default function AnnualPlansClient({
   };
 
   const handleSaveAnnualPlan = async () => {
+    if (isSavingPlanRef.current) return;
     const pInput = periodInput[0] || "";
     if (!planNameInput.trim() || !pInput) {
       showFeedback("Error: Plan Name and Period are required.");
       return;
     }
 
+    isSavingPlanRef.current = true;
+    setIsSavingPlan(true);
     try {
       if (modalMode === "create") {
         const newPlan = await clientApi<AnnualPlan>("/annual-plans", {
@@ -198,6 +207,9 @@ export default function AnnualPlansClient({
     } catch (err: any) {
       console.error(err);
       showFeedback(`Error: ${err.message || err.toString()}`);
+    } finally {
+      isSavingPlanRef.current = false;
+      setIsSavingPlan(false);
     }
   };
 
@@ -568,7 +580,7 @@ export default function AnnualPlansClient({
               <div className="flex items-center gap-4 self-start md:self-auto shrink-0 no-print">
                 {modalMode === "edit" && selectedPlanId && (
                   <>
-                    {(statusInput === "DRAFT" || statusInput === "REJECTED") && canUpdatePlan && (
+                    {(statusInput === "DRAFT" || statusInput === "REJECTED") && canSubmitPlan && (
                       <button
                         type="button"
                         onClick={() => handleUpdateStatus("PENDING_APPROVAL")}
@@ -578,7 +590,7 @@ export default function AnnualPlansClient({
                         <Send className="w-3.5 h-3.5" /> Submit
                       </button>
                     )}
-                    {statusInput === "PENDING_APPROVAL" && canUpdatePlan && (
+                    {statusInput === "PENDING_APPROVAL" && canApprovePlan && (
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -629,13 +641,14 @@ export default function AnnualPlansClient({
                   <button
                     type="button"
                     onClick={handleSaveAnnualPlan}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-[#0a1128] dark:bg-accent text-white dark:text-slate-950 hover:opacity-90 text-xs font-bold rounded transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2 bg-[#0a1128] dark:bg-accent text-white dark:text-slate-950 hover:opacity-90 text-xs font-bold rounded transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                     disabled={
+                      isSavingPlan ||
                       (statusInput !== "DRAFT" && statusInput !== "REJECTED" && modalMode !== "create") ||
                       (modalMode === "create" ? !canCreatePlan : !canUpdatePlan)
                     }
                   >
-                    <Save className="w-3.5 h-3.5" /> Save Plan
+                    <Save className="w-3.5 h-3.5" /> {isSavingPlan ? "Saving..." : "Save Plan"}
                   </button>
 
                   <button

@@ -14,7 +14,6 @@ import {
   UserCheck, 
   Sun, 
   Moon,
-  ChevronRight,
   ChevronDown,
   Menu,
   Bell,
@@ -275,14 +274,11 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
                           <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{item.name}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          {typeof item.badge === "number" && item.badge > 0 && (
-                            <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse">
-                              {item.badge}
-                            </span>
-                          )}
-                          <ChevronRight className="w-2.5 h-2.5 text-slate-500" />
-                        </div>
+                        {typeof item.badge === "number" && item.badge > 0 && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse">
+                            {item.badge}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
