@@ -31,6 +31,7 @@ import type {
   AuditPlan
 } from "@auditdesk/shared";
 import { clientApi } from "@/lib/apiClient";
+import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
@@ -316,7 +317,7 @@ export default function MeetingsClient({
     return isProjectMember(proj);
   };
 
-  const canManage = true;
+  const canManage = RBAC.can(currentUser, "meetings:create") || RBAC.can(currentUser, "meetings:update") || RBAC.can(currentUser, "meetings:delete");
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);

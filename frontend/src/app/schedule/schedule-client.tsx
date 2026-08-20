@@ -260,7 +260,7 @@ export default function ScheduleClient({
     return isProjectMember(proj);
   };
 
-  const canManage = true;
+  const canManage = RBAC.can(currentUser, "execution-schedules:create") || RBAC.can(currentUser, "execution-schedules:update") || RBAC.can(currentUser, "execution-schedules:delete");
 
   const showFeedback = (msg: string, type: "success" | "error" = "success") => {
     setFeedback(msg);

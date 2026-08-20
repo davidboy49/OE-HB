@@ -1,8 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import type { UserRole } from '@auditdesk/shared';
-
-const USER_ROLES: UserRole[] = ['ADMIN', 'LEAD_AUDITOR', 'AUDITOR', 'AUDITEE'];
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateUserGroupDto {
   @ApiProperty()
@@ -14,8 +11,4 @@ export class CreateUserGroupDto {
   @IsOptional()
   @IsString()
   description?: string;
-
-  @ApiProperty({ enum: USER_ROLES })
-  @IsIn(USER_ROLES)
-  role!: UserRole;
 }

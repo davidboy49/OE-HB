@@ -8,7 +8,6 @@ export interface UserGroup {
   id: string;
   name: string;
   description: string | null;
-  role: UserRole;
 }
 
 export type UserRole = "ADMIN" | "LEAD_AUDITOR" | "AUDITOR" | "AUDITEE";
@@ -22,6 +21,8 @@ export interface User {
   groupId: string | null;
   departmentName?: string | null;
   groupName?: string | null;
+  /** Effective granular permission keys (see backend/src/common/permissions.ts). Only present on GET /auth/me. */
+  permissions?: string[];
 }
 
 export interface Attachment {

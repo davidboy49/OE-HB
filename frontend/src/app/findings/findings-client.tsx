@@ -259,7 +259,7 @@ export default function FindingsClient({
     return isProjectMember(proj);
   };
 
-  const canManage = true;
+  const canManage = RBAC.can(currentUser, "findings:create") || RBAC.can(currentUser, "findings:update");
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);

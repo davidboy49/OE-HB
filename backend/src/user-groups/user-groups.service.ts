@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSIONS } from '../common/permissions';
-import type { UserGroup, UserRole } from '@auditdesk/shared';
+import type { UserGroup } from '@auditdesk/shared';
 
 @Injectable()
 export class UserGroupsService {
@@ -15,23 +15,17 @@ export class UserGroupsService {
       id: group.id,
       name: group.name,
       description: group.description,
-      role: group.role as UserRole,
     }));
   }
 
-  async create(
-    name: string,
-    description: string,
-    role: UserRole,
-  ): Promise<UserGroup> {
+  async create(name: string, description: string): Promise<UserGroup> {
     const group = await this.prisma.userGroup.create({
-      data: { name, description, role },
+      data: { name, description },
     });
     return {
       id: group.id,
       name: group.name,
       description: group.description,
-      role: group.role as UserRole,
     };
   }
 
