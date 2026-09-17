@@ -10,7 +10,7 @@ export default async function PlanningPage() {
 
   const [projects, users, departments, annualPlans, auditPlans] = await Promise.all([
     apiFetch<AuditProject[]>("/audit-projects"),
-    apiFetch<User[]>("/users"), // For selecting Lead Auditor
+    apiFetch<User[]>("/users"), // For selecting OE Leader
     apiFetch<Department[]>("/departments"), // For selecting Departments
     apiFetch<AnnualPlan[]>("/annual-plans"),
     apiFetch<AuditPlan[]>("/audit-plans"),

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { 
   LayoutDashboard, 
   CalendarRange, 
@@ -20,6 +20,7 @@ import {
   User as UserIcon,
   Lock,
   Building,
+  Building2,
   CalendarCheck,
   History,
   MessageSquare,
@@ -27,7 +28,6 @@ import {
   X
 } from "lucide-react";
 import type { User } from "@auditdesk/shared";
-import { getActiveAlertsCount } from "@auditdesk/shared";
 import { apiFetch } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 
@@ -36,7 +36,7 @@ interface AppLayoutProps {
   currentUser: User;
 }
 
-export default function AppLayout({ children, currentUser }: AppLayoutProps) {
+export default function AppLayout({ children, currentUser: initialCurrentUser }: AppLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light"); // Default light just like screenshot
@@ -44,6 +44,28 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
   const [auditModuleOpen, setAuditModuleOpen] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // Root layout persists across client-side (<Link>) navigation in the App
+  // Router - a plain `currentUser` prop would stay frozen at whatever it was
+  // on the last hard load, so sidebar gating/role display could lag behind an
+  // admin changing this user's group/role/permissions elsewhere. Re-fetch on
+  // every route change (each page's own Server Component already does the
+  // same for its own RBAC checks) so the sidebar stays in sync too.
+  const [currentUser, setCurrentUser] = useState<User>(initialCurrentUser);
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    apiFetch<User>("/auth/me")
+      .then(setCurrentUser)
+      .catch(() => {
+        // Session likely expired/invalidated mid-navigation - let the page-level
+        // redirect-to-login (getCurrentUserServer) handle it, not this refresh.
+      });
+  }, [pathname]);
 
   useEffect(() => {
     const savedAvatar = localStorage.getItem(`avatar_${currentUser.id}`);
@@ -126,41 +148,17 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
     }
   };
 
-  const [activeAlertsCount, setActiveAlertsCount] = useState<number>(0);
-
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const schedules = await apiFetch<any[]>("/execution-schedules");
-        const count = getActiveAlertsCount(schedules);
-        setActiveAlertsCount(count);
-      } catch (err) {
-        console.error("Failed to fetch alerts count:", err);
-      }
-    };
-
-    fetchAlerts();
-
-    const handleRefresh = () => fetchAlerts();
-    window.addEventListener("findings-updated", handleRefresh);
-    window.addEventListener("schedule-updated", handleRefresh);
-
-    return () => {
-      window.removeEventListener("findings-updated", handleRefresh);
-      window.removeEventListener("schedule-updated", handleRefresh);
-    };
-  }, []);
-
   const menuItems = [
     { name: "Annual OE Plans", href: "/annual-plans", icon: CalendarRange },
     // { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Individual OE Plans", href: "/planning", icon: CalendarRange },    
+    { name: "Individual OE Plans", href: "/planning", icon: CalendarRange },
     { name: "Open Meetings", href: "/meetings", icon: MessageSquare },
     { name: "Execution Schedule", href: "/schedule", icon: CalendarCheck },
     { name: "OE Findings", href: "/findings", icon: AlertTriangle },
-    { name: "Findings Alerts", href: "/findings-alerts", icon: BellRing, badge: activeAlertsCount },
+    { name: "Findings Alerts", href: "/findings-alerts", icon: BellRing },
     { name: "User Groups", href: "/users", icon: Users },
     { name: "Departments", href: "/departments", icon: Building },
+    { name: "Business Units", href: "/business-units", icon: Building2 },
   ];
 
   if (RBAC.can(currentUser, "activity-logs:view")) {
@@ -179,6 +177,7 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
     if (pathname.startsWith("/findings")) return "Mitigation / Findings Ledger";
     if (pathname.startsWith("/users")) return "Identity / User Management";
     if (pathname.startsWith("/departments")) return "Identity / Department Management";
+    if (pathname.startsWith("/business-units")) return "Identity / Business Unit Management";
     if (pathname.startsWith("/annual-plans")) return "Strategy / Annual OE Plan";
     if (pathname.startsWith("/logs")) return "Administration / Activity Logs";
     if (pathname.startsWith("/settings")) return "Administration / System Settings";
@@ -258,8 +257,11 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
                 <div className="pl-4 border-l border-[#042844] ml-7 my-1 space-y-1">
                   {menuItems.map((item) => {
                     const Icon = item.icon;
-                    const isActive = pathname.startsWith(item.href) || (item.href === "/dashboard" && pathname === "/");
-                    
+                    const isActive =
+                      pathname === item.href ||
+                      pathname.startsWith(`${item.href}/`) ||
+                      (item.href === "/dashboard" && pathname === "/");
+
                     return (
                       <Link
                         key={item.name}
@@ -274,11 +276,6 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
                           <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{item.name}</span>
                         </div>
-                        {typeof item.badge === "number" && item.badge > 0 && (
-                          <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse">
-                            {item.badge}
-                          </span>
-                        )}
                       </Link>
                     );
                   })}

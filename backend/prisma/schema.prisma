@@ -37,6 +37,14 @@ model Department {
   updatedAt   DateTime @updatedAt
 }
 
+model BusinessUnit {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model UserGroup {
   id          String       @id @default(uuid())
   name        String       @unique
@@ -255,13 +263,17 @@ model AuditPlan {
   annualPlanId  String
   annualPlan    AnnualPlan @relation(fields: [annualPlanId], references: [id], onDelete: Cascade)
   no            String
+  projectName   String     @default("")
   topic         String
+  bu            String     @default("")
   type          String     @default("OE")
   revieweeIds   String
   conductDate   DateTime
   endDate       DateTime
   durationDay   Int
   purpose       String
+  objectives    String     @default("")
+  scope         String     @default("")
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   auditProjects AuditProject[]

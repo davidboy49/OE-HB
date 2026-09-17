@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
+import { KeycloakService } from './keycloak.service';
 import type { AuthenticatedUser } from './auth.types';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly permissionsResolver: PermissionsResolverService,
+    private readonly keycloakService: KeycloakService,
   ) {}
 
   /** Used by LocalStrategy. Throws (not just returns null) so Passport surfaces a clean 401. */
@@ -52,7 +54,6 @@ export class AuthService {
     }
     const permissions = await this.permissionsResolver.getEffectivePermissions(
       user.id,
-      user.role as AuthenticatedUser['role'],
     );
     return {
       id: user.id,
@@ -64,6 +65,33 @@ export class AuthService {
       departmentName: user.department?.name ?? null,
       groupName: user.group?.name ?? null,
       permissions,
+    };
+  }
+
+  /**
+   * Exchanges a Keycloak access token (from the mobile app's existing SSO
+   * login) for our own JWT. The Keycloak account must map to an existing
+   * AuditDesk user by email - we don't self-provision accounts here, since
+   * role/department/permissions are assigned deliberately by an admin.
+   */
+  async validateSso(keycloakToken: string): Promise<AuthenticatedUser> {
+    const claims = await this.keycloakService.verify(keycloakToken);
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: claims.email },
+    });
+    if (!user) {
+      throw new UnauthorizedException(
+        `No AuditDesk account found for ${claims.email} - contact an admin`,
+      );
+    }
+
+    return {
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as AuthenticatedUser['role'],
+      departmentId: user.departmentId,
     };
   }
 

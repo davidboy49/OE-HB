@@ -99,7 +99,7 @@ export default async function DashboardPage() {
                 <tr>
                   <th className="px-5 py-3">Code</th>
                   <th className="px-5 py-3">Project Name</th>
-                  <th className="px-5 py-3">Lead Auditor</th>
+                  <th className="px-5 py-3">OE Leader</th>
                   <th className="px-5 py-3 text-right">Status</th>
                 </tr>
               </thead>

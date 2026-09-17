@@ -13,9 +13,12 @@ import type { AuthenticatedUser } from '../../auth/auth.types';
  * already run (reads req.user). Replaces the old RolesGuard/@Roles() pair -
  * permission grants live on UserGroup now instead of being hardcoded per role.
  *
- * ADMIN always bypasses (there's no lockout scenario - an admin can always
- * fix a misconfigured group's permissions). A user with no group falls back
- * to DEFAULT_PERMISSIONS_BY_ROLE, reproducing pre-permissions-system behavior.
+ * Always resolves grants from the DB via PermissionsResolverService rather
+ * than trusting req.user.role (the JWT's role claim, signed once at login) -
+ * ADMIN is not special-cased here because getEffectivePermissions already
+ * returns the full key list for a DB-fresh ADMIN, so a role change, ADMIN
+ * promotion/demotion, or group reassignment takes effect on this user's very
+ * next request instead of only after they log back in.
  */
 @Injectable()
 export class PermissionsGuard {
@@ -35,11 +38,9 @@ export class PermissionsGuard {
     if (!user) {
       throw new ForbiddenException('Access Denied');
     }
-    if (user.role === 'ADMIN') return true;
 
     const grantedKeys = await this.permissionsResolver.getEffectivePermissions(
       user.sub,
-      user.role,
     );
     if (!grantedKeys.includes(requiredPermission)) {
       throw new ForbiddenException('Access Denied');

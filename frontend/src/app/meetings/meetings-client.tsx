@@ -342,7 +342,7 @@ export default function MeetingsClient({
       const period = parsedStart && parsedEnd ? `${parsedStart} to ${parsedEnd}` : parsedStart || parsedEnd || "";
       setAuditPeriod(period);
       
-      // Auto-derive Lead Auditor from project
+      // Auto-derive OE Leader from project
       const leadUser = users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId);
       const leadName = leadUser ? leadUser.name : (proj.leadAuditorId || "");
 
@@ -1118,11 +1118,11 @@ export default function MeetingsClient({
                       {/* Row 11: OPE Scope */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Audit Scope:
+                          OE Scope:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
-                            sectionTitle="Audit Scope"
+                            sectionTitle="OE Scope"
                             items={parsePlanItems(scope, "IAP-ISCP")}
                             onChange={() => {}}
                             prefix="IAP-ISCP"
