@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { SsoLoginDto } from './dto/sso-login.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LocalAuthGuard } from '../common/guards/local-auth.guard';
@@ -22,6 +23,13 @@ export class AuthController {
     @Body() _dto: LoginDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    return this.authService.login(user);
+  }
+
+  @Public()
+  @Post('sso')
+  async sso(@Body() dto: SsoLoginDto) {
+    const user = await this.authService.validateSso(dto.token);
     return this.authService.login(user);
   }
 

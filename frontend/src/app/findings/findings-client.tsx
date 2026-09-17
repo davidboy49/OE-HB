@@ -232,6 +232,8 @@ export default function FindingsClient({
   const departmentsArray = departmentsStr ? departmentsStr.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setDepartmentsArray = (vals: string[]) => setDepartmentsStr(vals.join(", "));
 
+  const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
+
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
@@ -264,6 +266,15 @@ export default function FindingsClient({
   const showFeedback = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  // Some findings are only Opportunities for Improvement rather than a formal
+  // Non-Conformance - the NCN # field can be re-prefixed between the two kinds
+  // without needing a separate DB column.
+  const isCnKind = /^CN\b/i.test(visitNumber.trim()) && !/^NCN\b/i.test(visitNumber.trim());
+  const setNcnKind = (kind: "NCN" | "CN") => {
+    const rest = visitNumber.trim().replace(/^(NCN|CN)\s*/i, "");
+    setVisitNumber(rest ? `${kind} ${rest}` : `${kind} #001/26`);
   };
 
   // Prepopulate fields when a released Execution Schedule is selected
@@ -609,9 +620,9 @@ export default function FindingsClient({
   const saveRowEdit = async () => {
     if (!draftRow) return;
     
-    // Validation: Linked Audit Scope selection is mandatory!
+    // Validation: Linked OE Scope selection is mandatory!
     if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
-      alert("Please select a Linked Audit Scope first.");
+      alert("Please select a Linked OE Scope first.");
       return;
     }
     
@@ -803,7 +814,7 @@ export default function FindingsClient({
                   <th className="px-6 py-4">Project Name</th>
                   <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">Finding Date</th>
-                  <th className="px-6 py-4">Lead Auditors</th>
+                  <th className="px-6 py-4">OE Leaders</th>
                   <th className="px-6 py-4">Status</th>
                 </tr>
               </thead>
@@ -1020,14 +1031,14 @@ export default function FindingsClient({
                 <div className="border border-[#0066cc] rounded-lg relative z-30">
                   <table className="w-full border-collapse text-xs">
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      {/* Row 1: Department — single value derived from Execution Schedule */}
+                      {/* Row 1: Project name — derived from the linked Execution Schedule's OE Plan */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Department
+                          Project name
                         </td>
                         <td colSpan={3} className="px-4 py-3">
                           <span className="text-xs font-sans font-bold text-slate-800 dark:text-slate-200">
-                            {departmentsStr || "—"}
+                            {selectedProjectObj?.name || "—"}
                           </span>
                         </td>
                       </tr>
@@ -1038,20 +1049,40 @@ export default function FindingsClient({
                           NCN
                         </td>
                         <td className="px-6 py-3">
-                          <input 
-                            type="text" 
-                            value={visitNumber}
-                            onChange={(e) => setVisitNumber(e.target.value)}
-                            placeholder="NCN #001/26"
-                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
-                          />
+                          <div className="flex items-center gap-3">
+                            <div className="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-[10px] font-bold shrink-0 no-print">
+                              <button
+                                type="button"
+                                onClick={() => setNcnKind("NCN")}
+                                title="Non-Conformance Note"
+                                className={`px-2.5 py-1 transition-colors ${!isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                              >
+                                NCN
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setNcnKind("CN")}
+                                title="Opportunity for Improvement"
+                                className={`px-2.5 py-1 border-l border-slate-300 dark:border-slate-700 transition-colors ${isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                              >
+                                CN
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              value={visitNumber}
+                              onChange={(e) => setVisitNumber(e.target.value)}
+                              placeholder="NCN #001/26"
+                              className="flex-1 bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
+                            />
+                          </div>
                         </td>
                       </tr>
 
-                      {/* Row 3: Execution Date */}
+                      {/* Row 3: Actual Visit Date */}
                       <tr className="align-middle">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Execution Date
+                          Actual Visit Date
                         </td>
                         <td className="px-6 py-3">
                           <input 
@@ -1065,32 +1096,32 @@ export default function FindingsClient({
                         </td>
                       </tr>
 
-                      {/* Row 4: Lead Auditors */}
+                      {/* Row 4: OE Leaders */}
                       <tr className="align-middle relative z-30">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Lead Auditors
+                          OE Leaders
                         </td>
                         <td className="px-6 py-2.5">
                           <MultiSelect
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
-                            placeholder="Select lead auditors..."
+                            placeholder="Select OE leaders..."
                           />
                         </td>
                       </tr>
 
-                      {/* Row 5: Auditors */}
+                      {/* Row 5: OE(s) */}
                       <tr className="align-middle relative z-20">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Auditors
+                          OE(s)
                         </td>
                         <td className="px-6 py-2.5">
                           <MultiSelect
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
-                            placeholder="Select auditors..."
+                            placeholder="Select OE(s)..."
                           />
                         </td>
                       </tr>
@@ -1120,7 +1151,7 @@ export default function FindingsClient({
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
                       <h3 className="text-xs font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Finding & Nonconformity Line Items
+                        Finding & Observation Items
                       </h3>
                       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                         Final corrections remaining: {pendingFinalRowsCount} pending, {completedFinalRowsCount} completed.
@@ -1171,7 +1202,7 @@ export default function FindingsClient({
 
                       <div className="p-6 space-y-4 flex-1 overflow-y-auto text-left">
                         <div className="space-y-4">
-                          {/* Linked Audit Scope Selection */}
+                          {/* Linked OE Scope Selection */}
                           <div className="space-y-1">
                             <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                               Linked OE Scope <span className="text-red-500">*</span>
@@ -1425,7 +1456,7 @@ export default function FindingsClient({
                                   )}
                                   {row.conductBy && <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">by {row.conductBy}</span>}
                                 </div>
-                                <div className="prose dark:prose-invert text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: row.activity }} />
+                                <div className="rich-text-content text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: row.activity }} />
                                 {row.attachments && row.attachments.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-1">
                                     {row.attachments.map((att: any) => (
@@ -1439,10 +1470,10 @@ export default function FindingsClient({
                               </div>
                             </td>
                             <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800">
-                              <div className="prose dark:prose-invert text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.implication) ? row.implication || "" : "" }} />
+                              <div className="rich-text-content text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.implication) ? row.implication || "" : "" }} />
                             </td>
                             <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800">
-                              <div className="prose dark:prose-invert text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.recommendation) ? row.recommendation || "" : "" }} />
+                              <div className="rich-text-content text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.recommendation) ? row.recommendation || "" : "" }} />
                             </td>
                             <td className="px-4 pt-4 pb-3 align-top text-center">
                               {row.correctiveFinalUser ? (

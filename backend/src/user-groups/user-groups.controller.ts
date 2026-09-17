@@ -64,25 +64,25 @@ export class UserGroupsController {
     // Can't grant a permission you don't hold yourself - a non-ADMIN with
     // user-groups:manage-permissions must not be able to escalate a group
     // (including their own) beyond their own effective grants. Revoking is
-    // always allowed; only newly-added keys are checked.
-    if (user.role !== 'ADMIN') {
-      const current = await this.userGroupsService.getGroupPermissions(id);
-      const newlyGranted = dto.permissionKeys.filter(
-        (key) => !current.includes(key),
+    // always allowed; only newly-added keys are checked. Always run this
+    // against DB-fresh effective permissions rather than short-circuiting on
+    // req.user.role (the JWT's role claim) - a real, currently-fresh ADMIN's
+    // effective grants already include every key, so this stays a no-op for
+    // them without a separate bypass, and a since-demoted admin can no longer
+    // slip through on a stale token.
+    const current = await this.userGroupsService.getGroupPermissions(id);
+    const newlyGranted = dto.permissionKeys.filter(
+      (key) => !current.includes(key),
+    );
+    const callerPermissions =
+      await this.permissionsResolver.getEffectivePermissions(user.sub);
+    const disallowed = newlyGranted.filter(
+      (key) => !callerPermissions.includes(key),
+    );
+    if (disallowed.length > 0) {
+      throw new ForbiddenException(
+        `Cannot grant permissions you do not hold: ${disallowed.join(', ')}`,
       );
-      const callerPermissions =
-        await this.permissionsResolver.getEffectivePermissions(
-          user.sub,
-          user.role,
-        );
-      const disallowed = newlyGranted.filter(
-        (key) => !callerPermissions.includes(key),
-      );
-      if (disallowed.length > 0) {
-        throw new ForbiddenException(
-          `Cannot grant permissions you do not hold: ${disallowed.join(', ')}`,
-        );
-      }
     }
     return this.userGroupsService.setGroupPermissions(id, dto.permissionKeys);
   }

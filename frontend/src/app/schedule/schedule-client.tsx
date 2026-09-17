@@ -293,7 +293,7 @@ export default function ScheduleClient({
     setAuditPeriodStart(parsedStart);
     setAuditPeriodEnd(parsedEnd);
     
-    // Auto-derive Lead Auditor from project
+    // Auto-derive Execution Leader from project
     const leadUser = users.find(u => u.id === project.leadAuditorId || u.name === project.leadAuditorId);
     const leadName = leadUser ? leadUser.name : (project.leadAuditorId || "");
 
@@ -537,8 +537,8 @@ export default function ScheduleClient({
     if (!s) return;
 
     showConfirm(
-      "Delete Execution Schedule",
-      `Are you sure you want to delete the execution schedule for "${s.projectName}"? This action cannot be undone.`,
+      "Delete Execution Schedule & Document Request",
+      `Are you sure you want to delete the execution schedule & document request for "${s.projectName}"? This action cannot be undone.`,
       async () => {
         try {
           const success = await clientApi<boolean>(`/execution-schedules/${selectedScheduleId}`, { method: "DELETE" });
@@ -592,7 +592,7 @@ export default function ScheduleClient({
   const saveDraftRow = () => {
     if (activeRowIndex !== null && draftRow) {
       if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
-        showFeedback("Please select at least one Audit Scope for this slot.", "error");
+        showFeedback("Please select at least one OE Scope for this slot.", "error");
         return;
       }
       
@@ -710,10 +710,10 @@ export default function ScheduleClient({
                 <tr>
                   <th className="px-6 py-4">OE Plan Code</th>
                   <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">OE#</th>
+                  <th className="px-6 py-4">Version #</th>
                   <th className="px-6 py-4">Department(s)</th>
                   <th className="px-6 py-4">Visit Date</th>
-                  <th className="px-6 py-4">Lead Auditor</th>
+                  <th className="px-6 py-4">Execution Leader</th>
                   <th className="px-6 py-4">Status</th>
                 </tr>
               </thead>
@@ -794,7 +794,7 @@ export default function ScheduleClient({
                   Document 2. Schedule
                 </div>
                 <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                  {modalMode === "create" ? "Link New OE Schedule" : "Edit Execution Schedule"}
+                  {modalMode === "create" ? "Link New OE Schedule" : "Edit Execution Schedule & Document Request"}
                 </h2>
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 pt-1 text-[10px] font-roboto text-slate-400 mt-1">
                   <span className="flex items-center gap-1">
@@ -885,13 +885,13 @@ export default function ScheduleClient({
                 <div className="overflow-x-auto border border-slate-350 dark:border-slate-800 rounded-md">
                   <table className="w-full border-collapse text-xs">
                     <tbody>
-                      {/* Row 1: Departments */}
+                      {/* Row 1: Project name */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Department:
+                          Project name:
                         </td>
                         <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
-                          {departmentsStr || <span className="text-slate-400 font-normal italic">Select an Audit Plan to auto-derive department</span>}
+                          {selectedProjectObj?.name || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive project name</span>}
                         </td>
                       </tr>
 
@@ -914,7 +914,7 @@ export default function ScheduleClient({
                       {/* Row 3: Visit Number + Actual Visit Date */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          OE#:
+                          Version #:
                         </td>
                         <td className="w-1/4 px-4 py-2 border-r border-slate-300 dark:border-slate-800/80">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -941,10 +941,10 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
-                      {/* Row 4: Audit Period */}
+                      {/* Row 4: Review Period */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Audit Period:
+                          Review Period:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <div className="flex items-center gap-2 max-w-sm">
@@ -965,10 +965,10 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
-                      {/* Row 5: Lead Execution */}
+                      {/* Row 5: Execution Leader */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Lead Auditor(s):
+                          Execution Leader(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
@@ -984,7 +984,7 @@ export default function ScheduleClient({
                       {/* Row 6: Team Member(s) */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Auditor(s):
+                          Team Member(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
@@ -1028,10 +1028,10 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
-                      {/* Row 9: OE Language */}
+                      {/* Row 9: Report Language */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          OE Language:
+                          Report Language:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <MultiSelect
@@ -1074,7 +1074,7 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
-                            sectionTitle="OPE Scope"
+                            sectionTitle="OE Scope"
                             items={parsePlanItems(scope, "IAP-ISCP")}
                             onChange={() => {}}
                             prefix="IAP-ISCP"
@@ -1112,9 +1112,8 @@ export default function ScheduleClient({
                         <th className="px-4 py-3 w-16 border-r border-slate-200 dark:border-slate-800">Day</th>
                         <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Date</th>
                         <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">Audit Scope</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">Type of data to request</th>
-                        <th className="px-4 py-3 border-r border-slate-200 dark:border-slate-800">Functional Units/Activities/ Document request</th>
+                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 border-r border-slate-200 dark:border-slate-800">Activities/Data/Document Request</th>
                         <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">Conduct by</th>
                         <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">P-Incharge</th>
                         <th className="px-4 py-3 w-24 text-center">Actions</th>
@@ -1123,7 +1122,7 @@ export default function ScheduleClient({
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80 bg-white dark:bg-slate-950">
                       {rows.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="text-center py-8 text-slate-400 italic">
+                          <td colSpan={8} className="text-center py-8 text-slate-400 italic">
                             No slots created yet. Click "+ Add Day/Slot" above.
                           </td>
                         </tr>
@@ -1161,7 +1160,7 @@ export default function ScheduleClient({
                                             </span>
                                           </div>
                                           <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                            {matched ? matched.text : <span className="text-slate-400 italic font-normal">Audit Scope text not found</span>}
+                                            {matched ? matched.text : <span className="text-slate-400 italic font-normal">OE Scope text not found</span>}
                                           </div>
                                         </div>
                                       );
@@ -1170,13 +1169,30 @@ export default function ScheduleClient({
                                 );
                               })()}
                             </td>
-                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-700 dark:text-slate-300">
-                              {row.dataRequest || "None"}
+                            <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                              <div className="flex flex-col gap-3">
+                                {(() => {
+                                  if (!row.dataRequest) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                  const matched = availableDataRequests.find(d => d.id === row.dataRequest);
+                                  return (
+                                    <div className="flex flex-col gap-1">
+                                      <div>
+                                        <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                          {row.dataRequest}
+                                        </span>
+                                      </div>
+                                      <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                        {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                                <div
+                                  className="leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
+                                  dangerouslySetInnerHTML={{ __html: row.activity || "<i>No activities set. Click to configure.</i>" }}
+                                />
+                              </div>
                             </td>
-                            <td 
-                              className="p-3 border-r border-slate-200 dark:border-slate-800 leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
-                              dangerouslySetInnerHTML={{ __html: row.activity || "<i>No activities set. Click to configure.</i>" }}
-                            />
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-[#05375c] dark:text-sky-400 whitespace-pre-wrap">
                               {row.conductBy || "Unassigned"}
                             </td>
@@ -1373,16 +1389,16 @@ export default function ScheduleClient({
                             )}
                           </div>
 
-                          {/* Audit Scope and Data Request */}
+                          {/* OE Scope and Data Request */}
                           <div className="space-y-6 flex-1 overflow-y-auto px-2 pb-2">
-                            {/* Audit Scope Selection */}
+                            {/* OE Scope Selection */}
                             <div className="space-y-1">
-                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Audit Scope</label>
+                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">OE Scope</label>
                               <MultiSelect
                                 selectedValues={draftRow.auditScope ? draftRow.auditScope.split(",").map(s => s.trim()).filter(Boolean) : []}
                                 onChange={(values) => updateDraftField("auditScope", values.join(", "))}
                                 options={auditScopeOptions}
-                                placeholder="Select audit scope..."
+                                placeholder="Select OE scope..."
                               />
                               <div className="mt-2 min-h-[120px] p-3 border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
                                 {(() => {
@@ -1450,9 +1466,8 @@ export default function ScheduleClient({
                         <th className="px-4 py-3 w-16 border-r border-slate-300 dark:border-slate-800">Day</th>
                         <th className="px-4 py-3 w-28 border-r border-slate-300 dark:border-slate-800">Date</th>
                         <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">Audit Scope</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-300 dark:border-slate-800">Type of data to request</th>
-                        <th className="px-4 py-3 border-r border-slate-300 dark:border-slate-800">Functional Units/Activities/ Document request</th>
+                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 border-r border-slate-300 dark:border-slate-800">Activities/Data/Document Request</th>
                         <th className="px-4 py-3 w-40 border-r border-slate-300 dark:border-slate-800">Conduct by</th>
                         <th className="px-4 py-3 w-40">P-Incharge</th>
                       </tr>
@@ -1481,7 +1496,7 @@ export default function ScheduleClient({
                                           </span>
                                         </div>
                                         <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">Audit Scope text not found</span>}
+                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">OE Scope text not found</span>}
                                         </div>
                                       </div>
                                     );
@@ -1490,13 +1505,30 @@ export default function ScheduleClient({
                               );
                             })()}
                           </td>
-                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">
-                            {row.dataRequest || "None"}
+                          <td className="p-3 border-r border-slate-300 dark:border-slate-800">
+                            <div className="flex flex-col gap-3">
+                              {(() => {
+                                if (!row.dataRequest) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                const matched = availableDataRequests.find(d => d.id === row.dataRequest);
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    <div>
+                                      <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                        {row.dataRequest}
+                                      </span>
+                                    </div>
+                                    <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                      {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                              <div
+                                className="leading-relaxed rich-text-content"
+                                dangerouslySetInnerHTML={{ __html: row.activity }}
+                              />
+                            </div>
                           </td>
-                          <td 
-                            className="p-3 border-r border-slate-300 dark:border-slate-800 leading-relaxed rich-text-content"
-                            dangerouslySetInnerHTML={{ __html: row.activity }}
-                          />
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">{row.conductBy}</td>
                           <td className="p-3 font-medium whitespace-pre-wrap">{row.pIncharge}</td>
                         </tr>

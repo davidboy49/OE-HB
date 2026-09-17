@@ -22,7 +22,17 @@ export class CreateAuditPlanDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  projectName!: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
   topic!: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  bu!: string;
 
   @ApiPropertyOptional({ default: 'OE' })
   @IsOptional()
@@ -51,4 +61,14 @@ export class CreateAuditPlanDto {
   @IsString()
   @IsNotEmpty()
   purpose!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  objectives?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  scope?: string;
 }

@@ -21,6 +21,11 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'departments:update', description: 'Edit departments' },
   { key: 'departments:delete', description: 'Delete departments' },
 
+  // Business Units
+  { key: 'business-units:create', description: 'Create business units' },
+  { key: 'business-units:update', description: 'Edit business units' },
+  { key: 'business-units:delete', description: 'Delete business units' },
+
   // Users
   { key: 'users:create', description: 'Create users' },
   { key: 'users:update', description: 'Edit user profiles/roles' },

@@ -301,7 +301,7 @@ export default function UsersClient({
 
   const roleFilterOptions = [
     { label: "Admin", value: "ADMIN" },
-    { label: "Lead Auditor", value: "LEAD_AUDITOR" },
+    { label: "OE Leader", value: "LEAD_AUDITOR" },
     { label: "Auditor", value: "AUDITOR" },
     { label: "Auditee", value: "AUDITEE" }
   ];
@@ -662,7 +662,7 @@ export default function UsersClient({
                 >
                   <option value="AUDITEE">Auditee</option>
                   <option value="AUDITOR">Auditor</option>
-                  <option value="LEAD_AUDITOR">Lead Auditor</option>
+                  <option value="LEAD_AUDITOR">OE Leader</option>
                   <option value="ADMIN">Administrator</option>
                 </select>
               </div>

@@ -9,10 +9,11 @@ import type { AuthenticatedUser } from '../auth/auth.types';
  * PermissionsGuard (backend enforcement) and AuthService (so the frontend can
  * mirror the same grants when deciding what to show, via GET /auth/me).
  *
- * ADMIN gets the full key list here (not a bypass sentinel) so the frontend's
- * membership check (`user.permissions.includes(key)`) works identically for
- * every role - the guard still short-circuits ADMIN separately for the actual
- * enforcement path.
+ * Deliberately re-reads role + group from the DB on every call instead of
+ * trusting the caller's `role` (e.g. from the JWT, which is signed once at
+ * login and can go stale for up to the token's lifetime): a role change,
+ * an ADMIN promotion/demotion, or a group reassignment must take effect on
+ * this user's very next request, not just after they log back in.
  */
 @Injectable()
 export class PermissionsResolverService implements OnApplicationBootstrap {
@@ -32,18 +33,17 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
     });
   }
 
-  async getEffectivePermissions(
-    userId: string,
-    role: UserRole,
-  ): Promise<string[]> {
-    if (role === 'ADMIN') return PERMISSION_KEYS;
-
+  async getEffectivePermissions(userId: string): Promise<string[]> {
     const dbUser = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { groupId: true },
+      select: { role: true, groupId: true },
     });
+    if (!dbUser) return [];
 
-    if (!dbUser?.groupId) {
+    const role = dbUser.role as UserRole;
+    if (role === 'ADMIN') return PERMISSION_KEYS;
+
+    if (!dbUser.groupId) {
       return DEFAULT_PERMISSIONS_BY_ROLE[role] ?? [];
     }
 
@@ -54,13 +54,12 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
     return group?.permissions.map((p) => p.key) ?? [];
   }
 
-  /** Throws unless the user's effective grants include `key`. ADMIN always passes. */
+  /** Throws unless the user's current (DB-fresh) effective grants include `key`. */
   async requirePermission(
     user: AuthenticatedUser,
     key: string,
   ): Promise<void> {
-    if (user.role === 'ADMIN') return;
-    const granted = await this.getEffectivePermissions(user.sub, user.role);
+    const granted = await this.getEffectivePermissions(user.sub);
     if (!granted.includes(key)) {
       throw new ForbiddenException('Access Denied');
     }

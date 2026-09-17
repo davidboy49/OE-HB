@@ -56,6 +56,29 @@ interface PlanningClientProps {
   currentUser: User;
 }
 
+// Per-plan adjustments layered on top of the Scope inherited from the linked
+// Planned Engagement: which inherited/extra item ids are marked inactive for
+// this Individual OE Plan only, plus any extra items added locally. Stored as
+// JSON in AuditProject.scope (unused for free text since Scope moved up to
+// the Planned Engagement level).
+interface ScopeOverride {
+  inactiveIds: string[];
+  extraItems: AuditPlanItem[];
+}
+
+const parseScopeOverride = (raw?: string): ScopeOverride => {
+  if (!raw || !raw.trim()) return { inactiveIds: [], extraItems: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      inactiveIds: Array.isArray(parsed.inactiveIds) ? parsed.inactiveIds : [],
+      extraItems: Array.isArray(parsed.extraItems) ? parsed.extraItems : [],
+    };
+  } catch {
+    return { inactiveIds: [], extraItems: [] };
+  }
+};
+
 export default function PlanningClient({ initialProjects, users, departments, annualPlans, auditPlans, currentUser }: PlanningClientProps) {
   const [projects, setProjects] = useState<AuditProject[]>(initialProjects);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjects[0]?.id || "");
@@ -148,8 +171,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [isPicDropdownOpen, setIsPicDropdownOpen] = useState(false);
 
   // Additional screen-matching properties (session local persistence)
-  const [editObjectivesItems, setEditObjectivesItems] = useState<AuditPlanItem[]>([]);
-  const [editScopeItems, setEditScopeItems] = useState<AuditPlanItem[]>([]);
+  const [editScopeOverride, setEditScopeOverride] = useState<ScopeOverride>({ inactiveIds: [], extraItems: [] });
   const [editRiskProcess, setEditRiskProcess] = useState("");
   const [editRiskClass, setEditRiskClass] = useState("");
   const [editOpEx, setEditOpEx] = useState("");
@@ -282,7 +304,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [completionStatus, setCompletionStatus] = useState("45% Planned");
 
   // New Project Form state
-  const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
@@ -299,7 +320,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const openNewProjectModal = async () => {
     setIsCopying(false);
     setIsCreating(true);
-    setNewName("");
     setNewStart(new Date().toISOString().split("T")[0]);
     const endDateObj = new Date();
     endDateObj.setDate(endDateObj.getDate() + 90);
@@ -321,7 +341,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setIsCopying(true);
     setIsCreating(true);
     setSelectedProjectId(proj.id);
-    setNewName(""); // Keep blank as requested
     setNewStart(proj.startDate);
     setNewEnd(proj.endDate);
     
@@ -373,9 +392,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
     
     if (editWorkflowStage !== (selectedProject.workflowStage || "DRAFTING")) return true;
     
-    if (JSON.stringify(editObjectivesItems) !== JSON.stringify(parsePlanItems(selectedProject.objectives, "AP-OBJ"))) return true;
-    if (JSON.stringify(editScopeItems) !== JSON.stringify(parsePlanItems(selectedProject.scope, "AP-ISCP"))) return true;
-    
+    if (JSON.stringify(editScopeOverride) !== JSON.stringify(parseScopeOverride(selectedProject.scope))) return true;
+
     const dbRiskProcess = selectedProject.riskProcess || "";
     if (editRiskProcess !== dbRiskProcess) return true;
 
@@ -464,14 +482,18 @@ export default function PlanningClient({ initialProjects, users, departments, an
   // Open popup and load project for editing
   const openProjectEditor = (proj: AuditProject) => {
     setSelectedProjectId(proj.id);
-    setEditName(proj.name);
+    // Project Name mirrors the linked Planned Engagement's Project Name; fall
+    // back to whatever name is already stored for legacy/unlinked plans.
+    const linkedAp = proj.auditPlanId ? auditPlans?.find(ap => ap.id === proj.auditPlanId) : null;
+    setEditName(linkedAp?.projectName?.trim() || proj.name);
     setEditStatus(proj.status);
 
     setEditPlanning(proj.planningDetails);
     setEditStart(proj.startDate);
     setEditEnd(proj.endDate);
     setEditLead(proj.leadAuditorId ? (users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId)?.id || proj.leadAuditorId) : "");
-    
+    setEditScopeOverride(parseScopeOverride(proj.scope));
+
     // Set custom SQLite integrations
     setEditWorkflowStage(proj.workflowStage || "DRAFTING");
     setEditDepartments(proj.departments ? proj.departments.split(",").map(s => s.trim()).filter(Boolean) : []);
@@ -486,8 +508,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditAttachments(proj.attachments || []);
 
     // Load scoping values from database fields, with default fallback templates if null/empty
-    setEditObjectivesItems(parsePlanItems(proj.objectives, "AP-OBJ"));
-    setEditScopeItems(parsePlanItems(proj.scope, "AP-ISCP"));
     setEditRiskClass(proj.riskClass || "");
     setEditOpEx(proj.opEx || "");
     setEditFieldwork(proj.fieldwork || "");
@@ -561,7 +581,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         body: JSON.stringify({
           name: editName,
           status: editStatus,
-          scope: serializePlanItems(editScopeItems),
+          scope: JSON.stringify(editScopeOverride),
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
@@ -571,7 +591,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
           departments: editDepartments.join(","),
           auditorIds: editAuditorIds,
           auditorNames: editAuditorIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
-          objectives: serializePlanItems(editObjectivesItems),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
@@ -622,7 +641,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         body: JSON.stringify({
           name: editName,
           status: editStatus,
-          scope: serializePlanItems(editScopeItems),
+          scope: JSON.stringify(editScopeOverride),
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
@@ -632,7 +651,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
           departments: editDepartments.join(","),
           auditorIds: editAuditorIds,
           auditorNames: editAuditorIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
-          objectives: serializePlanItems(editObjectivesItems),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
@@ -700,7 +718,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         body: JSON.stringify({
           name: editName,
           status: newStatus,
-          scope: serializePlanItems(editScopeItems),
+          scope: JSON.stringify(editScopeOverride),
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
@@ -710,7 +728,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
           departments: editDepartments.join(","),
           auditorIds: editAuditorIds,
           auditorNames: editAuditorIds.join(","),
-          objectives: serializePlanItems(editObjectivesItems),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
@@ -758,8 +775,23 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
   };
 
+  const getMissingMandatoryFields = (): string[] => {
+    const missing: string[] = [];
+    if (!editAuditPlanId) missing.push("Planned Engagement");
+    if (editDepartments.length === 0) missing.push("Department");
+    if (!editLead) missing.push("OE Leader");
+    if (!editStart) missing.push("Start Date");
+    if (!editEnd) missing.push("End Date");
+    return missing;
+  };
+
   const handleSubmitForApproval = async () => {
     if (!selectedProject) return;
+    const missing = getMissingMandatoryFields();
+    if (missing.length > 0) {
+      showFeedback(`Cannot submit for approval - missing required info: ${missing.join(", ")}.`);
+      return;
+    }
     await saveStatusChange("SUBMITTED_FOR_APPROVAL");
     const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
       method: "POST",
@@ -787,7 +819,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "RELEASED (APPROVED)",
-          details: "The audit plan has been officially approved and released by the Lead Auditor."
+          details: "The audit plan has been officially approved and released by the OE Leader."
         }
       })
     });
@@ -845,7 +877,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "CLOSED",
-          details: "The audit plan has been officially closed and archived by the Lead Auditor/Admin."
+          details: "The audit plan has been officially closed and archived by the OE Leader/Admin."
         }
       })
     });
@@ -865,7 +897,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "RELEASED (REOPENED)",
-          details: "The closed audit plan has been reopened by the Lead Auditor/Admin."
+          details: "The closed audit plan has been reopened by the OE Leader/Admin."
         }
       })
     });
@@ -876,17 +908,23 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newStart || !newEnd) return;
+    if (!newAuditPlanId || !newStart || !newEnd) {
+      showFeedback("Error: Planned Engagement, Start Date, and End Date are required.");
+      return;
+    }
 
     const leadAuditorIdParam = newLeads[0] || null;
 
-    const selectedAp = newAuditPlanId ? auditPlans?.find(ap => ap.id === newAuditPlanId) : null;
+    const selectedAp = auditPlans?.find(ap => ap.id === newAuditPlanId) || null;
     const deptVal = selectedAp?.topic || (newDepartments.length > 0 ? newDepartments.join(",") : "");
+    // Project Name is no longer typed manually - it's derived from the linked
+    // Planned Engagement so the two stay in sync.
+    const derivedName = selectedAp?.projectName?.trim() || `${selectedAp?.topic || "OE"} - ${selectedAp?.version || "V1"}`;
 
     const newProj = await clientApi<AuditProject>("/audit-projects", {
       method: "POST",
       body: JSON.stringify({
-        name: newName,
+        name: derivedName,
         code: "AUTO", // Always auto-generate and increment sequence on the backend
         status: "PLANNING",
         scope: "",
@@ -902,9 +940,19 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
     let finalProj = newProj;
 
+    // The creator must always end up a project member (isProjectMember checks
+    // leadAuditorId/auditorIds/auditorNames/deptPicIds - there's no separate
+    // "createdBy" field), or they'd be locked out of the very plan they just
+    // created whenever they didn't happen to pick themselves in the Lead
+    // Auditor selector above.
+    const namesWithCreator = Array.from(new Set([...newLeads, currentUser.name]));
+    const idsWithCreator = namesWithCreator.map(l => users.find(u => u.name === l || u.id === l)?.id || l);
+
     if (isCopying && selectedProjectId) {
       const originalProj = projects.find(p => p.id === selectedProjectId);
       if (originalProj) {
+        const baseNames = newLeads.length > 0 ? newLeads : (originalProj.auditorNames ? originalProj.auditorNames.split(",").map(s => s.trim()).filter(Boolean) : []);
+        const finalNames = Array.from(new Set([...baseNames, currentUser.name]));
         const copyPayload = {
           scope: originalProj.scope || "",
           planningDetails: originalProj.planningDetails || "",
@@ -920,10 +968,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
           approvals: originalProj.approvals || "",
           deptPicIds: originalProj.deptPicIds || "",
           departments: originalProj.departments || "",
-          auditorNames: newLeads.length > 0 ? newLeads.join(",") : (originalProj.auditorNames || ""),
-          auditorIds: newLeads.length > 0 
-            ? newLeads.map(l => users.find(u => u.name === l || u.id === l)?.id || l) 
-            : (originalProj.auditorIds || [])
+          auditorNames: finalNames.join(","),
+          auditorIds: finalNames.map(l => users.find(u => u.name === l || u.id === l)?.id || l)
         };
         const updated = await clientApi<AuditProject>(`/audit-projects/${newProj.id}`, {
           method: "PATCH",
@@ -933,12 +979,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
           finalProj = updated;
         }
       }
-    } else if (newLeads.length > 0) {
+    } else {
       const updated = await clientApi<AuditProject>(`/audit-projects/${newProj.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          auditorNames: newLeads.join(","),
-          auditorIds: newLeads.map(l => users.find(u => u.name === l || u.id === l)?.id || l)
+          auditorNames: namesWithCreator.join(","),
+          auditorIds: idsWithCreator
         })
       });
       if (updated) {
@@ -951,11 +997,46 @@ export default function PlanningClient({ initialProjects, users, departments, an
     openProjectEditor(finalProj);
     
     // Clear form
-    setNewName("");
     setNewCode("");
     setNewStart("");
     setNewEnd("");
     setNewLeads([]);
+  };
+
+  // Per-plan Scope override handlers (inherited items can only be toggled
+  // active/inactive; extra items are fully owned by this plan)
+  const toggleScopeItemActive = (id: string) => {
+    setEditScopeOverride(prev => ({
+      ...prev,
+      inactiveIds: prev.inactiveIds.includes(id)
+        ? prev.inactiveIds.filter(x => x !== id)
+        : [...prev.inactiveIds, id],
+    }));
+  };
+
+  const addExtraScopeItem = () => {
+    setEditScopeOverride(prev => {
+      const newId = `AP-ISCP-EX-${String(prev.extraItems.length + 1).padStart(2, "0")}`;
+      return { ...prev, extraItems: [...prev.extraItems, { id: newId, text: "" }] };
+    });
+  };
+
+  const updateExtraScopeItemText = (index: number, text: string) => {
+    setEditScopeOverride(prev => {
+      const next = [...prev.extraItems];
+      next[index] = { ...next[index], text };
+      return { ...prev, extraItems: next };
+    });
+  };
+
+  const removeExtraScopeItem = (index: number) => {
+    setEditScopeOverride(prev => {
+      const removed = prev.extraItems[index];
+      return {
+        inactiveIds: removed ? prev.inactiveIds.filter(x => x !== removed.id) : prev.inactiveIds,
+        extraItems: prev.extraItems.filter((_, i) => i !== index),
+      };
+    });
   };
 
   // Multiple Auditors selection handlers
@@ -1085,6 +1166,9 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const canReopenProject = RBAC.can(currentUser, "audit-projects:reopen");
   const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
   const leadAuditors = users.filter(u => u.role === "LEAD_AUDITOR" || u.role === "ADMIN");
+  const linkedAuditPlan = selectedProject?.auditPlanId
+    ? auditPlans?.find(ap => ap.id === selectedProject.auditPlanId)
+    : null;
 
   const statusOptions = [
     { label: "Planning", value: "PLANNING" },
@@ -1146,23 +1230,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <div className="overflow-visible border border-slate-300 dark:border-slate-800 rounded-md">
                 <table className="w-full border-collapse text-xs">
                   <tbody>
-                    {/* Row 1: Project Name */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Project Name*:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <input
-                          type="text"
-                          required
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          // placeholder="e.g. SOX Audit 2026"
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-bold text-slate-800 dark:text-slate-100"
-                        />
-                      </td>
-                    </tr>
-
                     {/* Row 2: Project Code */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
@@ -1207,10 +1274,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       </td>
                     </tr>
 
-                    {/* Row 4: Lead Auditor */}
+                    {/* Row 4: OE Leader */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Lead Auditor:
+                        OE Leader:
                       </td>
                       <td colSpan={3} className="px-4 py-2">
                         <div className="border border-slate-300 dark:border-slate-700 rounded-md">
@@ -1222,7 +1289,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               label: u.name,
                               subLabel: `${u.role.replace('_', ' ')}${u.departmentName ? ` • ${u.departmentName}` : ''}`
                             }))}
-                            placeholder="Select Lead Auditors..."
+                            placeholder="Select OE Leaders..."
                           />
                         </div>
                       </td>
@@ -1232,7 +1299,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     {/* Row 6: Annual Plan Master */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Annual Audit Plan:
+                        Annual OE Plan:
                       </td>
                       <td colSpan={3} className="px-4 py-2">
                         <div className="border border-slate-300 dark:border-slate-700 rounded-md">
@@ -1258,7 +1325,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     {/* Row 7: Audit Plan */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Planned Engagement:
+                        Planned Engagement*:
                       </td>
                       <td colSpan={3} className="px-4 py-2">
                         <div className="border border-slate-300 dark:border-slate-700 rounded-md">
@@ -1280,7 +1347,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                                 label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                               }));
                             })()}
-                            placeholder={newAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual Audit Plan first..."}
+                            placeholder={newAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
                           />
                         </div>
                       </td>
@@ -1348,7 +1415,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <tr>
                 <th className="px-6 py-4">Code</th>
                 <th className="px-6 py-4">Project Name</th>
-                <th className="px-6 py-4">Lead Auditor</th>
+                <th className="px-6 py-4">OE Leader</th>
                 <th className="px-6 py-4">Start Date</th>
                 <th className="px-6 py-4">End Date</th>
                 <th className="px-6 py-4">Status</th>
@@ -1432,13 +1499,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   <span>&gt;</span>
                   <span className="text-slate-600 font-roboto dark:text-slate-300">{selectedProject.code}</span>
                 </div>
-                <input
-                  type="text"
-                  disabled={editStatus !== "PLANNING"}
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className={`text-lg md:text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 bg-transparent border-b border-transparent focus:outline-none w-full pb-0.5 ${editStatus === "PLANNING" ? "hover:border-slate-300 focus:border-[#05375c]" : "cursor-not-allowed"}`}
-                />
+                <h1
+                  className="text-lg md:text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 w-full pb-0.5"
+                  title="Derived from the linked Planned Engagement's Project Name"
+                >
+                  {editName}
+                </h1>
                 
                 {/* Meta details row under header */}
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1 text-[10px] font-sans text-slate-400">
@@ -1500,7 +1566,9 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       <button
                         type="button"
                         onClick={handleSubmitForApproval}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded transition-colors cursor-pointer"
+                        disabled={getMissingMandatoryFields().length > 0}
+                        title={getMissingMandatoryFields().length > 0 ? `Missing required info: ${getMissingMandatoryFields().join(", ")}` : undefined}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#05375c]"
                       >
                         <Send className="w-3.5 h-3.5" /> Submit for Approval
                       </button>
@@ -1611,7 +1679,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   {/* Column 1: Audit Plan Link Section */}
                   <div className="flex flex-col space-y-4 select-none border-b lg:border-b-0 lg:border-r border-slate-150 dark:border-slate-800 pb-4 lg:pb-0 lg:pr-6 no-print">
                     <div>
-                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Annual Audit Plan</label>
+                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Annual OE Plan</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
                           selectedValues={editAnnualPlanId ? [editAnnualPlanId] : []}
@@ -1645,7 +1713,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         <MultiSelect
                           selectedValues={editAuditPlanId ? [editAuditPlanId] : []}
                           onChange={(values) => {
-                            setEditAuditPlanId(values.length > 0 ? values[0] : "");
+                            const apId = values.length > 0 ? values[0] : "";
+                            setEditAuditPlanId(apId);
+                            const matchedAp = apId ? auditPlans?.find(ap => ap.id === apId) : null;
+                            if (matchedAp?.projectName?.trim()) {
+                              setEditName(matchedAp.projectName.trim());
+                            }
                           }}
                           singleSelect={true}
                           disabled={isReadOnly || !editAnnualPlanId}
@@ -1660,7 +1733,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                             }));
                           })()}
-                          placeholder={editAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual Audit Plan first..."}
+                          placeholder={editAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
                         />
                       </div>
                     </div>
@@ -1668,7 +1741,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   {/* Column 2: Lead & Auditors & Departments */}
                   <div className="space-y-4">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-sans font-bold uppercase text-slate-500">Lead Auditor</label>
+                      <label className="text-xs font-sans font-bold uppercase text-slate-500">OE Leader</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
                           selectedValues={editLead ? editLead.split(",").map(s => {
@@ -1684,7 +1757,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               label: u.name,
                               subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
                             }))}
-                          placeholder="Select Lead Auditors..."
+                          placeholder="Select OE Leaders..."
                         />
                       </div>
                     </div>
@@ -1989,32 +2062,161 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 )}
               </div>
 
-              {/* Panel 1: Objectives & Scope (Full Width) */}
+              {/* Panel 1: Objectives & Scope (Full Width) - inherited read-only from the linked Planned OE Engagement */}
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-6 shadow-sm">
-                <h3 className="text-md font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 border-b border-slate-150 dark:border-slate-800 pb-2">
-                  I. Objectives & Scope
-                </h3>
+                <div className="flex items-center justify-between border-b border-slate-150 dark:border-slate-800 pb-2">
+                  <h3 className="text-md font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                    I. Objectives & Scope
+                  </h3>
+                  {linkedAuditPlan && (
+                    <span className="text-[10px] font-sans font-medium text-slate-400 uppercase tracking-wider">
+                      Inherited from Planned Engagement &middot; {linkedAuditPlan.topic} ({linkedAuditPlan.version || "V1"})
+                    </span>
+                  )}
+                </div>
 
-                <PlanItemEditor
-                  sectionTitle="1.1 Objectives"
-                  items={editObjectivesItems}
-                  onChange={setEditObjectivesItems}
-                  prefix="AP-OBJ"
-                  editable={!isReadOnly}
-                  placeholder="Enter objective item description..."
-                  addBtnText="Add Objective"
-                />
-
-                <div className="border-t border-slate-150 dark:border-slate-800 pt-4">
+                {linkedAuditPlan ? (
                   <PlanItemEditor
-                    sectionTitle="1.2 Audit Scope"
-                    items={editScopeItems}
-                    onChange={setEditScopeItems}
-                    prefix="AP-ISCP"
-                    editable={!isReadOnly}
-                    placeholder="Enter audit scope item description..."
-                    addBtnText="Add Scope Item"
+                    sectionTitle="1.1 Objectives"
+                    items={parsePlanItems(linkedAuditPlan.objectives, "AP-OBJ")}
+                    onChange={() => {}}
+                    prefix="AP-OBJ"
+                    editable={false}
                   />
+                ) : (
+                  <div className="text-slate-400 italic text-xs font-sans">
+                    This Individual OE Plan isn&apos;t linked to a Planned Engagement, so no Objectives are available. Link one under &quot;Planned Engagement&quot; above to inherit its Objectives.
+                  </div>
+                )}
+
+                {/* 1.2 OE Scope - inherited items from the Planned Engagement (text locked,
+                    but can be toggled inactive per plan), plus extra items owned by this plan */}
+                <div className="border-t border-slate-150 dark:border-slate-800 pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase">
+                      1.2 OE Scope
+                    </label>
+                    {!isReadOnly && (
+                      <button
+                        type="button"
+                        onClick={addExtraScopeItem}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-md transition-colors shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Scope Item
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {(linkedAuditPlan ? parsePlanItems(linkedAuditPlan.scope, "AP-ISCP") : []).map((item) => {
+                      const inactive = editScopeOverride.inactiveIds.includes(item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          className={`flex items-start gap-2 p-3 border rounded-lg transition-all ${
+                            inactive
+                              ? "border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 opacity-60"
+                              : "border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50"
+                          }`}
+                        >
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => toggleScopeItemActive(item.id)}
+                              title={inactive ? "Reactivate this scope item" : "Mark inactive for this plan"}
+                              className="shrink-0 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                            >
+                              {inactive ? <RotateCcw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                            </button>
+                          )}
+                          <div className="flex-1 space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
+                                {item.id}
+                              </span>
+                              {inactive && (
+                                <span className="text-[10px] font-sans font-bold text-red-400 uppercase tracking-wider">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-xs font-sans p-2.5 rounded-md border ${inactive ? "line-through text-slate-400 border-transparent" : "text-slate-700 dark:text-slate-300 bg-white/80 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800"}`}>
+                              {item.text || <span className="italic text-slate-400">No content entered.</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {editScopeOverride.extraItems.map((item, index) => {
+                      const inactive = editScopeOverride.inactiveIds.includes(item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          className={`flex items-start gap-2 p-3 border rounded-lg transition-all ${
+                            inactive
+                              ? "border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 opacity-60"
+                              : "border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50"
+                          }`}
+                        >
+                          {!isReadOnly && (
+                            <div className="flex flex-col gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleScopeItemActive(item.id)}
+                                title={inactive ? "Reactivate this scope item" : "Mark inactive for this plan"}
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                              >
+                                {inactive ? <RotateCcw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeExtraScopeItem(index)}
+                                title="Remove this extra scope item"
+                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/50 text-red-400 hover:text-red-600 dark:hover:text-red-300"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                          <div className="flex-1 space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
+                                {item.id}
+                              </span>
+                              <span className="text-[10px] font-sans font-medium text-slate-400 uppercase tracking-wider">
+                                Added for this plan
+                              </span>
+                              {inactive && (
+                                <span className="text-[10px] font-sans font-bold text-red-400 uppercase tracking-wider">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            {isReadOnly ? (
+                              <div className={`text-xs font-sans p-2.5 rounded-md border ${inactive ? "line-through text-slate-400 border-transparent" : "text-slate-700 dark:text-slate-300 bg-white/80 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800"}`}>
+                                {item.text || <span className="italic text-slate-400">No content entered.</span>}
+                              </div>
+                            ) : (
+                              <textarea
+                                rows={2}
+                                value={item.text}
+                                onChange={(e) => updateExtraScopeItemText(index, e.target.value)}
+                                placeholder="Enter extra scope item description..."
+                                className="w-full text-xs font-sans text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded-md p-2.5 focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 transition-all resize-y min-h-[56px]"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {!linkedAuditPlan && editScopeOverride.extraItems.length === 0 && (
+                      <div className="p-4 rounded-md border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
+                        No scope items yet. {!isReadOnly && 'Click "Add Scope Item" to add one.'}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -2060,7 +2262,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   <h4 className="text-[20px] text-xs font-sans font-bold uppercase tracking-wider text-slate-1000 border-b border-slate-150 dark:border-slate-800 pb-2">IV. Obtain data error to fieldwork parameters</h4>
                   <div className="space-y-6">
                     <PlanItemEditor
-                      sectionTitle="Type of data to request for information"
+                      sectionTitle="Type of Data/Document to Request for Review & Activities"
                       items={editDataRequestItems}
                       onChange={setEditDataRequestItems}
                       prefix="AP-DRQ"

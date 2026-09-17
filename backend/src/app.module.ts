@@ -8,6 +8,7 @@ import { PermissionsCommonModule } from './common/permissions-common.module';
 import { AuthModule } from './auth/auth.module';
 import { ActivityLogsModule } from './activity-logs/activity-logs.module';
 import { DepartmentsModule } from './departments/departments.module';
+import { BusinessUnitsModule } from './business-units/business-units.module';
 import { UsersModule } from './users/users.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
 import { CodeGeneratorModule } from './code-generator/code-generator.module';
@@ -29,6 +30,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
     ActivityLogsModule,
     AuthModule,
     DepartmentsModule,
+    BusinessUnitsModule,
     UsersModule,
     UserGroupsModule,
     CodeGeneratorModule,

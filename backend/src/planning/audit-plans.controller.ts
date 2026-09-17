@@ -57,13 +57,17 @@ export class AuditPlansController {
     return this.auditPlansService.create(
       dto.annualPlanId,
       dto.no,
+      dto.projectName,
       dto.topic,
+      dto.bu,
       dto.type ?? 'OE',
       dto.revieweeIds,
       new Date(dto.conductDate),
       new Date(dto.endDate),
       dto.durationDay,
       dto.purpose,
+      dto.objectives ?? '',
+      dto.scope ?? '',
     );
   }
 
@@ -77,13 +81,17 @@ export class AuditPlansController {
   update(@Param('id') id: string, @Body() dto: UpdateAuditPlanDto) {
     return this.auditPlansService.update(
       id,
+      dto.projectName,
       dto.topic,
+      dto.bu,
       dto.type,
       dto.revieweeIds,
       new Date(dto.conductDate),
       new Date(dto.endDate),
       dto.durationDay,
       dto.purpose,
+      dto.objectives ?? '',
+      dto.scope ?? '',
     );
   }
 

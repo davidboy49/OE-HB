@@ -4,6 +4,12 @@ export interface Department {
   description: string | null;
 }
 
+export interface BusinessUnit {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface UserGroup {
   id: string;
   name: string;
@@ -189,13 +195,17 @@ export interface AuditPlan {
   id: string;
   annualPlanId: string;
   no: string;
+  projectName: string;
   topic: string;
+  bu: string;
   type?: string;
   revieweeIds: string; // Comma-separated User IDs
   conductDate: string; // ISO date string
   endDate: string; // ISO date string
   durationDay: number;
   purpose: string;
+  objectives: string;
+  scope: string;
   version?: string;
   nextVersion?: string;
   isProcessed?: boolean;

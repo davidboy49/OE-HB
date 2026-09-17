@@ -5,7 +5,7 @@ import type { OpenMeeting, Department } from "@auditdesk/shared";
 
 export const metadata = {
   title: "Open Meeting & Scope Consent | AuditDesk",
-  description: "Departmental Open Meeting agenda and audit scope confirmation portal."
+  description: "Departmental Open Meeting agenda and OE scope confirmation portal."
 };
 
 interface PageProps {
