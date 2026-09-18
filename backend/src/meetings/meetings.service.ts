@@ -6,6 +6,7 @@ import {
   ExecutionSchedulesService,
   DepartmentConsentInput,
 } from '../execution-schedules/execution-schedules.service';
+import { resolveInheritedPlanContent } from '@auditdesk/shared';
 
 export interface CreateOpenMeetingInput {
   projectId: string;
@@ -16,7 +17,7 @@ export interface CreateOpenMeetingInput {
   auditPeriod: string;
   leadExecution: string;
   teamMembers: string;
-  additionalAttendees: string;
+  additionalAttendees?: string;
   attendeeConfirmations?: string;
   standards: string;
   status?: string;
@@ -109,6 +110,17 @@ export class MeetingsService {
     });
     if (!project) return [];
 
+    // AuditProject.objectives/scope can be empty or stale - resolve the real
+    // inherited content from the linked Planned Engagement instead. Scope in
+    // particular isn't scope text on AuditProject; it's an { inactiveIds,
+    // extraItems } override layered on top (see resolveInheritedPlanContent).
+    const parentAuditPlan = project.auditPlanId
+      ? await this.prisma.auditPlan.findUnique({
+          where: { id: project.auditPlanId },
+        })
+      : null;
+    const inherited = resolveInheritedPlanContent(project, parentAuditPlan);
+
     const deptsRaw = project.departments || '';
     let deptList = deptsRaw
       .split(',')
@@ -185,10 +197,10 @@ export class MeetingsService {
             standards: 'Work Procedure, Work Instruction & Policy',
             status: 'DRAFT',
             objectives:
-              project.objectives ||
+              inherited.objectives ||
               `Evaluate operational compliance and risk management for ${dept}.`,
             scope:
-              project.scope ||
+              inherited.scope ||
               `Full scope audit covering departmental procedures and key controls for ${dept}.`,
             scheduleRows: JSON.stringify(defaultAgendaRows),
             attachments: '[]',
@@ -245,7 +257,7 @@ export class MeetingsService {
         auditPeriod: data.auditPeriod,
         leadExecution: data.leadExecution,
         teamMembers: data.teamMembers,
-        additionalAttendees: data.additionalAttendees,
+        additionalAttendees: data.additionalAttendees || '',
         attendeeConfirmations: data.attendeeConfirmations || '{}',
         standards: data.standards,
         status: data.status || 'DRAFT',
@@ -292,6 +304,15 @@ export class MeetingsService {
       include: { project: true },
     });
     return this.findOne(m.id);
+  }
+
+  /** DRAFT -> SUBMITTED_FOR_APPROVAL -> RELEASED, with reject/reopen looping back to DRAFT. */
+  async updateStatus(id: string, status: string): Promise<any> {
+    await this.prisma.openMeeting.update({
+      where: { id },
+      data: { status },
+    });
+    return this.findOne(id);
   }
 
   async remove(id: string): Promise<boolean> {

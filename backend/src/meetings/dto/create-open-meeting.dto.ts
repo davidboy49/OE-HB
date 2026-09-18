@@ -42,10 +42,10 @@ export class CreateOpenMeetingDto {
   @IsNotEmpty()
   teamMembers!: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Defaults to "".' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  additionalAttendees!: string;
+  additionalAttendees?: string;
 
   @ApiPropertyOptional({
     description:

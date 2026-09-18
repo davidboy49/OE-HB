@@ -24,6 +24,7 @@ import {
 import type {
   User,
   AuditProject,
+  AuditPlan,
   ExecutionSchedule as FindingReport,
   ScheduleRow,
   Department
@@ -38,7 +39,7 @@ interface FindingRow extends ScheduleRow {
   correctiveFinalDatetime?: string;
   attachments?: any[];
 }
-import { parsePlanItems } from "@auditdesk/shared";
+import { parsePlanItems, resolveInheritedPlanContent } from "@auditdesk/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -132,15 +133,17 @@ interface FindingsClientProps {
   projects: AuditProject[];
   users: User[];
   departments: Department[];
+  auditPlans?: AuditPlan[];
   currentUser: User;
 }
 
-export default function FindingsClient({ 
-  initialSchedules, 
+export default function FindingsClient({
+  initialSchedules,
   releasedExecSchedules,
-  projects, 
-  users, 
+  projects,
+  users,
   departments,
+  auditPlans = [],
   currentUser 
 }: FindingsClientProps) {
   const [schedules, setSchedules] = useState<FindingReport[]>(initialSchedules);
@@ -313,8 +316,19 @@ export default function FindingsClient({
     setStandards(execSched.standards || "");
 
     const proj = projects.find(p => p.id === execSched.projectId);
-    setObjectives(proj?.objectives || "");
-    setScope(proj?.scope || "");
+    // Resolve inherited objectives/scope from the linked Planned Engagement -
+    // AuditProject.objectives/scope alone can be empty or stale.
+    if (proj) {
+      const linkedAuditPlan = proj.auditPlanId
+        ? auditPlans.find(a => a.id === proj.auditPlanId)
+        : null;
+      const inherited = resolveInheritedPlanContent(proj, linkedAuditPlan);
+      setObjectives(inherited.objectives);
+      setScope(inherited.scope);
+    } else {
+      setObjectives("");
+      setScope("");
+    }
     setRows([]);
   };
 
@@ -810,7 +824,7 @@ export default function FindingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">Audit Plan Code</th>
+                  <th className="px-6 py-4">OE Plan Code</th>
                   <th className="px-6 py-4">Project Name</th>
                   <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">Finding Date</th>

@@ -44,6 +44,7 @@ export default function ScanClient({
   // as plain form fields and sent directly in the consent request body.
   const [consentName, setConsentName] = useState("");
   const [consentEmail, setConsentEmail] = useState("");
+  const [departmentConcernInput, setDepartmentConcernInput] = useState("");
 
   const meetingsToUse = projectMeetingsList && projectMeetingsList.length > 0 ? projectMeetingsList : [schedule];
 
@@ -113,6 +114,7 @@ export default function ScanClient({
           acceptedByUserName: consentName,
           acceptedByUserEmail: consentEmail,
           comments: remarks,
+          departmentConcern: departmentConcernInput,
         }),
       });
       setSchedule(updatedSchedule);
@@ -294,11 +296,20 @@ export default function ScanClient({
 
                 {schedule.departmentConcern && (
                   <div>
-                    <h4 className="font-semibold text-slate-200 mb-1 text-xs">The Concern of the Department Owner:</h4>
-                    <div 
+                    <h4 className="font-semibold text-slate-200 mb-1 text-xs">OE Team Briefing Notes:</h4>
+                    <div
                       className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 text-slate-300 rich-text-content"
                       dangerouslySetInnerHTML={{ __html: schedule.departmentConcern }}
                     />
+                  </div>
+                )}
+
+                {currentDeptConsent?.departmentConcern && (
+                  <div>
+                    <h4 className="font-semibold text-slate-200 mb-1 text-xs">The Concern of the Department Owner ({selectedDept}):</h4>
+                    <p className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 text-slate-300 whitespace-pre-wrap">
+                      {currentDeptConsent.departmentConcern}
+                    </p>
                   </div>
                 )}
               </div>
@@ -442,6 +453,17 @@ export default function ScanClient({
                     />
                   </div>
                 </div>
+
+                <label className="block text-xs font-medium text-slate-300">
+                  The Concern of the Department Owner ({selectedDept}):
+                </label>
+                <textarea
+                  rows={3}
+                  value={departmentConcernInput}
+                  onChange={(e) => setDepartmentConcernInput(e.target.value)}
+                  placeholder="Enter this department's own concerns for the audit scope..."
+                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500"
+                />
 
                 <label className="block text-xs font-medium text-slate-300">
                   Optional Remarks / Scope Notes:

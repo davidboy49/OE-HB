@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,12 +14,23 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { MeetingsService } from './meetings.service';
 import { CreateOpenMeetingDto } from './dto/create-open-meeting.dto';
 import { UpdateOpenMeetingDto } from './dto/update-open-meeting.dto';
+import { UpdateOpenMeetingStatusDto } from './dto/update-open-meeting-status.dto';
 import { RecordQrConsentDto } from './dto/record-qr-consent.dto';
 import { DepartmentsService } from '../departments/departments.service';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
+import type { AuthenticatedUser } from '../auth/auth.types';
+
+/** DRAFT -> SUBMITTED_FOR_APPROVAL needs submit rights; the approver's decision (approve/reject/reopen) needs approve rights. */
+const STATUS_PERMISSION_BY_TARGET: Record<string, string> = {
+  SUBMITTED_FOR_APPROVAL: 'meetings:submit',
+  RELEASED: 'meetings:approve',
+  DRAFT: 'meetings:approve',
+};
 
 @ApiTags('meetings')
 @ApiBearerAuth()
@@ -27,6 +39,7 @@ export class MeetingsController {
   constructor(
     private readonly meetingsService: MeetingsService,
     private readonly departmentsService: DepartmentsService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   @Get()
@@ -64,6 +77,25 @@ export class MeetingsController {
   }))
   update(@Param('id') id: string, @Body() dto: UpdateOpenMeetingDto) {
     return this.meetingsService.update(id, dto);
+  }
+
+  @Patch(':id/status')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'UPDATE_OPEN_MEETING_STATUS',
+    details: `Updated open meeting ID: ${req.params.id} status to ${req.body.status}`,
+  }))
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateOpenMeetingStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const requiredKey = STATUS_PERMISSION_BY_TARGET[dto.status];
+    if (!requiredKey) {
+      throw new BadRequestException(`Unknown target status: ${dto.status}`);
+    }
+    await this.permissionsResolver.requirePermission(user, requiredKey);
+    return this.meetingsService.updateStatus(id, dto.status);
   }
 
   @Delete(':id')
@@ -130,6 +162,7 @@ export class MeetingsController {
         acceptedByUserEmail: dto.acceptedByUserEmail,
         timestamp: new Date().toISOString(),
         comments: dto.comments || '',
+        departmentConcern: dto.departmentConcern || '',
       },
     );
   }

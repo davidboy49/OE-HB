@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuditPlan } from '@auditdesk/shared';
 
@@ -9,13 +9,6 @@ import type { AuditPlan } from '@auditdesk/shared';
 export interface EnrichedAuditPlan extends AuditPlan {
   processedCount: number;
   totalSchedules: number;
-}
-
-export interface DepartmentAuditVersion {
-  version: string;
-  processedCount: number;
-  isProcessed: boolean;
-  nextVersion: string;
 }
 
 @Injectable()
@@ -134,6 +127,7 @@ export class AuditPlansService {
         processedCount,
         isProcessed,
         isApproved,
+        isUsed: (p.auditProjects || []).length > 0,
         annualPlanStatus: p.annualPlan?.status || 'DRAFT',
         totalSchedules,
         createdAt: p.createdAt.toISOString(),
@@ -154,78 +148,6 @@ export class AuditPlansService {
 
   async findByAnnualPlan(annualPlanId: string): Promise<EnrichedAuditPlan[]> {
     return this.getEnrichedAuditPlans(annualPlanId);
-  }
-
-  async getDepartmentAuditVersion(
-    projectId: string,
-    departmentNameOrId: string,
-    excludeScheduleId?: string,
-  ): Promise<DepartmentAuditVersion> {
-    if (!projectId || !departmentNameOrId) {
-      return {
-        version: 'V1',
-        processedCount: 0,
-        isProcessed: false,
-        nextVersion: 'V1',
-      };
-    }
-
-    const deptTokens = departmentNameOrId
-      .split(',')
-      .map((d) => d.trim())
-      .filter(Boolean);
-
-    if (deptTokens.length === 0) {
-      return {
-        version: 'V1',
-        processedCount: 0,
-        isProcessed: false,
-        nextVersion: 'V1',
-      };
-    }
-
-    // Find all schedules for this project with status RELEASED or APPROVED
-    const processedSchedules = await this.prisma.executionSchedule.findMany({
-      where: {
-        projectId,
-        status: { in: ['RELEASED', 'APPROVED'] },
-        ...(excludeScheduleId ? { id: { not: excludeScheduleId } } : {}),
-      },
-      select: {
-        id: true,
-        departments: true,
-        status: true,
-        visitNumber: true,
-        createdAt: true,
-      },
-    });
-
-    // Check how many processed schedules match any of the department tokens
-    let matchedProcessedCount = 0;
-    for (const sched of processedSchedules) {
-      const schedDepts = (sched.departments || '')
-        .split(',')
-        .map((d) => d.trim());
-      const hasOverlap = deptTokens.some(
-        (token) =>
-          schedDepts.some((sd) => sd.toLowerCase() === token.toLowerCase()) ||
-          sched.departments.toLowerCase().includes(token.toLowerCase()),
-      );
-      if (hasOverlap) {
-        matchedProcessedCount++;
-      }
-    }
-
-    const isProcessed = matchedProcessedCount > 0;
-    const version = isProcessed ? `V${matchedProcessedCount}` : 'V1';
-    const nextVersion = `V${matchedProcessedCount + 1}`;
-
-    return {
-      version,
-      processedCount: matchedProcessedCount,
-      isProcessed,
-      nextVersion,
-    };
   }
 
   async create(
@@ -355,6 +277,14 @@ export class AuditPlansService {
   }
 
   async remove(id: string): Promise<boolean> {
+    const inUse = await this.prisma.auditProject.findFirst({
+      where: { auditPlanId: id },
+    });
+    if (inUse) {
+      throw new ConflictException(
+        'This Planned Engagement is already in use by an Individual OE Plan and cannot be deleted.',
+      );
+    }
     await this.prisma.auditPlan.delete({ where: { id } });
     return true;
   }

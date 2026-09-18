@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -28,15 +27,6 @@ export class AuditProjectsController {
   @Get()
   findAll() {
     return this.auditProjectsService.findAll();
-  }
-
-  /** Mirrors getNextDocumentCodeAction - a pure read, not logged in the original either. */
-  @Get('next-code')
-  getNextCode(@Query('prefix') prefix?: string, @Query('year') year?: string) {
-    return this.auditProjectsService.getNextCodePreview(
-      prefix,
-      year ? Number(year) : undefined,
-    );
   }
 
   @Post()

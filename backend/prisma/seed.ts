@@ -35,14 +35,6 @@ async function main() {
 
   console.log("Cleared existing database records.");
 
-  // Seed Document Sequences (starts from 0 so first generated code is AP-2026-0001)
-  await prisma.documentSequence.create({
-    data: { key: "AP-2026", currentVal: 0 }
-  });
-  await prisma.documentSequence.create({
-    data: { key: "AP-2025", currentVal: 0 }
-  });
-
   // 1. Seed Departments
   const dept1 = await prisma.department.create({
     data: { id: "dept-1", name: "Information Technology", description: "Core IT infrastructure and software development" }

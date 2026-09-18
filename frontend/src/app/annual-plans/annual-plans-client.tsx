@@ -175,19 +175,23 @@ export default function AnnualPlansClient({
             );
             for (let i = 0; i < plansToPersist.length; i++) {
               const ap = plansToPersist[i];
-              const no = `AP-${new Date().getFullYear()}-${String(i + 1).padStart(3, '0')}`;
+              const no = `PRJ-${String(i + 1).padStart(3, '0')}`;
               await clientApi<AuditPlan>("/audit-plans", {
                 method: "POST",
                 body: JSON.stringify({
                   annualPlanId: newPlan.id,
                   no,
+                  projectName: ap.projectName || "",
                   topic: ap.topic,
+                  bu: ap.bu || "",
                   type: ap.type || "OE",
                   revieweeIds: ap.revieweeIds || "",
                   conductDate: ap.conductDate,
                   endDate: ap.endDate,
                   durationDay: ap.durationDay || 1,
                   purpose: ap.purpose || "",
+                  objectives: ap.objectives || "",
+                  scope: ap.scope || "",
                 }),
               });
             }
@@ -320,7 +324,7 @@ export default function AnnualPlansClient({
     try {
       if (modalMode === "create") {
         if (childModalMode === "create") {
-          const no = `AP-${new Date().getFullYear()}-${String(auditPlans.length + 1).padStart(3, '0')}`;
+          const no = `PRJ-${String(auditPlans.length + 1).padStart(3, '0')}`;
           const newAp = {
             id: `draft-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             annualPlanId: "",
@@ -364,7 +368,7 @@ export default function AnnualPlansClient({
       } else {
         if (!selectedPlanId) return;
         if (childModalMode === "create") {
-          const no = `AP-${new Date().getFullYear()}-${String(auditPlans.length + 1).padStart(3, '0')}`;
+          const no = `PRJ-${String(auditPlans.length + 1).padStart(3, '0')}`;
           const newAp = await clientApi<AuditPlan>("/audit-plans", {
             method: "POST",
             body: JSON.stringify({
@@ -757,7 +761,7 @@ export default function AnnualPlansClient({
               <div className="bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-lg p-6 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-3 mb-4">
                   <h3 className="text-xs font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                    Planned OE Engagements
+                    Projects
                   </h3>
                   {canCreateChildPlan && statusInput !== "APPROVED" && (
                     <button
@@ -783,6 +787,7 @@ export default function AnnualPlansClient({
                         <th className="px-4 py-3">Conduct Date</th>
                         <th className="px-4 py-3">End Date</th>
                         <th className="px-4 py-3">Duration (Day)</th>
+                        <th className="px-4 py-3">Status</th>
                         {(canUpdateChildPlan || canDeleteChildPlan) && <th className="px-4 py-3 text-center w-20">Actions</th>}
                       </tr>
                     </thead>
@@ -813,6 +818,17 @@ export default function AnnualPlansClient({
                           <td className="px-4 py-3 text-slate-500">{ap.conductDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.endDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.durationDay}</td>
+                          <td className="px-4 py-3">
+                            {ap.isUsed ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                                In Use
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                                Available
+                              </span>
+                            )}
+                          </td>
                           {(canUpdateChildPlan || canDeleteChildPlan) && (
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center gap-2">
@@ -826,7 +842,7 @@ export default function AnnualPlansClient({
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {statusInput !== "APPROVED" && canDeleteChildPlan && (
+                                {statusInput !== "APPROVED" && !ap.isUsed && canDeleteChildPlan && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteChildPlan(ap.id)}
@@ -843,7 +859,7 @@ export default function AnnualPlansClient({
                       ))}
                       {auditPlans.length === 0 && (
                         <tr>
-                          <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 10 : 9} className="px-4 py-6 text-center text-slate-400 text-xs italic">
+                          <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 11 : 10} className="px-4 py-6 text-center text-slate-400 text-xs italic">
                             No Planned Engagements added yet.
                           </td>
                         </tr>

@@ -167,7 +167,7 @@ export interface OpenMeeting {
   additionalAttendees: string;
   attendeeConfirmations?: string;
   standards: string;
-  status: "DRAFT" | "RELEASED";
+  status: "DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED";
   objectives: string;
   scope: string;
   scheduleRows: string; // JSON
@@ -210,6 +210,7 @@ export interface AuditPlan {
   nextVersion?: string;
   isProcessed?: boolean;
   isApproved?: boolean;
+  isUsed?: boolean; // true once an Individual OE Plan (AuditProject) has been created from this engagement
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;

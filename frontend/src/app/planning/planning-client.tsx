@@ -304,7 +304,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [completionStatus, setCompletionStatus] = useState("45% Planned");
 
   // New Project Form state
-  const [newCode, setNewCode] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
   const [newLeads, setNewLeads] = useState<string[]>([]);
@@ -328,13 +327,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setNewDepartments([]);
     setNewAnnualPlanId("");
     setNewAuditPlanId("");
-    
-    try {
-      const nextCode = await clientApi<string>("/audit-projects/next-code?prefix=AP");
-      setNewCode(nextCode);
-    } catch (e) {
-      setNewCode("AUTO");
-    }
   };
 
   const openCopyProjectModal = async (proj: AuditProject) => {
@@ -358,13 +350,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
     setNewLeads(initialLeads);
     setNewDepartments([]);
-
-    try {
-      const nextCode = await clientApi<string>("/audit-projects/next-code?prefix=AP");
-      setNewCode(nextCode);
-    } catch (e) {
-      setNewCode("AUTO");
-    }
   };
 
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -997,7 +982,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     openProjectEditor(finalProj);
     
     // Clear form
-    setNewCode("");
     setNewStart("");
     setNewEnd("");
     setNewLeads([]);
@@ -1230,22 +1214,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <div className="overflow-visible border border-slate-300 dark:border-slate-800 rounded-md">
                 <table className="w-full border-collapse text-xs">
                   <tbody>
-                    {/* Row 2: Project Code */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Project Code:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={newCode}
-                          placeholder="N/A"
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-sans font-bold text-slate-700 dark:text-slate-300 cursor-not-allowed select-none"
-                        />
-                      </td>
-                    </tr>
-
                     {/* Row 3: Start Date + End Date */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
@@ -1337,7 +1305,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             singleSelect={true}
                             disabled={!newAnnualPlanId}
                             options={(() => {
-                              const filtered = auditPlans?.filter(ap => ap.annualPlanId === newAnnualPlanId) || [];
+                              const filtered = auditPlans?.filter(ap => ap.annualPlanId === newAnnualPlanId && !ap.isUsed) || [];
                               if (newAuditPlanId && !filtered.some(ap => ap.id === newAuditPlanId)) {
                                 const target = auditPlans?.find(ap => ap.id === newAuditPlanId);
                                 if (target) filtered.push(target);
@@ -1413,7 +1381,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
               <tr>
-                <th className="px-6 py-4">Code</th>
+                <th className="px-6 py-4">OE Plan Code</th>
                 <th className="px-6 py-4">Project Name</th>
                 <th className="px-6 py-4">OE Leader</th>
                 <th className="px-6 py-4">Start Date</th>
@@ -1423,7 +1391,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {filteredProjects.map((proj) => (
-                  <tr 
+                  <tr
                     key={proj.id}
                     onClick={() => setSelectedProjectId(proj.id === selectedProjectId ? "" : proj.id)}
                     className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors select-none cursor-pointer ${
@@ -1433,7 +1401,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <td className="px-6 py-4 font-sans text-slate-800 dark:text-slate-200">
                       {proj.code}
                     </td>
-                    <td 
+                    <td
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedProjectId(proj.id);
@@ -1496,8 +1464,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5 text-[15px] font-roboto text-400 font-bold">
                   <span>Individual OE Plan</span>
-                  <span>&gt;</span>
-                  <span className="text-slate-600 font-roboto dark:text-slate-300">{selectedProject.code}</span>
                 </div>
                 <h1
                   className="text-lg md:text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 w-full pb-0.5"
@@ -1723,7 +1689,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                           singleSelect={true}
                           disabled={isReadOnly || !editAnnualPlanId}
                           options={(() => {
-                            const filtered = auditPlans?.filter(ap => ap.annualPlanId === editAnnualPlanId) || [];
+                            const filtered = auditPlans?.filter(ap => ap.annualPlanId === editAnnualPlanId && !ap.isUsed) || [];
                             if (editAuditPlanId && !filtered.some(ap => ap.id === editAuditPlanId)) {
                               const target = auditPlans?.find(ap => ap.id === editAuditPlanId);
                               if (target) filtered.push(target);
@@ -2525,8 +2491,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
             {/* Modal Page Footer */}
             <div className="px-8 py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] font-sans text-slate-400 shrink-0">
               <div>
-                <span>Audit ID: {selectedProject.code}-INTERNAL</span>
-                <span className="mx-2">|</span>
                 <span>Last Synced: Just now</span>
               </div>
               <div className="flex gap-4">
@@ -2580,10 +2544,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 Audit Plan
               </h3>
 
-              {/* Project Code Badge */}
-              <div className="inline-block px-5 py-1.5 rounded-lg bg-[#070c18]/90 border border-[#c79646]/30 shadow-inner">
-                <span className="text-xl font-bold tracking-wider text-[#d9a84e] font-mono">
-                  {selectedProject.code}
+              {/* Project Name Badge */}
+              <div className="inline-block px-5 py-1.5 rounded-lg bg-[#070c18]/90 border border-[#c79646]/30 shadow-inner max-w-[280px]">
+                <span className="text-lg font-bold tracking-wide text-[#d9a84e] truncate block">
+                  {selectedProject.name}
                 </span>
               </div>
             </div>
@@ -2654,7 +2618,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     if (!planningQrDataUrl) return;
                     const a = document.createElement("a");
                     a.href = planningQrDataUrl;
-                    a.download = `QR-${selectedProject.code}.png`;
+                    a.download = `QR-${selectedProject.name.replace(/[^a-z0-9]+/gi, "-")}.png`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);

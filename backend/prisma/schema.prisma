@@ -242,7 +242,7 @@ model EmailTemplate {
 }
 
 model DocumentSequence {
-  key        String   @id // e.g. "AP-2026", "ES-2026", "FD-2026"
+  key        String   @id // per-prefix counter, e.g. "AP" - not year-scoped
   currentVal Int      @default(0)
   updatedAt  DateTime @updatedAt
 }

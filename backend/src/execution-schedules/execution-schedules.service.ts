@@ -53,6 +53,8 @@ export interface DepartmentConsentInput {
   acceptedByUserEmail: string;
   timestamp: string;
   comments?: string;
+  /** That department's own Concern of the Department Owner - independent per department, submitted by whoever signs off for it. */
+  departmentConcern?: string;
 }
 
 /**

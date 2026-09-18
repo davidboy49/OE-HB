@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CodeGeneratorService } from '../code-generator/code-generator.service';
-import { MeetingsService } from '../meetings/meetings.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { AuditProject } from '@auditdesk/shared';
 import type { UpdateAuditProjectDto } from './dto/update-audit-project.dto';
@@ -30,7 +29,6 @@ export class AuditProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly codeGenerator: CodeGeneratorService,
-    private readonly meetingsService: MeetingsService,
     private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
@@ -148,6 +146,24 @@ export class AuditProjectsService {
     }));
   }
 
+  /** A Planned Engagement can back at most one Individual OE Plan. */
+  private async ensureAuditPlanAvailable(
+    auditPlanId: string,
+    excludeProjectId?: string,
+  ): Promise<void> {
+    const existing = await this.prisma.auditProject.findFirst({
+      where: {
+        auditPlanId,
+        ...(excludeProjectId ? { id: { not: excludeProjectId } } : {}),
+      },
+    });
+    if (existing) {
+      throw new ConflictException(
+        'This Planned Engagement has already been selected for another Individual OE Plan.',
+      );
+    }
+  }
+
   async create(
     name: string,
     code: string,
@@ -164,13 +180,7 @@ export class AuditProjectsService {
     let normalizedCode = (code || '').trim().toUpperCase();
 
     if (!normalizedCode || normalizedCode === 'AUTO') {
-      const startYear = startDate
-        ? new Date(startDate).getFullYear()
-        : new Date().getFullYear();
-      normalizedCode = await this.codeGenerator.generateDocumentCode(
-        'AP',
-        startYear,
-      );
+      normalizedCode = await this.codeGenerator.generateDocumentCode('OEP');
     }
 
     const existing = await this.prisma.auditProject.findFirst({
@@ -182,6 +192,8 @@ export class AuditProjectsService {
       );
     }
 
+    let inheritedObjectives = '';
+
     if (auditPlanId) {
       const parentAuditPlan = await this.prisma.auditPlan.findUnique({
         where: { id: auditPlanId },
@@ -192,6 +204,13 @@ export class AuditProjectsService {
           'The parent Annual Plan must be APPROVED before an Individual Audit Plan can be created under it.',
         );
       }
+      await this.ensureAuditPlanAvailable(auditPlanId);
+      // Objectives are inherited from the Planned Engagement as plain text (the
+      // editor shows them read-only, never entered independently). Scope is NOT
+      // copied here: AuditProject.scope holds a { inactiveIds, extraItems } JSON
+      // override on top of the Planned Engagement's scope, not the scope text
+      // itself - see ScopeOverride in planning-client.tsx.
+      inheritedObjectives = parentAuditPlan.objectives || '';
     }
 
     const p = await this.prisma.auditProject.create({
@@ -210,7 +229,7 @@ export class AuditProjectsService {
         departments,
         annualPlanId,
         auditPlanId,
-        objectives: '',
+        objectives: inheritedObjectives,
         riskProcess: '',
         riskClass: '',
         opEx: '',
@@ -359,6 +378,10 @@ export class AuditProjectsService {
       };
     }
 
+    if (updates.auditPlanId) {
+      await this.ensureAuditPlanAvailable(updates.auditPlanId, id);
+    }
+
     const p = await this.prisma.auditProject.update({
       where: { id },
       data: {
@@ -407,18 +430,7 @@ export class AuditProjectsService {
     });
 
     const finalSchedules = p.executionSchedules;
-    let finalOpenMeetings = p.openMeetings;
-
-    if (updates.status === 'RELEASED') {
-      try {
-        await this.meetingsService.ensureOpenMeetingsForProject(id);
-        finalOpenMeetings = await this.prisma.openMeeting.findMany({
-          where: { projectId: id, isDeleted: false },
-        });
-      } catch (err) {
-        console.error('Failed to auto-create open meetings on release:', err);
-      }
-    }
+    const finalOpenMeetings = p.openMeetings;
 
     return {
       id: p.id,
@@ -520,10 +532,4 @@ export class AuditProjectsService {
     }
   }
 
-  async getNextCodePreview(
-    prefix: string = 'AP',
-    year?: number,
-  ): Promise<string> {
-    return this.codeGenerator.getNextDocumentCodePreview(prefix, year);
-  }
 }

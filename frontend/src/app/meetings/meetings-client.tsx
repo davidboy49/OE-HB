@@ -20,6 +20,9 @@ import {
   Unlock,
   BadgeCheck,
   CheckCircle2,
+  CheckCircle,
+  XCircle,
+  Send,
   QrCode
 } from "lucide-react";
 import type {
@@ -36,7 +39,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems } from "@auditdesk/shared";
+import { parsePlanItems, resolveInheritedPlanContent } from "@auditdesk/shared";
 import QRCodeModal from "@/components/ui/qr-code-modal";
 import AuditPlanSelect from "@/components/ui/audit-plan-select";
 import QRCode from "qrcode";
@@ -167,7 +170,7 @@ export default function MeetingsClient({
   const [departmentConcern, setDepartmentConcern] = useState("");
   const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<ScheduleRow[]>([]);
-  const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "RELEASED">("DRAFT");
+  const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED">("DRAFT");
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
   // Active row index for card editing
   const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
@@ -318,6 +321,8 @@ export default function MeetingsClient({
   };
 
   const canManage = RBAC.can(currentUser, "meetings:create") || RBAC.can(currentUser, "meetings:update") || RBAC.can(currentUser, "meetings:delete");
+  const canSubmitMeeting = RBAC.can(currentUser, "meetings:submit");
+  const canApproveMeeting = RBAC.can(currentUser, "meetings:approve");
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
@@ -329,8 +334,14 @@ export default function MeetingsClient({
     setSelectedProjectId(projId);
     const proj = projects.find(p => p.id === projId);
     if (proj) {
-      setObjectives(proj.objectives || "");
-      setScope(proj.scope || "");
+      // Resolve inherited objectives/scope from the linked Planned Engagement -
+      // AuditProject.objectives/scope alone can be empty or stale.
+      const linkedAuditPlan = proj.auditPlanId
+        ? auditPlans.find(a => a.id === proj.auditPlanId)
+        : null;
+      const inherited = resolveInheritedPlanContent(proj, linkedAuditPlan);
+      setObjectives(inherited.objectives);
+      setScope(inherited.scope);
       if (proj.departments) {
         setDepartmentsStr(proj.departments);
       }
@@ -375,14 +386,17 @@ export default function MeetingsClient({
     setSelectedScheduleId(null);
     setSelectedProjectId("");
     setDepartmentsStr("");
-    setAddress("");
-    setVisitNumber("");
+    // address/visitNumber/standards have no form inputs of their own here -
+    // they're required by the backend, so blanking them (as opposed to
+    // resetting to sensible defaults) made every new meeting fail to save.
+    setAddress("HB-HQ");
+    setVisitNumber("01");
     setActualVisitDate("");
     setAuditPeriod("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
-    setStandards("");
+    setStandards("Meeting Alignment Agenda");
     setObjectives("");
     setScope("");
     setDepartmentConcern("");
@@ -436,15 +450,21 @@ export default function MeetingsClient({
     }
   }, [schedules]);
 
-  const persistMeetingSchedule = async (targetStatus: "DRAFT" | "RELEASED", options: { closeAfterSave?: boolean; sendReleaseNotification?: boolean } = {}) => {
-    if (meetingStatus === "RELEASED" && targetStatus !== "DRAFT") {
-      showFeedback("This meeting record is already released. Reopen it before making edits.");
-      return false;
+  // Saves field edits as DRAFT. Release now only happens via the Submit ->
+  // Approve workflow below, not directly from here.
+  // Returns the saved record's id on success, or null on failure. Callers that
+  // chain a status transition right after saving (e.g. Submit for Approval)
+  // need the id directly - selectedScheduleId won't reflect a just-created
+  // record's id until the next render, since setSelectedScheduleId is async.
+  const persistMeetingSchedule = async (options: { closeAfterSave?: boolean } = {}): Promise<string | null> => {
+    if (meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL") {
+      showFeedback("This meeting report is locked. Reopen it, or wait for the approval decision, before making edits.");
+      return null;
     }
 
     if (!selectedProjectId || !departmentsStr || !actualVisitDate) {
       showFeedback("Please fill in the required fields (Project, Departments, Date).");
-      return false;
+      return null;
     }
 
     const payload = {
@@ -459,7 +479,7 @@ export default function MeetingsClient({
       additionalAttendees,
       attendeeConfirmations: JSON.stringify(pruneConfirmations(additionalAttendeesArray, attendeeConfirmations)),
       standards,
-      status: targetStatus,
+      status: "DRAFT",
       objectives,
       scope,
       departmentConcern,
@@ -472,58 +492,104 @@ export default function MeetingsClient({
     try {
       let savedId = selectedScheduleId;
       const shouldClose = options.closeAfterSave ?? false;
-      const notifyRelease = options.sendReleaseNotification ?? false;
 
       if (modalMode === "create") {
         const result = await clientApi<OpenMeeting>("/meetings", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        if (!result) return false;
+        if (!result) return null;
         savedId = result.id || savedId;
         setSelectedScheduleId(savedId || null);
-        setMeetingStatus(targetStatus);
+        setMeetingStatus("DRAFT");
       } else {
-        if (!selectedScheduleId) return false;
+        if (!selectedScheduleId) return null;
         const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
-        if (!result) return false;
+        if (!result) return null;
         savedId = result.id || savedId;
-        setMeetingStatus(targetStatus);
+        setMeetingStatus("DRAFT");
       }
 
       const fresh = await clientApi<OpenMeeting[]>("/meetings");
       setSchedules(fresh);
 
-      if (targetStatus === "RELEASED" && savedId && notifyRelease) {
-        await clientApi(`/notifications/send-meeting-release/${savedId}`, { method: "POST" });
-      }
-
-      showFeedback(targetStatus === "RELEASED"
-        ? "Open meeting report released and locked."
-        : (modalMode === "create" ? "Open meeting record generated successfully." : "Open meeting changes saved."));
+      showFeedback(modalMode === "create" ? "Open meeting record generated successfully." : "Open meeting changes saved.");
 
       if (shouldClose) {
         setIsModalOpen(false);
       }
 
-      return true;
+      return savedId ?? null;
     } catch (err: any) {
       console.error(err);
       showFeedback(`Save failed: ${err.message || err.toString()}`);
-      return false;
+      return null;
     }
   };
 
   const handleSaveSchedule = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    await persistMeetingSchedule("DRAFT", { closeAfterSave: false, sendReleaseNotification: false });
+    await persistMeetingSchedule({ closeAfterSave: false });
   };
 
-  const handleReleaseSchedule = async () => {
-    await persistMeetingSchedule("RELEASED", { closeAfterSave: false, sendReleaseNotification: true });
+  const updateMeetingStatus = async (scheduleId: string, targetStatus: "DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED") => {
+    return clientApi<OpenMeeting>(`/meetings/${scheduleId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: targetStatus }),
+    });
+  };
+
+  const handleSubmitForApproval = async () => {
+    const savedId = await persistMeetingSchedule({ closeAfterSave: false });
+    if (!savedId) return;
+    try {
+      const result = await updateMeetingStatus(savedId, "SUBMITTED_FOR_APPROVAL");
+      if (result) {
+        setMeetingStatus("SUBMITTED_FOR_APPROVAL");
+        const fresh = await clientApi<OpenMeeting[]>("/meetings");
+        setSchedules(fresh);
+        showFeedback("Open meeting report submitted for approval.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Submit failed: ${err.message || err.toString()}`);
+    }
+  };
+
+  const handleApproveSchedule = async () => {
+    if (!selectedScheduleId) return;
+    try {
+      const result = await updateMeetingStatus(selectedScheduleId, "RELEASED");
+      if (result) {
+        setMeetingStatus("RELEASED");
+        const fresh = await clientApi<OpenMeeting[]>("/meetings");
+        setSchedules(fresh);
+        await clientApi(`/notifications/send-meeting-release/${selectedScheduleId}`, { method: "POST" });
+        showFeedback("Open meeting report approved and released.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Approve failed: ${err.message || err.toString()}`);
+    }
+  };
+
+  const handleRejectSchedule = async () => {
+    if (!selectedScheduleId) return;
+    try {
+      const result = await updateMeetingStatus(selectedScheduleId, "DRAFT");
+      if (result) {
+        setMeetingStatus("DRAFT");
+        const fresh = await clientApi<OpenMeeting[]>("/meetings");
+        setSchedules(fresh);
+        showFeedback("Open meeting report sent back for revision.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Reject failed: ${err.message || err.toString()}`);
+    }
   };
 
   const handleConfirmAttendee = async (attendeeName: string) => {
@@ -579,13 +645,7 @@ export default function MeetingsClient({
   const handleReopenSchedule = async () => {
     if (!selectedScheduleId) return;
     try {
-      const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          status: "DRAFT",
-          lastModifiedBy: currentUser.name
-        }),
-      });
+      const result = await updateMeetingStatus(selectedScheduleId, "DRAFT");
       if (result) {
         setMeetingStatus("DRAFT");
         const fresh = await clientApi<OpenMeeting[]>("/meetings");
@@ -712,7 +772,7 @@ export default function MeetingsClient({
   }));
 
   const activeSchedule = schedules.find(x => x.id === selectedScheduleId);
-  const isLocked = meetingStatus === "RELEASED";
+  const isLocked = meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL";
 
   return (
     <div className="space-y-6">
@@ -825,6 +885,11 @@ export default function MeetingsClient({
                               <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
                               Released
                             </>
+                          ) : s.status === "SUBMITTED_FOR_APPROVAL" ? (
+                            <>
+                              <Send className="w-3.5 h-3.5 text-slate-500" />
+                              Pending Approval
+                            </>
                           ) : (
                             <>
                               <Clock className="w-3.5 h-3.5 text-slate-400" />
@@ -875,6 +940,11 @@ export default function MeetingsClient({
                             <CheckCircle2 className="w-3 h-3 text-slate-600 dark:text-slate-400" />
                             Released
                           </>
+                        ) : meetingStatus === "SUBMITTED_FOR_APPROVAL" ? (
+                          <>
+                            <Send className="w-3 h-3 text-slate-500" />
+                            Pending Approval
+                          </>
                         ) : (
                           <>
                             <Clock className="w-3 h-3 text-slate-400" />
@@ -905,7 +975,7 @@ export default function MeetingsClient({
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {meetingStatus === "DRAFT" && (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -913,7 +983,35 @@ export default function MeetingsClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                )}
+                {meetingStatus === "DRAFT" && canSubmitMeeting && (
+                  <button
+                    type="button"
+                    onClick={handleSubmitForApproval}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold rounded cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Submit for Approval
+                  </button>
+                )}
+                {meetingStatus === "SUBMITTED_FOR_APPROVAL" && canApproveMeeting && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleApproveSchedule}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold rounded cursor-pointer"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRejectSchedule}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white hover:bg-red-700 text-xs font-bold rounded cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Reject
+                    </button>
+                  </>
+                )}
+                {meetingStatus === "RELEASED" && canApproveMeeting && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -922,15 +1020,6 @@ export default function MeetingsClient({
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
                 )}
-                {!isLocked ? (
-                  <button
-                    type="button"
-                    onClick={handleReleaseSchedule}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 text-xs font-bold rounded cursor-pointer"
-                  >
-                    <Lock className="w-3.5 h-3.5" /> Release
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

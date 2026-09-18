@@ -25,6 +25,7 @@ import type {
   ExecutionSchedule,
   OpenMeeting,
   AuditProject,
+  AuditPlan,
   User,
   Department,
   ScheduleRow
@@ -36,7 +37,7 @@ import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems, serializePlanItems } from "@auditdesk/shared";
+import { parsePlanItems, serializePlanItems, resolveInheritedPlanContent } from "@auditdesk/shared";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -103,15 +104,17 @@ interface ScheduleClientProps {
   projects: AuditProject[];
   users: User[];
   departments: Department[];
+  auditPlans?: AuditPlan[];
   currentUser: User | null;
 }
 
-export default function ScheduleClient({ 
-  initialSchedules, 
-  projects, 
-  users, 
+export default function ScheduleClient({
+  initialSchedules,
+  projects,
+  users,
   departments,
-  currentUser 
+  auditPlans = [],
+  currentUser
 }: ScheduleClientProps) {
   const [schedules, setSchedules] = useState<ExecutionSchedule[]>(initialSchedules.filter(s => s.language !== "finding" && s.language !== "meeting"));
   
@@ -129,28 +132,39 @@ export default function ScheduleClient({
   const [departmentsStr, setDepartmentsStr] = useState("");
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("1");
-  const [deptVersionInfo, setDeptVersionInfo] = useState<{ version: string; processedCount: number; isProcessed: boolean; nextVersion: string } | null>(null);
   const [actualVisitDate, setActualVisitDate] = useState("");
   const [auditPeriod, setAuditPeriod] = useState("");
 
-  useEffect(() => {
-    if (selectedProjectId && departmentsStr) {
-      const params = new URLSearchParams({ projectId: selectedProjectId, department: departmentsStr });
-      if (selectedScheduleId) params.set("excludeScheduleId", selectedScheduleId);
-      clientApi<{ version: string; processedCount: number; isProcessed: boolean; nextVersion: string }>(
-        `/audit-plans/department-version?${params.toString()}`
-      )
-        .then((info) => {
-          setDeptVersionInfo(info);
-          if (modalMode === "create") {
-            setVisitNumber(info.isProcessed ? String(info.processedCount + 1) : "1");
-          }
-        })
-        .catch(console.error);
-    } else {
-      setDeptVersionInfo(null);
+  // "Version #" is the Planned Engagement's own department version (e.g. the
+  // "V2" already shown as the OE Plan Department's version elsewhere) - not a
+  // count recomputed from this project's own released execution schedules.
+  // Same department-resolution fallback as meetings-client.tsx's
+  // getDepartmentWithVersion: explicit auditPlanId match, then annualPlanId +
+  // topic match, then a topic-only match across all Planned Engagements.
+  const resolveDepartmentVersion = (dept: string, proj: AuditProject | null | undefined): string => {
+    if (!dept) return "V1";
+    const cleanDept = dept.trim().toLowerCase();
+
+    if (proj?.auditPlanId) {
+      const ap = auditPlans.find(a => a.id === proj.auditPlanId);
+      if (ap && ap.topic.toLowerCase() === cleanDept) return ap.version || "V1";
     }
-  }, [selectedProjectId, departmentsStr, modalMode, selectedScheduleId]);
+    if (proj?.annualPlanId) {
+      const ap = auditPlans.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === cleanDept);
+      if (ap) return ap.version || "V1";
+    }
+    const ap = auditPlans.find(a => a.topic.toLowerCase() === cleanDept);
+    return ap?.version || "V1";
+  };
+
+  useEffect(() => {
+    if (modalMode !== "create") return;
+    if (!selectedProjectId || !departmentsStr) return;
+    const proj = projects.find(p => p.id === selectedProjectId);
+    const firstDept = departmentsStr.split(",").map(d => d.trim()).filter(Boolean)[0] || "";
+    const version = resolveDepartmentVersion(firstDept, proj);
+    setVisitNumber(version.replace(/^V/i, "") || "1");
+  }, [selectedProjectId, departmentsStr, modalMode, projects, auditPlans]);
   const [auditPeriodStart, setAuditPeriodStart] = useState("");
   const [auditPeriodEnd, setAuditPeriodEnd] = useState("");
 
@@ -221,10 +235,6 @@ export default function ScheduleClient({
   const additionalAttendeesArray = additionalAttendees ? additionalAttendees.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setAdditionalAttendeesArray = (vals: string[]) => setAdditionalAttendees(vals.join(", "));
 
-  // Convert departments string to array for MultiSelect component
-  const departmentsArray = departmentsStr ? departmentsStr.split(",").map(s => s.trim()).filter(Boolean) : [];
-  const setDepartmentsArray = (vals: string[]) => setDepartmentsStr(vals.join(", "));
-
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
@@ -278,10 +288,8 @@ export default function ScheduleClient({
     setDepartmentsStr(project.departments || "");
     setAddress("HB-HQ");
 
-    // Calculate OE# (integer sequence for this project)
-    const existingForProject = schedules.filter(s => s.projectId === projectId);
-    const nextOeInt = String(existingForProject.length + 1);
-    setVisitNumber(nextOeInt);
+    // Version # is resolved by the useEffect above from the linked Planned
+    // Engagement's department version, once departmentsStr updates.
 
     // "Allow to manually but auto-fill"
     const parsedStart = project.startDate ? project.startDate.split("T")[0] : "";
@@ -319,8 +327,15 @@ export default function ScheduleClient({
     setTeamMembers(auditorNamesClean);
     setAdditionalAttendees(attendeesClean);
     setStandards("Work Procedure, work instruction, and policy");
-    setObjectives(project.objectives || "");
-    setScope(project.scope || "");
+
+    // Resolve inherited objectives/scope from the linked Planned Engagement -
+    // AuditProject.objectives/scope alone can be empty or stale.
+    const linkedAuditPlan = project.auditPlanId
+      ? auditPlans.find(ap => ap.id === project.auditPlanId)
+      : null;
+    const inherited = resolveInheritedPlanContent(project, linkedAuditPlan);
+    setObjectives(inherited.objectives);
+    setScope(inherited.scope);
 
     // Prepopulate empty rows
     setRows([]);
@@ -333,7 +348,6 @@ export default function ScheduleClient({
     setDepartmentsStr("");
     setAddress("HB-HQ");
     setVisitNumber("1");
-    setDeptVersionInfo(null);
     setActualVisitDate("");
     setAuditPeriod("");
     setAuditPeriodStart("");
@@ -595,7 +609,7 @@ export default function ScheduleClient({
         showFeedback("Please select at least one OE Scope for this slot.", "error");
         return;
       }
-      
+
       setRows(rows.map((r, idx) => idx === activeRowIndex ? draftRow : r));
       setActiveRowIndex(null);
       setDraftRow(null);
@@ -895,6 +909,16 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
+                      {/* Row: Department(s) - derived from the linked OE Plan, read-only */}
+                      <tr className="border-b border-slate-300 dark:border-slate-800/80">
+                        <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
+                          Department(s):
+                        </td>
+                        <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
+                          {departmentsStr || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive department(s)</span>}
+                        </td>
+                      </tr>
+
                       {/* Row 2: Address */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
@@ -917,16 +941,9 @@ export default function ScheduleClient({
                           Version #:
                         </td>
                         <td className="w-1/4 px-4 py-2 border-r border-slate-300 dark:border-slate-800/80">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <input 
-                              type="number"
-                              min="1"
-                              value={visitNumber ? visitNumber.replace(/^V/i, "") : "1"}
-                              onChange={(e) => setVisitNumber(e.target.value)}
-                              placeholder="1"
-                              className="w-16 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold focus:outline-none text-slate-800 dark:text-slate-100"
-                            />
-                          </div>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded font-mono font-bold text-xs bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300/80 dark:border-slate-700">
+                            {visitNumber ? `V${visitNumber.replace(/^V/i, "")}` : "V1"}
+                          </span>
                         </td>
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
                           Actual Visit Date:
@@ -1106,17 +1123,17 @@ export default function ScheduleClient({
 
                 {/* 1. Interactive Table Editor View (Screen only) */}
                 <div className="no-print overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-xs border-collapse table-fixed">
                     <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-555 dark:text-slate-400 uppercase font-sans font-bold">
                       <tr>
-                        <th className="px-4 py-3 w-16 border-r border-slate-200 dark:border-slate-800">Day</th>
-                        <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Date</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">OE Scope</th>
-                        <th className="px-4 py-3 border-r border-slate-200 dark:border-slate-800">Activities/Data/Document Request</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">Conduct by</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">P-Incharge</th>
-                        <th className="px-4 py-3 w-24 text-center">Actions</th>
+                        <th className="px-4 py-3 w-14 border-r border-slate-200 dark:border-slate-800">Day</th>
+                        <th className="px-4 py-3 w-24 border-r border-slate-200 dark:border-slate-800">Date</th>
+                        <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Time</th>
+                        <th className="px-4 py-3 w-64 border-r border-slate-200 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 w-80 border-r border-slate-200 dark:border-slate-800">Activities/Data/Document Request</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">Conduct by</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">P-Incharge</th>
+                        <th className="px-4 py-3 w-20 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80 bg-white dark:bg-slate-950">
@@ -1128,7 +1145,7 @@ export default function ScheduleClient({
                         </tr>
                       ) : (
                         rows.map((row, index) => (
-                          <tr 
+                          <tr
                             key={index}
                             onClick={() => startEditingRow(index)}
                             className="hover:bg-slate-50/50 dark:hover:bg-slate-900/35 transition-colors cursor-pointer align-top border-b border-slate-200 dark:border-slate-800 last:border-0"
@@ -1172,25 +1189,30 @@ export default function ScheduleClient({
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800">
                               <div className="flex flex-col gap-3">
                                 {(() => {
-                                  if (!row.dataRequest) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                                  const matched = availableDataRequests.find(d => d.id === row.dataRequest);
-                                  return (
-                                    <div className="flex flex-col gap-1">
-                                      <div>
-                                        <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
-                                          {row.dataRequest}
-                                        </span>
+                                  const ids = (row.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                  return ids.map(id => {
+                                    const matched = availableDataRequests.find(d => d.id === id);
+                                    return (
+                                      <div key={id} className="flex flex-col gap-1">
+                                        <div>
+                                          <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                            {id}
+                                          </span>
+                                        </div>
+                                        <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                        </div>
                                       </div>
-                                      <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                        {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
-                                      </div>
-                                    </div>
-                                  );
+                                    );
+                                  });
                                 })()}
-                                <div
-                                  className="leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
-                                  dangerouslySetInnerHTML={{ __html: row.activity || "<i>No activities set. Click to configure.</i>" }}
-                                />
+                                {row.activity && (
+                                  <div
+                                    className="leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
+                                    dangerouslySetInnerHTML={{ __html: row.activity }}
+                                  />
+                                )}
                               </div>
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-[#05375c] dark:text-sky-400 whitespace-pre-wrap">
@@ -1400,34 +1422,61 @@ export default function ScheduleClient({
                                 options={auditScopeOptions}
                                 placeholder="Select OE scope..."
                               />
-                              <div className="mt-2 min-h-[120px] p-3 border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                              <div className="mt-2">
                                 {(() => {
                                   const ids = (draftRow.auditScope || "").split(",").map(s => s.trim()).filter(Boolean);
-                                  if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-xs">No scope selected.</span>;
-                                  return ids.map(id => {
-                                    const match = availableAuditScopes.find(o => o.id === id);
-                                    return match ? match.text : id;
-                                  }).join("\n\n");
+                                  if (ids.length === 0) {
+                                    return (
+                                      <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/60 dark:bg-slate-900/50 text-xs text-slate-400 italic font-sans">
+                                        No scope selected.
+                                      </div>
+                                    );
+                                  }
+                                  const items = ids.map(id => availableAuditScopes.find(o => o.id === id) || { id, text: "" });
+                                  return (
+                                    <PlanItemEditor
+                                      sectionTitle="OE Scope"
+                                      items={items}
+                                      onChange={() => {}}
+                                      prefix="IAP-ISCP"
+                                      editable={false}
+                                      hideHeader={true}
+                                    />
+                                  );
                                 })()}
                               </div>
                             </div>
 
                             {/* Data Request Selection */}
                             <div className="space-y-1">
-                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Type of data to request</label>
+                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Type(s) of data to request</label>
                               <MultiSelect
-                                selectedValues={draftRow.dataRequest ? [draftRow.dataRequest] : []}
-                                onChange={(selected) => updateDraftField("dataRequest", selected.length > 0 ? selected[0] : "")}
+                                selectedValues={draftRow.dataRequest ? draftRow.dataRequest.split(",").map(s => s.trim()).filter(Boolean) : []}
+                                onChange={(values) => updateDraftField("dataRequest", values.join(", "))}
                                 options={dataRequestOptions}
-                                placeholder="Select data to request..."
-                                singleSelect={true}
+                                placeholder="Select type(s) of data to request..."
                               />
-                              <div className="mt-2 min-h-[120px] p-3 border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                              <div className="mt-2">
                                 {(() => {
-                                  const id = draftRow.dataRequest;
-                                  if (!id) return <span className="text-slate-400 italic font-sans text-xs">No data request selected.</span>;
-                                  const match = dataRequestOptions.find(o => o.value === id);
-                                  return match ? match.subLabel : id;
+                                  const ids = (draftRow.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  if (ids.length === 0) {
+                                    return (
+                                      <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/60 dark:bg-slate-900/50 text-xs text-slate-400 italic font-sans">
+                                        No data request selected.
+                                      </div>
+                                    );
+                                  }
+                                  const items = ids.map(id => availableDataRequests.find(o => o.id === id) || { id, text: "" });
+                                  return (
+                                    <PlanItemEditor
+                                      sectionTitle="Data Request"
+                                      items={items}
+                                      onChange={() => {}}
+                                      prefix="AP-DRQ"
+                                      editable={false}
+                                      hideHeader={true}
+                                    />
+                                  );
                                 })()}
                               </div>
                             </div>
@@ -1460,16 +1509,16 @@ export default function ScheduleClient({
 
                 {/* 3. Flat Printout Table View (Print only - hidden on screen) */}
                 <div className="hidden print:block overflow-x-auto border border-slate-350 dark:border-slate-800 rounded-md">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-xs border-collapse table-fixed">
                     <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-300 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                       <tr>
-                        <th className="px-4 py-3 w-16 border-r border-slate-300 dark:border-slate-800">Day</th>
-                        <th className="px-4 py-3 w-28 border-r border-slate-300 dark:border-slate-800">Date</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 w-14 border-r border-slate-300 dark:border-slate-800">Day</th>
+                        <th className="px-4 py-3 w-24 border-r border-slate-300 dark:border-slate-800">Date</th>
+                        <th className="px-4 py-3 w-28 border-r border-slate-300 dark:border-slate-800">Time</th>
+                        <th className="px-4 py-3 w-48 border-r border-slate-300 dark:border-slate-800">OE Scope</th>
                         <th className="px-4 py-3 border-r border-slate-300 dark:border-slate-800">Activities/Data/Document Request</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-300 dark:border-slate-800">Conduct by</th>
-                        <th className="px-4 py-3 w-40">P-Incharge</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-300 dark:border-slate-800">Conduct by</th>
+                        <th className="px-4 py-3 w-32">P-Incharge</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-300 dark:divide-slate-800 bg-white dark:bg-slate-900">
@@ -1508,20 +1557,23 @@ export default function ScheduleClient({
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800">
                             <div className="flex flex-col gap-3">
                               {(() => {
-                                if (!row.dataRequest) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                                const matched = availableDataRequests.find(d => d.id === row.dataRequest);
-                                return (
-                                  <div className="flex flex-col gap-1">
-                                    <div>
-                                      <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
-                                        {row.dataRequest}
-                                      </span>
+                                const ids = (row.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                return ids.map(id => {
+                                  const matched = availableDataRequests.find(d => d.id === id);
+                                  return (
+                                    <div key={id} className="flex flex-col gap-1">
+                                      <div>
+                                        <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                          {id}
+                                        </span>
+                                      </div>
+                                      <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                        {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                      </div>
                                     </div>
-                                    <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                      {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
-                                    </div>
-                                  </div>
-                                );
+                                  );
+                                });
                               })()}
                               <div
                                 className="leading-relaxed rich-text-content"

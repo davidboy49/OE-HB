@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -26,19 +25,6 @@ export class AuditPlansController {
   @Get()
   findAll() {
     return this.auditPlansService.findAll();
-  }
-
-  @Get('department-version')
-  getDepartmentAuditVersion(
-    @Query('projectId') projectId: string,
-    @Query('department') department: string,
-    @Query('excludeScheduleId') excludeScheduleId?: string,
-  ) {
-    return this.auditPlansService.getDepartmentAuditVersion(
-      projectId,
-      department,
-      excludeScheduleId,
-    );
   }
 
   @Get('by-annual-plan/:annualPlanId')

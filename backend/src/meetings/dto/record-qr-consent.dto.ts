@@ -42,4 +42,12 @@ export class RecordQrConsentDto {
   @IsOptional()
   @IsString()
   comments?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "That department's own Concern of the Department Owner, submitted by the person signing off for this department.",
+  })
+  @IsOptional()
+  @IsString()
+  departmentConcern?: string;
 }

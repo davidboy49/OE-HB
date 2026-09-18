@@ -388,7 +388,7 @@ export default function SettingsClient({
                     <span className="text-[10px] text-slate-500">
                       {variable === "recipientName" && "The full name of the email recipient."}
                       {variable === "projectName" && "The descriptive name of the linked Audit Plan."}
-                      {variable === "projectCode" && "The standard audit plan registration identifier (e.g. AUD-2026-001)."}
+                      {variable === "projectCode" && "The standard OE plan registration identifier (e.g. OEP-0001)."}
                       {variable === "status" && "The current workspace status of the plan or finding record."}
                       {variable === "details" && "Context details, remarks, or revision feedback."}
                       {variable === "departments" && "The auditee's corporate/department governance name."}

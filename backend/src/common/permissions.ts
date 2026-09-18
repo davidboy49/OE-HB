@@ -78,6 +78,14 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'meetings:create', description: 'Create open meetings' },
   { key: 'meetings:update', description: 'Edit open meetings' },
   { key: 'meetings:delete', description: 'Delete open meetings' },
+  {
+    key: 'meetings:submit',
+    description: 'Submit an open meeting report for approval',
+  },
+  {
+    key: 'meetings:approve',
+    description: 'Approve, reject, or reopen a submitted open meeting report',
+  },
 
   // Findings
   { key: 'findings:create', description: 'Log audit findings' },
@@ -140,6 +148,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'execution-schedules:update',
     'meetings:create',
     'meetings:update',
+    'meetings:submit',
     'findings:create',
     'findings:update',
     'attachments:create',
