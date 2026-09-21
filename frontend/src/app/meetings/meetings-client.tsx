@@ -27,21 +27,21 @@ import {
 } from "lucide-react";
 import type {
   User,
-  AuditProject,
+  OePlan,
   OpenMeeting,
   ScheduleRow,
   Department,
-  AuditPlan
-} from "@auditdesk/shared";
+  PlannedEngagement
+} from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems, resolveInheritedPlanContent } from "@auditdesk/shared";
+import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import QRCodeModal from "@/components/ui/qr-code-modal";
-import AuditPlanSelect from "@/components/ui/audit-plan-select";
+import OePlanSelect from "@/components/ui/oe-plan-select";
 import QRCode from "qrcode";
 
 // Helper to format date strings for display
@@ -128,10 +128,10 @@ const pruneConfirmations = (attendeeNames: string[], confirmations: Record<strin
 
 interface MeetingsClientProps {
   initialSchedules: OpenMeeting[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
-  auditPlans?: AuditPlan[];
+  plannedEngagements?: PlannedEngagement[];
   currentUser: User;
 }
 
@@ -140,7 +140,7 @@ export default function MeetingsClient({
   projects, 
   users, 
   departments,
-  auditPlans = [],
+  plannedEngagements = [],
   currentUser 
 }: MeetingsClientProps) {
   const [schedules, setSchedules] = useState<OpenMeeting[]>(initialSchedules);
@@ -160,7 +160,7 @@ export default function MeetingsClient({
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("01");
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
   const [leadExecution, setLeadExecution] = useState("");
   const [teamMembers, setTeamMembers] = useState("");
   const [additionalAttendees, setAdditionalAttendees] = useState("");
@@ -252,7 +252,7 @@ export default function MeetingsClient({
   const additionalAttendeesArray = additionalAttendees ? additionalAttendees.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setAdditionalAttendeesArray = (vals: string[]) => setAdditionalAttendees(vals.join(", "));
 
-  // Helper to format Department with its Version (just like Annual Plan > Audit Plan)
+  // Helper to format Department with its Version (just like Annual Plan > OE Plan)
   const getDepartmentWithVersion = (deptStr: string, projId?: string): string => {
     if (!deptStr) return "";
     const proj = projId ? projects.find(p => p.id === projId) : null;
@@ -262,24 +262,24 @@ export default function MeetingsClient({
       // If dept already has a version pattern like "Finance - V1", return as-is
       if (/\s*-\s*V\d+/i.test(dept)) return dept;
 
-      // 1. Check if linked project has an explicit auditPlanId
-      if (proj?.auditPlanId) {
-        const ap = auditPlans.find(a => a.id === proj.auditPlanId);
+      // 1. Check if linked project has an explicit plannedEngagementId
+      if (proj?.plannedEngagementId) {
+        const ap = plannedEngagements.find(a => a.id === proj.plannedEngagementId);
         if (ap && (ap.topic.toLowerCase() === dept.toLowerCase() || depts.length === 1)) {
           return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
         }
       }
 
-      // 2. Check if linked project has an annualPlanId with matching audit plan topic
+      // 2. Check if linked project has an annualPlanId with matching OE plan topic
       if (proj?.annualPlanId) {
-        const ap = auditPlans.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === dept.toLowerCase());
+        const ap = plannedEngagements.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === dept.toLowerCase());
         if (ap) {
           return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
         }
       }
 
-      // 3. Match by topic across all audit plans
-      const ap = auditPlans.find(a => a.topic.toLowerCase() === dept.toLowerCase());
+      // 3. Match by topic across all OE plans
+      const ap = plannedEngagements.find(a => a.topic.toLowerCase() === dept.toLowerCase());
       if (ap) {
         return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
       }
@@ -303,10 +303,10 @@ export default function MeetingsClient({
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
     if (currentUser.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser.id || proj.leadAuditorId === currentUser.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser.name)) return true;
-    if (proj.auditorIds?.includes(currentUser.id)) return true;
+    if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser.name)) return true;
+    if (proj.memberIds?.includes(currentUser.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser.id) || picList.includes(currentUser.name)) return true;
     return false;
@@ -335,11 +335,11 @@ export default function MeetingsClient({
     const proj = projects.find(p => p.id === projId);
     if (proj) {
       // Resolve inherited objectives/scope from the linked Planned Engagement -
-      // AuditProject.objectives/scope alone can be empty or stale.
-      const linkedAuditPlan = proj.auditPlanId
-        ? auditPlans.find(a => a.id === proj.auditPlanId)
+      // OePlan.objectives/scope alone can be empty or stale.
+      const linkedPlannedEngagement = proj.plannedEngagementId
+        ? plannedEngagements.find(a => a.id === proj.plannedEngagementId)
         : null;
-      const inherited = resolveInheritedPlanContent(proj, linkedAuditPlan);
+      const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
       setObjectives(inherited.objectives);
       setScope(inherited.scope);
       if (proj.departments) {
@@ -351,15 +351,15 @@ export default function MeetingsClient({
       
       const parsedEnd = proj.endDate ? proj.endDate.split("T")[0] : "";
       const period = parsedStart && parsedEnd ? `${parsedStart} to ${parsedEnd}` : parsedStart || parsedEnd || "";
-      setAuditPeriod(period);
+      setOePeriod(period);
       
       // Auto-derive OE Leader from project
-      const leadUser = users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId);
-      const leadName = leadUser ? leadUser.name : (proj.leadAuditorId || "");
+      const leadUser = users.find(u => u.id === proj.leaderId || u.name === proj.leaderId);
+      const leadName = leadUser ? leadUser.name : (proj.leaderId || "");
 
-      // Auto-derive Auditors from project
-      const auditorNamesClean = proj.auditorNames
-        ? proj.auditorNames.split(",").map(s => {
+      // Auto-derive OE Members from project
+      const memberNamesClean = proj.memberNames
+        ? proj.memberNames.split(",").map(s => {
             const clean = s.trim();
             const u = users.find(user => user.name === clean || user.id === clean);
             return u ? u.name : clean;
@@ -376,7 +376,7 @@ export default function MeetingsClient({
         : "";
 
       setLeadExecution(leadName);
-      setTeamMembers(auditorNamesClean);
+      setTeamMembers(memberNamesClean);
       setAdditionalAttendees(attendeesClean);
     }
   };
@@ -392,7 +392,7 @@ export default function MeetingsClient({
     setAddress("HB-HQ");
     setVisitNumber("01");
     setActualVisitDate("");
-    setAuditPeriod("");
+    setOePeriod("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
@@ -414,7 +414,7 @@ export default function MeetingsClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
+    setOePeriod(sched.oePeriod);
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
     setAdditionalAttendees(sched.additionalAttendees);
@@ -473,7 +473,7 @@ export default function MeetingsClient({
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
@@ -1033,10 +1033,10 @@ export default function MeetingsClient({
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
               
-              {/* Linked Audit Plan Card */}
+              {/* Linked OE Plan Card */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 p-5 shadow-sm">
                 
-                {/* Linked Audit Plan Left section */}
+                {/* Linked OE Plan Left section */}
                 <div className="w-full">
                   <div className="flex border border-slate-250 dark:border-slate-800 rounded-lg h-12 items-center">
                     <div className="bg-slate-50 dark:bg-slate-900/60 px-4 h-full flex items-center font-roboto font-bold text-xs text-slate-700 dark:text-slate-355 border-r border-slate-250 dark:border-slate-800 shrink-0 w-36 rounded-l-lg">
@@ -1044,7 +1044,7 @@ export default function MeetingsClient({
                     </div>
                     <div className="px-4 h-full flex items-center flex-1 bg-white dark:bg-slate-950">
                       {modalMode === "create" ? (
-                        <AuditPlanSelect
+                        <OePlanSelect
                           projects={projects.filter(p => isProjectMember(p) && p.status === "RELEASED")}
                           selectedProjectId={selectedProjectId}
                           onSelect={handleProjectSelect}
@@ -1195,9 +1195,9 @@ export default function MeetingsClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="Objectives"
-                            items={parsePlanItems(objectives, "IAP-OBJ")}
+                            items={parsePlanItems(objectives, "IOE-OBJ")}
                             onChange={() => {}}
-                            prefix="IAP-OBJ"
+                            prefix="IOE-OBJ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1212,9 +1212,9 @@ export default function MeetingsClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="OE Scope"
-                            items={parsePlanItems(scope, "IAP-ISCP")}
+                            items={parsePlanItems(scope, "IOE-SCP")}
                             onChange={() => {}}
-                            prefix="IAP-ISCP"
+                            prefix="IOE-SCP"
                             editable={false}
                             hideHeader={true}
                           />

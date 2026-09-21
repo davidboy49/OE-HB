@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import { getCurrentUserServer } from "@/lib/auth";
-import type { User, Department, UserGroup } from "@auditdesk/shared";
+import type { User, Department, UserGroup } from "@oeportal/shared";
 import type { PermissionDef } from "./permission-types";
 import UsersClient from "./users-client";
 

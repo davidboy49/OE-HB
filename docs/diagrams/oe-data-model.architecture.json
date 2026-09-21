@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OE Portal data model",
+    "output": "oe-data-model.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "meeting",
+      "type": "database",
+      "label": "OpenMeeting",
+      "sublabel": "ownerName",
+      "pos": [
+        600,
+        50
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "annual",
+      "type": "database",
+      "label": "AnnualPlan",
+      "sublabel": "createdBy",
+      "pos": [
+        30,
+        170
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "engagement",
+      "type": "database",
+      "label": "PlannedEngagement",
+      "sublabel": "scope required",
+      "pos": [
+        290,
+        170
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "oeplan",
+      "type": "database",
+      "label": "OePlan",
+      "sublabel": "code OEP-0001",
+      "tag": "createdBy",
+      "pos": [
+        600,
+        170
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "schedule",
+      "type": "database",
+      "label": "ExecutionSchedule",
+      "sublabel": "ownerName",
+      "pos": [
+        880,
+        170
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "files",
+      "type": "database",
+      "label": "Files",
+      "sublabel": "Attachment, Document, Report",
+      "pos": [
+        340,
+        290
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "user",
+      "type": "security",
+      "label": "User",
+      "sublabel": "role, group",
+      "pos": [
+        600,
+        290
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "finding",
+      "type": "database",
+      "label": "Finding",
+      "sublabel": "severity, status",
+      "pos": [
+        880,
+        290
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "group",
+      "type": "security",
+      "label": "UserGroup",
+      "sublabel": "permission grants",
+      "pos": [
+        600,
+        410
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "permission",
+      "type": "security",
+      "label": "Permission",
+      "sublabel": "oe-plans:create",
+      "pos": [
+        340,
+        410
+      ],
+      "size": [
+        120,
+        64
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "engagement-annual",
+      "from": "engagement",
+      "to": "annual",
+      "label": "annualPlanId"
+    },
+    {
+      "id": "oeplan-engagement",
+      "from": "oeplan",
+      "to": "engagement",
+      "label": "plannedEngagementId"
+    },
+    {
+      "id": "schedule-oeplan",
+      "from": "schedule",
+      "to": "oeplan",
+      "label": "projectId"
+    },
+    {
+      "id": "meeting-oeplan",
+      "from": "meeting",
+      "to": "oeplan",
+      "label": "projectId",
+      "labelDy": 24
+    },
+    {
+      "id": "files-oeplan",
+      "from": "files",
+      "to": "oeplan",
+      "label": "projectId"
+    },
+    {
+      "id": "finding-schedule",
+      "from": "finding",
+      "to": "schedule",
+      "label": "executionScheduleId",
+      "variant": "emphasis"
+    },
+    {
+      "id": "finding-user",
+      "from": "finding",
+      "to": "user",
+      "label": "memberId",
+      "variant": "dashed"
+    },
+    {
+      "id": "user-oeplan",
+      "from": "user",
+      "to": "oeplan",
+      "label": "plan members",
+      "variant": "dashed"
+    },
+    {
+      "id": "user-group",
+      "from": "user",
+      "to": "group",
+      "label": "groupId",
+      "variant": "security",
+      "labelDy": 24
+    },
+    {
+      "id": "group-permission",
+      "from": "group",
+      "to": "permission",
+      "label": "grants (many)",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Reading the arrows",
+      "items": [
+        "Arrows point from a child table to its parent; labels are the foreign key",
+        "Dashed lines are the member links",
+        "Deleting an OePlan removes its meetings, schedules, files and reports"
+      ]
+    }
+  ]
+}

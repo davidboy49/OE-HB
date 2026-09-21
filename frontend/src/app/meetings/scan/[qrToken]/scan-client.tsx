@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { clientApi } from "@/lib/apiClient";
-import { formatPlanItemsAsText } from "@auditdesk/shared";
+import { formatPlanItemsAsText } from "@oeportal/shared";
 
 interface ScanClientProps {
   schedule: any;
@@ -137,7 +137,7 @@ export default function ScanClient({
             <Link 
               href="/meetings" 
               className="p-2 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-              title="Return to Audit Desk"
+              title="Return to OE Portal"
             >
               <ArrowLeft className="w-4 h-4" />
             </Link>
@@ -151,7 +151,7 @@ export default function ScanClient({
                 </span>
               </div>
               <h1 className="text-base sm:text-lg font-bold text-white tracking-tight line-clamp-1">
-                {schedule.projectName || "Audit Open Meeting Agenda & Scope"}
+                {schedule.projectName || "OE Open Meeting Agenda & Scope"}
               </h1>
             </div>
           </div>
@@ -184,7 +184,7 @@ export default function ScanClient({
                 <span>Visit Date: <strong className="text-white">{schedule.actualVisitDate || "Scheduled"}</strong></span>
                 <span className="text-slate-600">•</span>
                 <Clock className="w-4 h-4 text-indigo-400" />
-                <span>Audit Period: <strong className="text-white">{schedule.auditPeriod || "N/A"}</strong></span>
+                <span>OE Period: <strong className="text-white">{schedule.oePeriod || "N/A"}</strong></span>
               </div>
               
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
@@ -194,11 +194,11 @@ export default function ScanClient({
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400">Lead Execution Auditor</span>
+                <span className="text-slate-400">Lead Execution OE Leader</span>
                 <p className="font-semibold text-slate-200 mt-1">{schedule.leadExecution || "OE Leader"}</p>
               </div>
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400">Target Audit Location</span>
+                <span className="text-slate-400">Target OE Location</span>
                 <p className="font-semibold text-slate-200 mt-1 truncate">{schedule.address || "HQ Offices"}</p>
               </div>
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
@@ -266,7 +266,7 @@ export default function ScanClient({
           </div>
         </div>
 
-        {/* Scoped Agenda & Audit Details */}
+        {/* Scoped Agenda & OE Details */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Left 2 Columns: Agenda & Scope */}
@@ -281,7 +281,7 @@ export default function ScanClient({
 
               <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
                 <div>
-                  <h4 className="font-semibold text-slate-200 mb-1 text-xs">Audit Objectives:</h4>
+                  <h4 className="font-semibold text-slate-200 mb-1 text-xs">OE Objectives:</h4>
                   <p className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 text-slate-300 whitespace-pre-wrap">
                     {formatPlanItemsAsText(schedule.objectives) || `Evaluate internal controls, compliance with procedures, operational efficiency, and risk mitigation across ${selectedDept} workflows.`}
                   </p>
@@ -372,7 +372,7 @@ export default function ScanClient({
 
           </div>
 
-          {/* Right Column: Consent Sign-off & Audit Log */}
+          {/* Right Column: Consent Sign-off & Activity Log */}
           <div className="space-y-6">
             
             {/* Consent Card */}
@@ -427,7 +427,7 @@ export default function ScanClient({
                 </div>
               )}
 
-              {/* Interactive Form for Auditee or Auditor */}
+              {/* Interactive Form for Department PIC or OE Member */}
               <div className="space-y-3 pt-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="space-y-1">
@@ -461,7 +461,7 @@ export default function ScanClient({
                   rows={3}
                   value={departmentConcernInput}
                   onChange={(e) => setDepartmentConcernInput(e.target.value)}
-                  placeholder="Enter this department's own concerns for the audit scope..."
+                  placeholder="Enter this department's own concerns for the OE scope..."
                   className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500"
                 />
 
@@ -504,13 +504,13 @@ export default function ScanClient({
                 </div>
 
                 <p className="text-[11px] text-slate-400 text-center pt-1 font-mono">
-                  Sign-off is timestamped and recorded in the audit trail.
+                  Sign-off is timestamped and recorded in the activity log.
                 </p>
               </div>
 
             </div>
 
-            {/* Audit Trail Summary Card */}
+            {/* Activity Log Summary Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-md">
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Overall Meeting Consent Status
@@ -546,7 +546,7 @@ export default function ScanClient({
 
       {/* Footer */}
       <footer className="border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-400">
-        AuditDesk Corporate Governance Platform • ISO 19011 Compliant Audit Management System
+        OE Portal Corporate Governance Platform • Operational Excellence Management System
       </footer>
 
     </div>

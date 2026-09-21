@@ -30,7 +30,7 @@ export class CreateOpenMeetingDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  auditPeriod!: string;
+  oePeriod!: string;
 
   @ApiProperty()
   @IsString()
@@ -61,7 +61,7 @@ export class CreateOpenMeetingDto {
   standards!: string;
 
   @ApiPropertyOptional({
-    description: 'Free-form status string; defaults to DRAFT.',
+    description: 'Ignored - a new Open Meeting always starts as DRAFT.',
   })
   @IsOptional()
   @IsString()

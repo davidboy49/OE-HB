@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_PERMISSIONS_BY_ROLE, PERMISSIONS, PERMISSION_KEYS } from './permissions';
-import type { UserRole } from '@auditdesk/shared';
+import type { UserRole } from '@oeportal/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 /**

@@ -1,4 +1,4 @@
-import type { UserRole } from '@auditdesk/shared';
+import type { UserRole } from '@oeportal/shared';
 
 /** Decoded JWT payload, attached to `req.user` by JwtStrategy. */
 export interface AuthenticatedUser {

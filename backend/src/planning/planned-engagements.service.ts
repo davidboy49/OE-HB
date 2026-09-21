@@ -4,40 +4,40 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasPlanItemContent } from '@auditdesk/shared';
-import type { AuditPlan } from '@auditdesk/shared';
+import { hasPlanItemContent } from '@oeportal/shared';
+import type { PlannedEngagement } from '@oeportal/shared';
 
 const SCOPE_REQUIRED_MESSAGE =
   'Scope is required: add at least one scope item before saving the Planned Engagement.';
 
 /**
- * Shape returned by getEnrichedAuditPlans in the original dbService (typed `any[]` there).
- * Adds the two computed fields the shared AuditPlan type doesn't carry.
+ * Shape returned by getEnrichedPlannedEngagements in the original dbService (typed `any[]` there).
+ * Adds the two computed fields the shared PlannedEngagement type doesn't carry.
  */
-export interface EnrichedAuditPlan extends AuditPlan {
+export interface EnrichedPlannedEngagement extends PlannedEngagement {
   processedCount: number;
   totalSchedules: number;
 }
 
 @Injectable()
-export class AuditPlansService {
+export class PlannedEngagementsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Mirrors dbService.getEnrichedAuditPlans. Computes, for every audit plan:
+   * Mirrors dbService.getEnrichedPlannedEngagements. Computes, for every OE plan:
    *  - a locked version number (based on occurrence order among APPROVED annual plans' topics)
    *    or a preview version number (for DRAFT annual plans), and
-   *  - how many of its linked execution schedules (across all its audit projects) are
+   *  - how many of its linked execution schedules (across all its OE plans) are
    *    RELEASED/APPROVED for a matching department.
    * Used internally by findAll, findByAnnualPlan, create, and update.
    */
-  private async getEnrichedAuditPlans(
+  private async getEnrichedPlannedEngagements(
     annualPlanIdFilter?: string,
-  ): Promise<EnrichedAuditPlan[]> {
-    const allPlans = await this.prisma.auditPlan.findMany({
+  ): Promise<EnrichedPlannedEngagement[]> {
+    const allPlans = await this.prisma.plannedEngagement.findMany({
       include: {
         annualPlan: true,
-        auditProjects: {
+        oePlans: {
           include: {
             executionSchedules: {
               select: {
@@ -66,14 +66,14 @@ export class AuditPlansService {
     const runningApprovedOccurrence: Record<string, number> = {};
     const runningDraftOccurrence: Record<string, number> = {};
 
-    const enriched: EnrichedAuditPlan[] = allPlans.map((p) => {
+    const enriched: EnrichedPlannedEngagement[] = allPlans.map((p) => {
       const deptKey = (p.topic || '').trim().toLowerCase();
       const isApproved = p.annualPlan?.status === 'APPROVED';
 
       let processedCount = 0;
       let totalSchedules = 0;
 
-      for (const proj of p.auditProjects || []) {
+      for (const proj of p.oePlans || []) {
         for (const sched of proj.executionSchedules || []) {
           totalSchedules++;
           const schedDepts = (sched.departments || '').toLowerCase();
@@ -135,10 +135,10 @@ export class AuditPlansService {
         processedCount,
         isProcessed,
         isApproved,
-        isUsed: (p.auditProjects || []).length > 0,
-        individualPlanStatus: [...(p.auditProjects || [])].sort(
+        isUsed: (p.oePlans || []).length > 0,
+        individualPlanStatus: [...(p.oePlans || [])].sort(
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-        )[0]?.status as AuditPlan['individualPlanStatus'],
+        )[0]?.status as PlannedEngagement['individualPlanStatus'],
         annualPlanStatus: p.annualPlan?.status || 'DRAFT',
         totalSchedules,
         createdAt: p.createdAt.toISOString(),
@@ -153,12 +153,12 @@ export class AuditPlansService {
     return filtered.reverse();
   }
 
-  async findAll(): Promise<EnrichedAuditPlan[]> {
-    return this.getEnrichedAuditPlans();
+  async findAll(): Promise<EnrichedPlannedEngagement[]> {
+    return this.getEnrichedPlannedEngagements();
   }
 
-  async findByAnnualPlan(annualPlanId: string): Promise<EnrichedAuditPlan[]> {
-    return this.getEnrichedAuditPlans(annualPlanId);
+  async findByAnnualPlan(annualPlanId: string): Promise<EnrichedPlannedEngagement[]> {
+    return this.getEnrichedPlannedEngagements(annualPlanId);
   }
 
   async create(
@@ -175,11 +175,11 @@ export class AuditPlansService {
     purpose: string,
     objectives: string = '',
     scope: string = '',
-  ): Promise<EnrichedAuditPlan> {
+  ): Promise<EnrichedPlannedEngagement> {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
-    const p = await this.prisma.auditPlan.create({
+    const p = await this.prisma.plannedEngagement.create({
       data: {
         annualPlanId,
         no,
@@ -197,7 +197,7 @@ export class AuditPlansService {
       },
     });
 
-    const allPlans = await this.getEnrichedAuditPlans(annualPlanId);
+    const allPlans = await this.getEnrichedPlannedEngagements(annualPlanId);
     const createdPlan = allPlans.find((plan) => plan.id === p.id);
     if (createdPlan) {
       return createdPlan;
@@ -241,11 +241,11 @@ export class AuditPlansService {
     purpose: string,
     objectives: string = '',
     scope: string = '',
-  ): Promise<EnrichedAuditPlan> {
+  ): Promise<EnrichedPlannedEngagement> {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
-    const p = await this.prisma.auditPlan.update({
+    const p = await this.prisma.plannedEngagement.update({
       where: { id },
       data: {
         projectName,
@@ -262,7 +262,7 @@ export class AuditPlansService {
       },
     });
 
-    const allPlans = await this.getEnrichedAuditPlans(p.annualPlanId);
+    const allPlans = await this.getEnrichedPlannedEngagements(p.annualPlanId);
     const updatedPlan = allPlans.find((plan) => plan.id === p.id);
     if (updatedPlan) {
       return updatedPlan;
@@ -294,15 +294,15 @@ export class AuditPlansService {
   }
 
   async remove(id: string): Promise<boolean> {
-    const inUse = await this.prisma.auditProject.findFirst({
-      where: { auditPlanId: id },
+    const inUse = await this.prisma.oePlan.findFirst({
+      where: { plannedEngagementId: id },
     });
     if (inUse) {
       throw new ConflictException(
         'This Planned Engagement is already in use by an Individual OE Plan and cannot be deleted.',
       );
     }
-    await this.prisma.auditPlan.delete({ where: { id } });
+    await this.prisma.plannedEngagement.delete({ where: { id } });
     return true;
   }
 }

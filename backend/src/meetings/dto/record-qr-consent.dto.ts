@@ -14,7 +14,7 @@ const CONSENT_STATUSES = ['ACCEPTED', 'REVISION_REQUESTED'];
  *
  * Deviates from actions.ts's recordDepartmentConsentAction, which derived
  * acceptedByUserId/Name/Email from getCurrentUserServer() (falling back to a mock
- * admin user when unauthenticated). This route is @Public() - an external auditee
+ * admin user when unauthenticated). This route is @Public() - an external department PIC
  * scanning a physical QR code has no account/JWT - so the person's name/email are
  * collected directly as plain form fields instead, and acceptedByUserId is left
  * empty (there's no real user id for an anonymous consenter).

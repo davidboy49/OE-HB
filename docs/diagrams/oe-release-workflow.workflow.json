@@ -1,0 +1,194 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "OE release-gated workflow",
+    "output": "oe-release-workflow.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "Plan drafting"
+        },
+        "backend": {
+          "label": "System step"
+        },
+        "security": {
+          "label": "Approval gate"
+        },
+        "external": {
+          "label": "Department PIC"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "annual",
+      "label": "Annual OE Plan"
+    },
+    {
+      "id": "oeplan",
+      "label": "Individual OE Plan"
+    },
+    {
+      "id": "meetings",
+      "label": "Open Meeting"
+    },
+    {
+      "id": "delivery",
+      "label": "Schedule + Findings"
+    }
+  ],
+  "mainPath": [
+    "draft",
+    "approve",
+    "create",
+    "release",
+    "schedule",
+    "findings"
+  ],
+  "nodes": [
+    {
+      "id": "draft",
+      "lane": "annual",
+      "col": 0,
+      "type": "frontend",
+      "label": "Draft plan",
+      "sublabel": "engagements + scope",
+      "tag": "scope required",
+      "width": 150
+    },
+    {
+      "id": "approve",
+      "lane": "annual",
+      "col": 1,
+      "type": "security",
+      "label": "Approve",
+      "sublabel": "submit, then approve",
+      "tag": "human gate",
+      "width": 150
+    },
+    {
+      "id": "create",
+      "lane": "oeplan",
+      "col": 2,
+      "type": "backend",
+      "label": "Create OE Plan",
+      "sublabel": "code OEP-0001",
+      "tag": "approved plan only",
+      "width": 150
+    },
+    {
+      "id": "release",
+      "lane": "oeplan",
+      "col": 3,
+      "type": "security",
+      "label": "Release",
+      "sublabel": "submit, then approve",
+      "tag": "human gate",
+      "width": 150
+    },
+    {
+      "id": "meeting",
+      "lane": "meetings",
+      "col": 4,
+      "type": "backend",
+      "label": "Open Meeting",
+      "sublabel": "submit, leader approves",
+      "width": 150
+    },
+    {
+      "id": "consent",
+      "lane": "meetings",
+      "col": 5,
+      "type": "external",
+      "label": "PIC consent",
+      "sublabel": "public QR scan",
+      "width": 150
+    },
+    {
+      "id": "schedule",
+      "lane": "delivery",
+      "col": 4,
+      "type": "backend",
+      "label": "Schedule",
+      "sublabel": "execution, released",
+      "width": 150
+    },
+    {
+      "id": "findings",
+      "lane": "delivery",
+      "col": 5,
+      "type": "backend",
+      "label": "Log findings",
+      "sublabel": "released schedule only",
+      "width": 150
+    }
+  ],
+  "edges": [
+    {
+      "from": "draft",
+      "to": "approve",
+      "label": "submit",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "from": "approve",
+      "to": "create",
+      "label": "approved",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "from": "create",
+      "to": "release",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "from": "release",
+      "to": "meeting",
+      "label": "released",
+      "role": "branch"
+    },
+    {
+      "from": "meeting",
+      "to": "consent",
+      "role": "branch"
+    },
+    {
+      "from": "release",
+      "to": "schedule",
+      "label": "released",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "from": "schedule",
+      "to": "findings",
+      "label": "released",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "from": "approve",
+      "to": "draft",
+      "label": "rejected",
+      "role": "error",
+      "variant": "security",
+      "route": "up-channel",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "from": "release",
+      "to": "create",
+      "label": "rejected",
+      "role": "error",
+      "variant": "security"
+    }
+  ]
+}

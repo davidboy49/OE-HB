@@ -2,23 +2,23 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
-import type { AuditProject } from "@auditdesk/shared";
+import type { OePlan } from "@oeportal/shared";
 
-interface AuditPlanSelectProps {
-  projects: AuditProject[];
+interface OePlanSelectProps {
+  projects: OePlan[];
   selectedProjectId: string;
   onSelect: (projectId: string) => void;
   placeholder?: string;
   disabled?: boolean;
 }
 
-export default function AuditPlanSelect({
+export default function OePlanSelect({
   projects,
   selectedProjectId,
   onSelect,
-  placeholder = "Choose Audit Plan...",
+  placeholder = "Choose OE Plan...",
   disabled = false,
-}: AuditPlanSelectProps) {
+}: OePlanSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -91,7 +91,7 @@ export default function AuditPlanSelect({
           <div className="overflow-y-auto max-h-52 divide-y divide-slate-100 dark:divide-slate-800/40">
             {filteredProjects.length === 0 ? (
               <div className="p-3 text-slate-400 italic text-xs text-center">
-                No matching Audit Plans found.
+                No matching OE Plans found.
               </div>
             ) : (
               filteredProjects.map((p) => {

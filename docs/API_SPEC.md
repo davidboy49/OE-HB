@@ -1,4 +1,4 @@
-# AuditDesk API
+# OE Portal API
 
 The backend (NestJS) is the single source of truth for the REST API. Every controller carries `@nestjs/swagger` decorators, so the docs below are generated from the actual route/DTO definitions and can't drift out of sync the way a hand-written spec would.
 
@@ -14,13 +14,13 @@ The backend (NestJS) is the single source of truth for the REST API. Every contr
 | Users | `/users` (includes `PATCH /users/:id/password`, admin-only) |
 | User Groups | `/user-groups` (includes `GET/PATCH /user-groups/:id/permissions`) |
 | Permissions | `/permissions` (lists every capability key + description, for rendering a permission matrix) |
-| Audit Projects | `/audit-projects` |
+| OE Plans | `/oe-plans` |
 | Execution Schedules | `/execution-schedules` (`/execution-schedules/qr/:qrToken` is public) |
 | Meetings | `/meetings` (`/meetings/qr/:qrToken` and its consent endpoint are public - the QR-code consent flow) |
 | Findings | `/findings` |
 | Attachments | `/attachments` |
 | Annual Plans | `/annual-plans` |
-| Audit Plans | `/audit-plans` |
+| OE Plans | `/planned-engagements` |
 | Notifications | `/notifications` (SMTP config, email templates, and the email-sending endpoints) |
 | Activity Logs | `/activity-logs` (admin only) |
 

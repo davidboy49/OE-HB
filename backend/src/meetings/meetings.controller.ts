@@ -118,7 +118,7 @@ export class MeetingsController {
 
   /**
    * Mirrors getOpenMeetingByQrAction (actions.ts:823-832). Public: an unauthenticated
-   * auditee scanning a physical QR code has no account. Drops `currentUser` from the
+   * department PIC scanning a physical QR code has no account. Drops `currentUser` from the
    * response entirely - there's no reliable identity for an anonymous public request.
    */
   @Public()

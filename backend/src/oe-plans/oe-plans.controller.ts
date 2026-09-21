@@ -9,38 +9,38 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AuditProjectsService } from './audit-projects.service';
-import { CreateAuditProjectDto } from './dto/create-audit-project.dto';
-import { UpdateAuditProjectDto } from './dto/update-audit-project.dto';
+import { OePlansService } from './oe-plans.service';
+import { CreateOePlanDto } from './dto/create-oe-plan.dto';
+import { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
-@ApiTags('audit-projects')
+@ApiTags('oe-plans')
 @ApiBearerAuth()
-@Controller('audit-projects')
-export class AuditProjectsController {
-  constructor(private readonly auditProjectsService: AuditProjectsService) {}
+@Controller('oe-plans')
+export class OePlansController {
+  constructor(private readonly oePlansService: OePlansService) {}
 
   @Get()
   findAll() {
-    return this.auditProjectsService.findAll();
+    return this.oePlansService.findAll();
   }
 
   @Post()
-  @RequirePermission('audit-projects:create')
+  @RequirePermission('oe-plans:create')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req, result) => ({
     action: 'CREATE_PROJECT',
     details: `Created project "${req.body.name}" (Code: ${result.code})`,
   }))
   create(
-    @Body() dto: CreateAuditProjectDto,
+    @Body() dto: CreateOePlanDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.auditProjectsService.create(
+    return this.oePlansService.create(
       dto.name,
       dto.code ?? 'AUTO',
       dto.status,
@@ -48,10 +48,10 @@ export class AuditProjectsController {
       dto.planningDetails,
       dto.startDate,
       dto.endDate,
-      dto.leadAuditorId ?? null,
+      dto.leaderId ?? null,
       dto.departments ?? '',
       dto.annualPlanId ?? null,
-      dto.auditPlanId ?? null,
+      dto.plannedEngagementId ?? null,
       user.name,
     );
   }
@@ -70,21 +70,21 @@ export class AuditProjectsController {
   }))
   async update(
     @Param('id') id: string,
-    @Body() dto: UpdateAuditProjectDto,
+    @Body() dto: UpdateOePlanDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.auditProjectsService.assertUpdateAllowed(id, dto, user);
-    return this.auditProjectsService.update(id, dto);
+    await this.oePlansService.assertUpdateAllowed(id, dto, user);
+    return this.oePlansService.update(id, dto);
   }
 
   @Delete(':id')
-  @RequirePermission('audit-projects:delete')
+  @RequirePermission('oe-plans:delete')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'DELETE_PROJECT',
     details: `Deleted project ID: ${req.params.id}`,
   }))
   remove(@Param('id') id: string) {
-    return this.auditProjectsService.remove(id);
+    return this.oePlansService.remove(id);
   }
 }

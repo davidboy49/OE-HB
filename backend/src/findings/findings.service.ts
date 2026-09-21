@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertProjectNotClosed } from '../common/assert-project-status';
-import type { Finding } from '@auditdesk/shared';
+import type { Finding } from '@oeportal/shared';
 
 const findingInclude = {
   executionSchedule: {
@@ -13,7 +13,7 @@ const findingInclude = {
       project: true,
     },
   },
-  auditor: true,
+  member: true,
 } as const;
 
 @Injectable()
@@ -35,8 +35,8 @@ export class FindingsService {
       executionScheduleId: f.executionScheduleId,
       projectId: f.executionSchedule.projectId,
       projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
+      memberId: f.memberId,
+      memberName: f.member.name,
       createdAt: f.createdAt.toISOString(),
     }));
   }
@@ -48,7 +48,7 @@ export class FindingsService {
     status: any,
     recommendation: string,
     executionScheduleId: string,
-    auditorId: string,
+    memberId: string,
   ): Promise<Finding> {
     const sched = await this.prisma.executionSchedule.findUnique({
       where: { id: executionScheduleId },
@@ -70,7 +70,7 @@ export class FindingsService {
         status,
         recommendation,
         executionScheduleId,
-        auditorId,
+        memberId,
       },
       include: findingInclude,
     });
@@ -84,8 +84,8 @@ export class FindingsService {
       executionScheduleId: f.executionScheduleId,
       projectId: f.executionSchedule.projectId,
       projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
+      memberId: f.memberId,
+      memberName: f.member.name,
       createdAt: f.createdAt.toISOString(),
     };
   }
@@ -106,8 +106,8 @@ export class FindingsService {
       executionScheduleId: f.executionScheduleId,
       projectId: f.executionSchedule.projectId,
       projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
+      memberId: f.memberId,
+      memberName: f.member.name,
       createdAt: f.createdAt.toISOString(),
     };
   }
@@ -137,8 +137,8 @@ export class FindingsService {
       executionScheduleId: f.executionScheduleId,
       projectId: f.executionSchedule.projectId,
       projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
+      memberId: f.memberId,
+      memberName: f.member.name,
       createdAt: f.createdAt.toISOString(),
     };
   }

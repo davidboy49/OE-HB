@@ -42,7 +42,7 @@ export class FindingsController {
       dto.status,
       dto.recommendation,
       dto.executionScheduleId,
-      dto.auditorId,
+      dto.memberId,
     );
   }
 

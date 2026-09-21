@@ -35,14 +35,14 @@ import {
   AlertCircle,
   Eye
 } from "lucide-react";
-import type { User, AuditProject, Department, ExecutionSchedule } from "@auditdesk/shared";
-import { parseFindingAlerts, FindingAlertItem, groupFindingAlerts, GroupedFindingAlert } from "@auditdesk/shared";
+import type { User, OePlan, Department, ExecutionSchedule } from "@oeportal/shared";
+import { parseFindingAlerts, FindingAlertItem, groupFindingAlerts, GroupedFindingAlert } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import MultiSelect from "@/components/ui/multi-select";
 
 interface FindingsAlertsClientProps {
   initialSchedules: ExecutionSchedule[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
   currentUser: User;
@@ -399,7 +399,7 @@ export default function FindingsAlertsClient({
 
         {/* Dropdowns & Search Inputs Row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Audit Project Filter - Custom MultiSelect singleSelect */}
+          {/* OE Plan Filter - Custom MultiSelect singleSelect */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">
               Filter by OE Project
@@ -495,7 +495,7 @@ export default function FindingsAlertsClient({
                         {idx + 1}
                       </td>
 
-                      {/* 2. Audit Plan (Code & Project) */}
+                      {/* 2. OE Plan (Code & Project) */}
                       <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 font-sans text-slate-800 dark:text-slate-200 font-semibold space-y-1">
                         <div className="flex items-center gap-2">
                         </div>
@@ -506,7 +506,7 @@ export default function FindingsAlertsClient({
                         </div>
                       </td>
 
-                      {/* 3. Department of the Audit Plan */}
+                      {/* 3. Department of the OE Plan */}
                       <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 space-y-1">
                         {group.departments ? (
                           <div className="font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
@@ -580,7 +580,7 @@ export default function FindingsAlertsClient({
             <div className="col-span-full py-16 text-center text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
               <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto opacity-70 mb-2" />
               <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">No alert items found</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">All audit findings rows meet required date and resolution criteria.</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">All OE findings rows meet required date and resolution criteria.</p>
             </div>
           ) : (
             filteredAlerts.map((item) => (
@@ -751,7 +751,7 @@ export default function FindingsAlertsClient({
               {/* Custom Note input */}
               <div className="space-y-1.5">
                 <label className="block font-bold text-slate-800 dark:text-slate-200">
-                  Custom Audit Team Note / Instruction (Optional)
+                  Custom OE Team Note / Instruction (Optional)
                 </label>
                 <textarea
                   rows={3}
@@ -962,7 +962,7 @@ export default function FindingsAlertsClient({
                   rows={3}
                   value={modalFinalRemarks}
                   onChange={(e) => setModalFinalRemarks(e.target.value)}
-                  placeholder="Provide verification notes or audit sign-off remarks..."
+                  placeholder="Provide verification notes or OE sign-off remarks..."
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                 />
               </div>

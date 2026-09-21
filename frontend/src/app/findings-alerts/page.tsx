@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, Department, ExecutionSchedule, User } from "@auditdesk/shared";
+import type { OePlan, Department, ExecutionSchedule, User } from "@oeportal/shared";
 import FindingsAlertsClient from "./findings-alerts-client";
 
 export default async function FindingsAlertsPage() {
@@ -10,7 +10,7 @@ export default async function FindingsAlertsPage() {
 
   const [allSchedules, projects, users, departments] = await Promise.all([
     apiFetch<ExecutionSchedule[]>("/execution-schedules"),
-    apiFetch<AuditProject[]>("/audit-projects"),
+    apiFetch<OePlan[]>("/oe-plans"),
     apiFetch<User[]>("/users"),
     apiFetch<Department[]>("/departments"),
   ]);

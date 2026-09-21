@@ -12,7 +12,7 @@ import { BusinessUnitsModule } from './business-units/business-units.module';
 import { UsersModule } from './users/users.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
 import { CodeGeneratorModule } from './code-generator/code-generator.module';
-import { AuditProjectsModule } from './audit-projects/audit-projects.module';
+import { OePlansModule } from './oe-plans/oe-plans.module';
 import { FindingsModule } from './findings/findings.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { PlanningModule } from './planning/planning.module';
@@ -34,7 +34,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
     UsersModule,
     UserGroupsModule,
     CodeGeneratorModule,
-    AuditProjectsModule,
+    OePlansModule,
     FindingsModule,
     AttachmentsModule,
     PlanningModule,

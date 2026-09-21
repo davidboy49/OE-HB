@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Users, Plus, Lock, Mail, X, KeyRound, Save, ChevronDown } from "lucide-react";
-import type { User, Department, UserGroup, UserRole } from "@auditdesk/shared";
+import type { User, Department, UserGroup, UserRole } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -48,7 +48,7 @@ export default function UsersClient({
   const [userModalMode, setUserModalMode] = useState<"create" | "edit">("create");
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
-  const [userRole, setUserRole] = useState<UserRole>("AUDITEE");
+  const [userRole, setUserRole] = useState<UserRole>("DEPT_PIC");
   const [userDept, setUserDept] = useState("");
   const [userGroup, setUserGroup] = useState("");
   const [userPassword, setUserPassword] = useState("");
@@ -94,7 +94,7 @@ export default function UsersClient({
     setUserModalMode("create");
     setUserName("");
     setUserEmail("");
-    setUserRole("AUDITEE");
+    setUserRole("DEPT_PIC");
     setUserDept("");
     setUserGroup("");
     setUserPassword("");
@@ -169,7 +169,7 @@ export default function UsersClient({
     const u = users.find(x => x.id === selectedUserId);
     if (!u) return;
 
-    const confirmDel = window.confirm(`Are you sure you want to delete user "${u.name}"? This will delete all their audit requests and documents.`);
+    const confirmDel = window.confirm(`Are you sure you want to delete user "${u.name}"? This will delete all their OE requests and documents.`);
     if (!confirmDel) return;
 
     try {
@@ -301,9 +301,9 @@ export default function UsersClient({
 
   const roleFilterOptions = [
     { label: "Admin", value: "ADMIN" },
-    { label: "OE Leader", value: "LEAD_AUDITOR" },
-    { label: "Auditor", value: "AUDITOR" },
-    { label: "Auditee", value: "AUDITEE" }
+    { label: "OE Leader", value: "OE_LEADER" },
+    { label: "OE Member", value: "OE_MEMBER" },
+    { label: "Department PIC", value: "DEPT_PIC" }
   ];
 
   return (
@@ -660,9 +660,9 @@ export default function UsersClient({
                   onChange={(e) => setUserRole(e.target.value as UserRole)}
                   className="w-full bg-muted border border-border rounded-md px-3 py-2 text-xs focus:outline-none cursor-pointer text-foreground"
                 >
-                  <option value="AUDITEE">Auditee</option>
-                  <option value="AUDITOR">Auditor</option>
-                  <option value="LEAD_AUDITOR">OE Leader</option>
+                  <option value="DEPT_PIC">Department PIC</option>
+                  <option value="OE_MEMBER">OE Member</option>
+                  <option value="OE_LEADER">OE Leader</option>
                   <option value="ADMIN">Administrator</option>
                 </select>
               </div>

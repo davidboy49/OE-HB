@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import type { User, UserRole } from '@auditdesk/shared';
+import type { User, UserRole } from '@oeportal/shared';
 
 @Injectable()
 export class UsersService {
@@ -101,13 +101,13 @@ export class UsersService {
     // Delete documents uploaded by this user
     await this.prisma.document.deleteMany({ where: { uploaderId: userId } });
     // Delete findings reported by this user
-    await this.prisma.finding.deleteMany({ where: { auditorId: userId } });
+    await this.prisma.finding.deleteMany({ where: { memberId: userId } });
     // Delete reports created by this user
     await this.prisma.report.deleteMany({ where: { creatorId: userId } });
-    // Set leadAuditorId to null in any projects where they lead
-    await this.prisma.auditProject.updateMany({
-      where: { leadAuditorId: userId },
-      data: { leadAuditorId: null },
+    // Set leaderId to null in any projects where they lead
+    await this.prisma.oePlan.updateMany({
+      where: { leaderId: userId },
+      data: { leaderId: null },
     });
     // Safely delete the user
     await this.prisma.user.delete({ where: { id: userId } });

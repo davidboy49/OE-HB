@@ -30,7 +30,7 @@ export class CreateExecutionScheduleDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  auditPeriod!: string;
+  oePeriod!: string;
 
   @ApiProperty()
   @IsString()

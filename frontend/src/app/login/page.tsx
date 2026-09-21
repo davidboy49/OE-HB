@@ -1,7 +1,7 @@
 import LoginClient from "./login-client";
 
 export const metadata = {
-  title: "Log in | AuditDesk",
+  title: "Log in | OE Portal",
 };
 
 export default function LoginPage() {

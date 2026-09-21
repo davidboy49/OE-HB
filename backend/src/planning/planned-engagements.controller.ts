@@ -9,38 +9,38 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AuditPlansService } from './audit-plans.service';
-import { CreateAuditPlanDto } from './dto/create-audit-plan.dto';
-import { UpdateAuditPlanDto } from './dto/update-audit-plan.dto';
+import { PlannedEngagementsService } from './planned-engagements.service';
+import { CreatePlannedEngagementDto } from './dto/create-planned-engagement.dto';
+import { UpdatePlannedEngagementDto } from './dto/update-planned-engagement.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 
-@ApiTags('audit-plans')
+@ApiTags('planned-engagements')
 @ApiBearerAuth()
-@Controller('audit-plans')
-export class AuditPlansController {
-  constructor(private readonly auditPlansService: AuditPlansService) {}
+@Controller('planned-engagements')
+export class PlannedEngagementsController {
+  constructor(private readonly plannedEngagementsService: PlannedEngagementsService) {}
 
   @Get()
   findAll() {
-    return this.auditPlansService.findAll();
+    return this.plannedEngagementsService.findAll();
   }
 
   @Get('by-annual-plan/:annualPlanId')
   findByAnnualPlan(@Param('annualPlanId') annualPlanId: string) {
-    return this.auditPlansService.findByAnnualPlan(annualPlanId);
+    return this.plannedEngagementsService.findByAnnualPlan(annualPlanId);
   }
 
   @Post()
-  @RequirePermission('audit-plans:create')
+  @RequirePermission('planned-engagements:create')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'CREATE_AUDIT_PLAN',
-    details: `Created Audit Plan "${req.body.topic}" (No: ${req.body.no})`,
+    action: 'CREATE_PLANNED_ENGAGEMENT',
+    details: `Created OE Plan "${req.body.topic}" (No: ${req.body.no})`,
   }))
-  create(@Body() dto: CreateAuditPlanDto) {
-    return this.auditPlansService.create(
+  create(@Body() dto: CreatePlannedEngagementDto) {
+    return this.plannedEngagementsService.create(
       dto.annualPlanId,
       dto.no,
       dto.projectName,
@@ -58,14 +58,14 @@ export class AuditPlansController {
   }
 
   @Patch(':id')
-  @RequirePermission('audit-plans:update')
+  @RequirePermission('planned-engagements:update')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'UPDATE_AUDIT_PLAN',
-    details: `Updated Audit Plan ID: ${req.params.id}`,
+    action: 'UPDATE_PLANNED_ENGAGEMENT',
+    details: `Updated OE Plan ID: ${req.params.id}`,
   }))
-  update(@Param('id') id: string, @Body() dto: UpdateAuditPlanDto) {
-    return this.auditPlansService.update(
+  update(@Param('id') id: string, @Body() dto: UpdatePlannedEngagementDto) {
+    return this.plannedEngagementsService.update(
       id,
       dto.projectName,
       dto.topic,
@@ -82,13 +82,13 @@ export class AuditPlansController {
   }
 
   @Delete(':id')
-  @RequirePermission('audit-plans:delete')
+  @RequirePermission('planned-engagements:delete')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'DELETE_AUDIT_PLAN',
-    details: `Deleted Audit Plan ID: ${req.params.id}`,
+    action: 'DELETE_PLANNED_ENGAGEMENT',
+    details: `Deleted OE Plan ID: ${req.params.id}`,
   }))
   remove(@Param('id') id: string) {
-    return this.auditPlansService.remove(id);
+    return this.plannedEngagementsService.remove(id);
   }
 }

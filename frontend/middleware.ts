@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE } from "@/lib/apiClient";
 
 // Routes reachable without a session - /meetings/scan is the QR-code consent flow,
-// meant to be opened by an external auditee with no AuditDesk account. /api/backend
+// meant to be opened by an external department PIC with no OE Portal account. /api/backend
 // is excluded entirely: it's the client-side fetch proxy, not a page - redirecting
 // a fetch() call to a login HTML page would break every client component's error
 // handling, not just the QR flow. The backend's own JwtAuthGuard (401) is the real

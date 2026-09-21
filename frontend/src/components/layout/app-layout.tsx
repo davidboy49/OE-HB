@@ -27,7 +27,7 @@ import {
   Settings as SettingsIcon,
   X
 } from "lucide-react";
-import type { User } from "@auditdesk/shared";
+import type { User } from "@oeportal/shared";
 import { apiFetch } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 
@@ -41,7 +41,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
   const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light"); // Default light just like screenshot
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [auditModuleOpen, setAuditModuleOpen] = useState(true);
+  const [oeModuleOpen, setOeModuleOpen] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -234,24 +234,24 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
 
           {/* Navigation Links with nesting */}
           <nav className="py-4 space-y-1">
-            {/* Audit Module Collapsible Parent */}
+            {/* OE Module Collapsible Parent */}
             <div>
               <button
                 type="button"
-                onClick={() => setAuditModuleOpen(!auditModuleOpen)}
+                onClick={() => setOeModuleOpen(!oeModuleOpen)}
                 className="w-full flex items-center justify-between px-5 py-3 text-xs font-bold text-white hover:bg-[#053254]/50 transition-all select-none cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <Building className="w-4 h-4 text-slate-300" />
                   <span className="uppercase tracking-wider">OE Module</span>
                 </div>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${auditModuleOpen ? "" : "-rotate-90"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${oeModuleOpen ? "" : "-rotate-90"}`} />
               </button>
 
               {/* Nested Child Items */}
               <div 
                 className={`transition-all duration-300 overflow-hidden ${
-                  auditModuleOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                  oeModuleOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
                 }`}
               >
                 <div className="pl-4 border-l border-[#042844] ml-7 my-1 space-y-1">

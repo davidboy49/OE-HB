@@ -1,10 +1,10 @@
 import { apiFetch } from "@/lib/apiClient";
 import ScanClient from "./scan-client";
 import { notFound } from "next/navigation";
-import type { OpenMeeting, Department } from "@auditdesk/shared";
+import type { OpenMeeting, Department } from "@oeportal/shared";
 
 export const metadata = {
-  title: "Open Meeting & Scope Consent | AuditDesk",
+  title: "Open Meeting & Scope Consent | OE Portal",
   description: "Departmental Open Meeting agenda and OE scope confirmation portal."
 };
 
@@ -13,7 +13,7 @@ interface PageProps {
 }
 
 // Public route (see middleware.ts PUBLIC_PATHS: "/meetings/scan") - an unauthenticated
-// external auditee scans a physical QR code with no AuditDesk account, so this calls the
+// external department PIC scans a physical QR code with no OE Portal account, so this calls the
 // backend's @Public() QR endpoint directly. No cookie/token is sent or required.
 export default async function ScanPage({ params }: PageProps) {
   const { qrToken } = await params;

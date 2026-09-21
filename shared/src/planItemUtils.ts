@@ -1,13 +1,13 @@
-export interface AuditPlanItem {
+export interface PlanItem {
   id: string;
   text: string;
 }
 
 /**
- * Parses raw objectives or scope data into structured AuditPlanItem objects.
+ * Parses raw objectives or scope data into structured PlanItem objects.
  * Handles legacy raw strings, HTML text, or existing JSON arrays.
  */
-export function parsePlanItems(raw?: string, defaultPrefix: string = "IAP-OBJ"): AuditPlanItem[] {
+export function parsePlanItems(raw?: string, defaultPrefix: string = "IOE-OBJ"): PlanItem[] {
   if (!raw || !raw.trim()) {
     return [{ id: `${defaultPrefix}-01`, text: "" }];
   }
@@ -56,21 +56,21 @@ export function hasPlanItemContent(raw?: string): boolean {
 }
 
 /**
- * Serializes AuditPlanItem array to JSON string for DB storage.
+ * Serializes PlanItem array to JSON string for DB storage.
  */
-export function serializePlanItems(items: AuditPlanItem[]): string {
+export function serializePlanItems(items: PlanItem[]): string {
   return JSON.stringify(items);
 }
 
 export interface ScopeOverride {
   inactiveIds: string[];
-  extraItems: AuditPlanItem[];
+  extraItems: PlanItem[];
 }
 
 /**
- * Parses an Individual OE Plan's AuditProject.scope field, which - unlike
+ * Parses an Individual OE Plan's OePlan.scope field, which - unlike
  * objectives - does NOT hold scope text directly. Scope lives on the Planned
- * Engagement (AuditPlan.scope); AuditProject.scope only stores a delta on top
+ * Engagement (PlannedEngagement.scope); OePlan.scope only stores a delta on top
  * of it: which inherited item ids are deactivated for this plan, plus any
  * extra items added locally. See ScopeOverride usage in planning-client.tsx.
  */
@@ -90,14 +90,14 @@ export function parseScopeOverride(raw?: string): ScopeOverride {
 /**
  * Resolves an Individual OE Plan's actual effective scope items: its Planned
  * Engagement's base scope items minus any this plan marked inactive, plus
- * any extra items it added locally. Use this (not AuditProject.scope
+ * any extra items it added locally. Use this (not OePlan.scope
  * directly) anywhere the real inherited scope content is needed.
  */
 export function resolveEffectiveScopeItems(
   baseScopeRaw: string | undefined,
   overrideRaw: string | undefined,
-  defaultPrefix: string = "AP-ISCP",
-): AuditPlanItem[] {
+  defaultPrefix: string = "OE-SCP",
+): PlanItem[] {
   const override = parseScopeOverride(overrideRaw);
   const baseItems = baseScopeRaw
     ? parsePlanItems(baseScopeRaw, defaultPrefix).filter((item) => item.text)
@@ -112,19 +112,19 @@ export function resolveEffectiveScopeItems(
 /**
  * Resolves an Individual OE Plan's actual inherited objectives + scope text
  * from its linked Planned Engagement, falling back to whatever is stored
- * directly on the AuditProject (e.g. a manually-created plan with no linked
+ * directly on the OePlan (e.g. a manually-created plan with no linked
  * Planned Engagement, or legacy data). Always prefer this over reading
- * AuditProject.objectives/scope directly: objectives can go stale if the
+ * OePlan.objectives/scope directly: objectives can go stale if the
  * linked Planned Engagement is edited or swapped after this plan was
  * created, and scope is a { inactiveIds, extraItems } override, not text -
  * see resolveEffectiveScopeItems.
  */
 export function resolveInheritedPlanContent(
-  auditProject: { objectives?: string; scope?: string },
-  linkedAuditPlan: { objectives?: string; scope?: string } | null | undefined,
+  oePlan: { objectives?: string; scope?: string },
+  linkedPlannedEngagement: { objectives?: string; scope?: string } | null | undefined,
 ): { objectives: string; scope: string } {
-  const objectives = linkedAuditPlan?.objectives || auditProject.objectives || '';
-  const scopeItems = resolveEffectiveScopeItems(linkedAuditPlan?.scope, auditProject.scope);
+  const objectives = linkedPlannedEngagement?.objectives || oePlan.objectives || '';
+  const scopeItems = resolveEffectiveScopeItems(linkedPlannedEngagement?.scope, oePlan.scope);
   const scope = scopeItems.length > 0 ? serializePlanItems(scopeItems) : '';
   return { objectives, scope };
 }

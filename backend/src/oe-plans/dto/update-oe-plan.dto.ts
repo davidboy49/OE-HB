@@ -2,11 +2,11 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 
 /**
- * Mirrors the broad `Partial<AuditProject>` shape the original dbService.updateProject
+ * Mirrors the broad `Partial<OePlan>` shape the original dbService.updateProject
  * accepted. Intentionally permissive - the free-form JSON string fields (opExTimeline,
  * approvals) are validated only as strings, matching the original's lack of schema validation.
  */
-export class UpdateAuditProjectDto {
+export class UpdateOePlanDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -64,12 +64,12 @@ export class UpdateAuditProjectDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  leadAuditorId?: string | null;
+  leaderId?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  auditorNames?: string;
+  memberNames?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -129,14 +129,14 @@ export class UpdateAuditProjectDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  auditPlanId?: string | null;
+  plannedEngagementId?: string | null;
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Array of selected auditor user IDs (or names)',
+    description: 'Array of selected member user IDs (or names)',
   })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  auditorIds?: string[];
+  memberIds?: string[];
 }

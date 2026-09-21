@@ -18,11 +18,11 @@ export class CodeGeneratorService {
   /**
    * Generates the next unique document code, incrementing the persisted counter.
    *
-   * @param prefix Document type prefix (e.g., "AP").
+   * @param prefix Document type prefix (e.g., "OEP").
    * @param digits Number of zero-padded digits (default 4).
    */
   async generateDocumentCode(
-    prefix: string = 'AP',
+    prefix: string = 'OEP',
     digits: number = 4,
   ): Promise<string> {
     const key = prefix.trim().toUpperCase();

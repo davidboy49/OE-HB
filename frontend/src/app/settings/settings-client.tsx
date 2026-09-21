@@ -12,7 +12,7 @@ import {
   Loader2, 
   Send 
 } from "lucide-react";
-import type { User } from "@auditdesk/shared";
+import type { User } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 
 interface SettingsClientProps {
@@ -134,7 +134,7 @@ export default function SettingsClient({
   const templateVariables: Record<string, string[]> = {
     planning: ["recipientName", "projectName", "projectCode", "status", "details"],
     meetings: ["recipientName", "projectName", "projectCode", "departments", "visitDate", "ownerName"],
-    schedule: ["recipientName", "projectName", "projectCode", "auditPeriod", "leadExecution", "standards"],
+    schedule: ["recipientName", "projectName", "projectCode", "oePeriod", "leadExecution", "standards"],
     findings: ["recipientName", "projectName", "projectCode", "findingTitle", "severity", "recommendation"]
   };
 
@@ -324,10 +324,10 @@ export default function SettingsClient({
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
                   className="bg-slate-50 dark:bg-slate-800 border border-slate-250 dark:border-slate-850 rounded-md px-3 py-1.5 text-xs font-bold focus:outline-none cursor-pointer text-slate-800 dark:text-slate-200"
                 >
-                  <option value="planning">Audit Planning Scoping Alerts</option>
+                  <option value="planning">OE Planning Scoping Alerts</option>
                   <option value="meetings">Open Meetings Invitations</option>
                   <option value="schedule">Execution Schedules Release</option>
-                  <option value="findings">Audit Findings Ledger Alerts</option>
+                  <option value="findings">OE Findings Ledger Alerts</option>
                 </select>
               </div>
 
@@ -338,7 +338,7 @@ export default function SettingsClient({
                   required
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
-                  placeholder="e.g. Audit Planning Update - {{projectCode}}"
+                  placeholder="e.g. OE Planning Update - {{projectCode}}"
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-accent text-slate-800 dark:text-slate-200 font-semibold"
                 />
               </div>
@@ -387,19 +387,19 @@ export default function SettingsClient({
                     </span>
                     <span className="text-[10px] text-slate-500">
                       {variable === "recipientName" && "The full name of the email recipient."}
-                      {variable === "projectName" && "The descriptive name of the linked Audit Plan."}
+                      {variable === "projectName" && "The descriptive name of the linked OE Plan."}
                       {variable === "projectCode" && "The standard OE plan registration identifier (e.g. OEP-0001)."}
                       {variable === "status" && "The current workspace status of the plan or finding record."}
                       {variable === "details" && "Context details, remarks, or revision feedback."}
-                      {variable === "departments" && "The auditee's corporate/department governance name."}
+                      {variable === "departments" && "The department PIC's corporate/department governance name."}
                       {variable === "visitDate" && "Scheduled execution visit dates."}
                       {variable === "ownerName" && "The creator or chairperson of the meeting."}
-                      {variable === "auditPeriod" && "Dates representing the scoping timeframe."}
-                      {variable === "leadExecution" && "Lead internal auditor assigned for execution."}
+                      {variable === "oePeriod" && "Dates representing the scoping timeframe."}
+                      {variable === "leadExecution" && "OE Leader assigned for execution."}
                       {variable === "standards" && "Compliance standard tags (e.g. ISO 27001)."}
                       {variable === "findingTitle" && "The brief title outlining the nonconformity."}
                       {variable === "severity" && "Severity classifications: LOW, MEDIUM, HIGH, CRITICAL."}
-                      {variable === "recommendation" && "The Auditor's recommended mitigation actions."}
+                      {variable === "recommendation" && "The OE Member's recommended mitigation actions."}
                     </span>
                   </div>
                 ))}

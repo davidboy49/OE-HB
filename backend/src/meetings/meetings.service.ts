@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertProjectReleased } from '../common/assert-project-status';
@@ -6,7 +10,7 @@ import {
   ExecutionSchedulesService,
   DepartmentConsentInput,
 } from '../execution-schedules/execution-schedules.service';
-import { resolveInheritedPlanContent } from '@auditdesk/shared';
+import { resolveInheritedPlanContent } from '@oeportal/shared';
 
 export interface CreateOpenMeetingInput {
   projectId: string;
@@ -14,7 +18,7 @@ export interface CreateOpenMeetingInput {
   address: string;
   visitNumber: string;
   actualVisitDate: string;
-  auditPeriod: string;
+  oePeriod: string;
   leadExecution: string;
   teamMembers: string;
   additionalAttendees?: string;
@@ -37,7 +41,7 @@ export interface UpdateOpenMeetingInput {
   address?: string;
   visitNumber?: string;
   actualVisitDate?: string;
-  auditPeriod?: string;
+  oePeriod?: string;
   leadExecution?: string;
   teamMembers?: string;
   additionalAttendees?: string;
@@ -57,6 +61,17 @@ export interface UpdateOpenMeetingInput {
  * Port of the OpenMeeting + QR consent slice of frontend/src/lib/dbService.ts
  * (lines 925-1337) + frontend/src/app/actions.ts (lines 382-409, 823-847).
  */
+/**
+ * Open Meeting approval flow. A submitted meeting has to be approved (released) by
+ * someone holding meetings:approve - an OE Leader - before it counts; nothing can
+ * jump straight to RELEASED. Any content edit puts the meeting back to DRAFT.
+ */
+export const ALLOWED_MEETING_STATUS_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ['SUBMITTED_FOR_APPROVAL'],
+  SUBMITTED_FOR_APPROVAL: ['RELEASED', 'DRAFT'],
+  RELEASED: ['DRAFT'],
+};
+
 @Injectable()
 export class MeetingsService {
   constructor(
@@ -74,7 +89,7 @@ export class MeetingsService {
       address: m.address,
       visitNumber: m.visitNumber,
       actualVisitDate: m.actualVisitDate,
-      auditPeriod: m.auditPeriod,
+      oePeriod: m.oePeriod,
       leadExecution: m.leadExecution,
       teamMembers: m.teamMembers,
       additionalAttendees: m.additionalAttendees,
@@ -101,28 +116,31 @@ export class MeetingsService {
   /**
    * dbService.ensureOpenMeetingsForProject (dbService.ts:925-1011). Auto-creates a
    * default OpenMeeting (with a standard 3-slot opening agenda) for every department
-   * on a project that doesn't already have one. Public - AuditProjectsModule injects
+   * on a project that doesn't already have one. Public - OePlansModule injects
    * MeetingsService and calls this from its own update()/release flow.
    */
   async ensureOpenMeetingsForProject(
     projectId: string,
     actorName: string = '',
   ): Promise<any[]> {
-    const project = await this.prisma.auditProject.findUnique({
+    const project = await this.prisma.oePlan.findUnique({
       where: { id: projectId },
     });
     if (!project) return [];
 
-    // AuditProject.objectives/scope can be empty or stale - resolve the real
+    // OePlan.objectives/scope can be empty or stale - resolve the real
     // inherited content from the linked Planned Engagement instead. Scope in
-    // particular isn't scope text on AuditProject; it's an { inactiveIds,
+    // particular isn't scope text on OePlan; it's an { inactiveIds,
     // extraItems } override layered on top (see resolveInheritedPlanContent).
-    const parentAuditPlan = project.auditPlanId
-      ? await this.prisma.auditPlan.findUnique({
-          where: { id: project.auditPlanId },
+    const parentPlannedEngagement = project.plannedEngagementId
+      ? await this.prisma.plannedEngagement.findUnique({
+          where: { id: project.plannedEngagementId },
         })
       : null;
-    const inherited = resolveInheritedPlanContent(project, parentAuditPlan);
+    const inherited = resolveInheritedPlanContent(
+      project,
+      parentPlannedEngagement,
+    );
 
     const deptsRaw = project.departments || '';
     let deptList = deptsRaw
@@ -131,7 +149,7 @@ export class MeetingsService {
       .filter(Boolean);
     if (deptList.length === 0) {
       deptList = ['IT', 'Finance', 'Operations'];
-      await this.prisma.auditProject.update({
+      await this.prisma.oePlan.update({
         where: { id: projectId },
         data: { departments: deptList.join(', ') },
       });
@@ -164,7 +182,7 @@ export class MeetingsService {
             date: startDateStr,
             time: '09:00 AM - 09:30 AM',
             activity: `Opening Meeting & OE Scope Briefing for ${dept}`,
-            conductBy: project.auditorNames || 'OE Leader',
+            conductBy: project.memberNames || 'OE Leader',
             pIncharge: dept,
           },
           {
@@ -172,7 +190,7 @@ export class MeetingsService {
             date: startDateStr,
             time: '09:30 AM - 10:30 AM',
             activity: `Scope Alignment & Data Request Discussion for ${dept}`,
-            conductBy: project.auditorNames || 'Audit Team',
+            conductBy: project.memberNames || 'OE Team',
             pIncharge: dept,
           },
           {
@@ -180,7 +198,7 @@ export class MeetingsService {
             date: startDateStr,
             time: '10:30 AM - 11:00 AM',
             activity: `Scope Consent & Attendance Confirmation for ${dept}`,
-            conductBy: project.auditorNames || 'Audit Team',
+            conductBy: project.memberNames || 'OE Team',
             pIncharge: dept,
           },
         ];
@@ -192,9 +210,9 @@ export class MeetingsService {
             address: 'HQ Main Conference Room / Virtual Meeting',
             visitNumber: '01',
             actualVisitDate: startDateStr,
-            auditPeriod: `${project.startDate ? new Date(project.startDate).toLocaleDateString('en-GB') : 'Start'} - ${project.endDate ? new Date(project.endDate).toLocaleDateString('en-GB') : 'End'}`,
-            leadExecution: project.auditorNames || 'OE Leader',
-            teamMembers: project.auditorNames || '',
+            oePeriod: `${project.startDate ? new Date(project.startDate).toLocaleDateString('en-GB') : 'Start'} - ${project.endDate ? new Date(project.endDate).toLocaleDateString('en-GB') : 'End'}`,
+            leadExecution: project.memberNames || 'OE Leader',
+            teamMembers: project.memberNames || '',
             additionalAttendees: project.deptPicIds || '',
             attendeeConfirmations: '{}',
             standards: 'Work Procedure, Work Instruction & Policy',
@@ -204,7 +222,7 @@ export class MeetingsService {
               `Evaluate operational compliance and risk management for ${dept}.`,
             scope:
               inherited.scope ||
-              `Full scope audit covering departmental procedures and key controls for ${dept}.`,
+              `Full OE scope covering departmental procedures and key controls for ${dept}.`,
             scheduleRows: JSON.stringify(defaultAgendaRows),
             attachments: '[]',
             ownerName: actorName,
@@ -258,13 +276,14 @@ export class MeetingsService {
         address: data.address,
         visitNumber: data.visitNumber,
         actualVisitDate: data.actualVisitDate,
-        auditPeriod: data.auditPeriod,
+        oePeriod: data.oePeriod,
         leadExecution: data.leadExecution,
         teamMembers: data.teamMembers,
         additionalAttendees: data.additionalAttendees || '',
         attendeeConfirmations: data.attendeeConfirmations || '{}',
         standards: data.standards,
-        status: data.status || 'DRAFT',
+        // Always DRAFT: status only moves through updateStatus (submit -> approve).
+        status: 'DRAFT',
         objectives: data.objectives,
         scope: data.scope,
         departmentConcern: data.departmentConcern || '',
@@ -291,13 +310,15 @@ export class MeetingsService {
       address: data.address,
       visitNumber: data.visitNumber,
       actualVisitDate: data.actualVisitDate,
-      auditPeriod: data.auditPeriod,
+      oePeriod: data.oePeriod,
       leadExecution: data.leadExecution,
       teamMembers: data.teamMembers,
       additionalAttendees: data.additionalAttendees,
       attendeeConfirmations: data.attendeeConfirmations,
       standards: data.standards,
-      status: data.status,
+      // An edit always sends the meeting back to DRAFT so it must be submitted and
+      // approved again; a client-supplied status is never trusted.
+      status: 'DRAFT',
       objectives: data.objectives,
       scope: data.scope,
       departmentConcern: data.departmentConcern,
@@ -316,6 +337,15 @@ export class MeetingsService {
 
   /** DRAFT -> SUBMITTED_FOR_APPROVAL -> RELEASED, with reject/reopen looping back to DRAFT. */
   async updateStatus(id: string, status: string): Promise<any> {
+    const current = await this.prisma.openMeeting.findUnique({ where: { id } });
+    if (!current || current.isDeleted) {
+      throw new NotFoundException('Open Meeting not found');
+    }
+    if (!ALLOWED_MEETING_STATUS_TRANSITIONS[current.status]?.includes(status)) {
+      throw new BadRequestException(
+        `An Open Meeting cannot move from ${current.status} to ${status}. It must be submitted for approval, then approved by an OE Leader.`,
+      );
+    }
     await this.prisma.openMeeting.update({
       where: { id },
       data: { status },
@@ -353,7 +383,7 @@ export class MeetingsService {
     });
 
     if (!m) {
-      const matchingProject = await this.prisma.auditProject.findFirst({
+      const matchingProject = await this.prisma.oePlan.findFirst({
         where: { OR: [{ code: qrToken }, { id: qrToken }] },
       });
       if (matchingProject) {
@@ -414,7 +444,7 @@ export class MeetingsService {
       address: m.address,
       visitNumber: m.visitNumber,
       actualVisitDate: m.actualVisitDate,
-      auditPeriod: m.auditPeriod,
+      oePeriod: m.oePeriod,
       leadExecution: m.leadExecution,
       teamMembers: m.teamMembers,
       additionalAttendees: m.additionalAttendees,

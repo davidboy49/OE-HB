@@ -82,8 +82,8 @@ export class NotificationsService {
 
       await this.updateEmailTemplate(
         'planning',
-        'Audit Planning Scoping Update - {{projectCode}}',
-        '<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>Audit Management System</p>',
+        'OE Planning Scoping Update - {{projectCode}}',
+        '<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>OE Portal</p>',
       );
       await this.updateEmailTemplate(
         'meetings',
@@ -93,11 +93,11 @@ export class NotificationsService {
       await this.updateEmailTemplate(
         'schedule',
         'Execution Schedule Released - {{projectCode}}',
-        '<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Audit Period: {{auditPeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>',
+        '<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>OE Period: {{oePeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>',
       );
       await this.updateEmailTemplate(
         'findings',
-        'New Audit Finding Registered - {{projectCode}}',
+        'New OE Finding Registered - {{projectCode}}',
         '<p>Hello {{recipientName}},</p><p>A new compliance nonconformity has been logged under <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Finding: <strong>{{findingTitle}}</strong></p><p>Severity: <strong>{{severity}}</strong></p><p>Recommendation: {{recommendation}}</p>',
       );
     }
@@ -131,9 +131,9 @@ export class NotificationsService {
       await transporter.sendMail({
         from: smtp.fromEmail || 'alerts@auditdesk.com',
         to: toEmail,
-        subject: 'AuditDesk SMTP Test Email',
-        text: 'If you receive this email, your SMTP configuration on AuditDesk is set up correctly!',
-        html: '<p>If you receive this email, your SMTP configuration on AuditDesk is set up correctly!</p>',
+        subject: 'OE Portal SMTP Test Email',
+        text: 'If you receive this email, your SMTP configuration on OE Portal is set up correctly!',
+        html: '<p>If you receive this email, your SMTP configuration on OE Portal is set up correctly!</p>',
       });
 
       return { success: true, message: 'Test email sent successfully!' };
@@ -254,9 +254,9 @@ export class NotificationsService {
     variables: Record<string, string>,
   ): Promise<{ success: boolean; simulatedAlerts: SimulatedAlert[] }> {
     try {
-      const project = await this.prisma.auditProject.findUnique({
+      const project = await this.prisma.oePlan.findUnique({
         where: { id: projectId },
-        include: { auditors: true },
+        include: { members: true },
       });
       if (!project) {
         return { success: false, simulatedAlerts: [] };
@@ -265,16 +265,16 @@ export class NotificationsService {
       const allUsers = await this.prisma.user.findMany();
       const recipientsMap = new Map<string, (typeof allUsers)[number]>();
 
-      if (project.leadAuditorId) {
+      if (project.leaderId) {
         const lead = allUsers.find(
           (u) =>
-            u.id === project.leadAuditorId || u.name === project.leadAuditorId,
+            u.id === project.leaderId || u.name === project.leaderId,
         );
         if (lead) recipientsMap.set(lead.email, lead);
       }
 
-      for (const auditor of project.auditors) {
-        recipientsMap.set(auditor.email, auditor);
+      for (const member of project.members) {
+        recipientsMap.set(member.email, member);
       }
 
       if (project.deptPicIds) {
@@ -378,8 +378,8 @@ export class NotificationsService {
     customNote?: string,
   ): Promise<{ success: boolean; simulatedAlerts: SimulatedAlert[] }> {
     try {
-      const projects = await this.prisma.auditProject.findMany({
-        include: { auditors: true },
+      const projects = await this.prisma.oePlan.findMany({
+        include: { members: true },
       });
       const allUsers = await this.getUsersWithDepartment();
       const simulatedAlerts: SimulatedAlert[] = [];
@@ -391,17 +391,17 @@ export class NotificationsService {
         const recipientsMap = new Map<string, MailRecipient>();
 
         if (project) {
-          if (project.leadAuditorId) {
+          if (project.leaderId) {
             const lead = allUsers.find(
               (u) =>
-                u.id === project.leadAuditorId ||
-                u.name === project.leadAuditorId,
+                u.id === project.leaderId ||
+                u.name === project.leaderId,
             );
             if (lead) recipientsMap.set(lead.email, lead);
           }
-          for (const auditorId of project.auditors.map((a) => a.id)) {
-            const auditor = allUsers.find((u) => u.id === auditorId);
-            if (auditor) recipientsMap.set(auditor.email, auditor);
+          for (const memberId of project.members.map((a) => a.id)) {
+            const member = allUsers.find((u) => u.id === memberId);
+            if (member) recipientsMap.set(member.email, member);
           }
           if (project.deptPicIds) {
             const picIds = project.deptPicIds
@@ -438,23 +438,23 @@ export class NotificationsService {
             ? 'Corrective Final Date has NOT been input yet.'
             : 'Corrective Final Date has been input, but item is pending resolution sign-off.';
 
-        const subject = `[Audit Desk Alert] Action Required: NCN ${item.documentCode || 'Finding'} Reminder`;
+        const subject = `[OE Portal Alert] Action Required: NCN ${item.documentCode || 'Finding'} Reminder`;
 
         for (const recipient of Array.from(recipientsMap.values())) {
           const body = `
             <p>Dear <strong>${recipient.name}</strong>,</p>
-            <p>This is an official notification from the <strong>Internal Audit Team</strong> regarding pending Nonconformity Notice (NCN) action items requiring your attention:</p>
+            <p>This is an official notification from the <strong>OE Team</strong> regarding pending Nonconformity Notice (NCN) action items requiring your attention:</p>
             <ul>
               <li><strong>Document Code:</strong> ${item.documentCode || 'N/A'}</li>
-              <li><strong>Audit Project:</strong> ${item.projectName || 'N/A'}</li>
+              <li><strong>OE Plan:</strong> ${item.projectName || 'N/A'}</li>
               <li><strong>Department:</strong> ${item.departments || 'N/A'}</li>
               <li><strong>Finding Activity:</strong> ${item.activity}</li>
               <li><strong>Alert Condition:</strong> <span style="color: #dc2626; font-weight: bold;">${issueText}</span></li>
               <li><strong>Target Action Date:</strong> ${item.correctiveActionDate || 'Not set'}</li>
               ${item.correctiveFinalDate ? `<li><strong>Corrective Final Date:</strong> ${item.correctiveFinalDate}</li>` : ''}
             </ul>
-            ${customNote ? `<div style="background-color: #f8fafc; border-left: 4px solid #f59e0b; padding: 10px; margin: 10px 0;"><strong>Audit Team Note:</strong> ${customNote}</div>` : ''}
-            <p>Please log in to AuditDesk Findings Portal to complete the input or mark the item as resolved.</p>
+            ${customNote ? `<div style="background-color: #f8fafc; border-left: 4px solid #f59e0b; padding: 10px; margin: 10px 0;"><strong>OE Team Note:</strong> ${customNote}</div>` : ''}
+            <p>Please log in to OE Portal to complete the input or mark the item as resolved.</p>
           `;
 
           simulatedAlerts.push({

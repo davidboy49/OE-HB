@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OE Portal system architecture",
+    "output": "oe-system-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Browser",
+      "sublabel": "OE staff, QR guests",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "pages",
+      "type": "frontend",
+      "label": "Next.js pages",
+      "sublabel": "server components :3000",
+      "tag": "middleware gate",
+      "pos": [
+        270,
+        190
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "proxy",
+      "type": "frontend",
+      "label": "Session + API proxy",
+      "sublabel": "/api/session, /api/backend",
+      "tag": "httpOnly cookie",
+      "pos": [
+        270,
+        390
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "guards",
+      "type": "security",
+      "label": "Global guards",
+      "sublabel": "JWT, then permission check",
+      "tag": "grants read from DB",
+      "pos": [
+        520,
+        190
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "backend",
+      "label": "Auth module",
+      "sublabel": "/auth/login, /auth/sso",
+      "pos": [
+        520,
+        390
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "modules",
+      "type": "backend",
+      "label": "Domain modules",
+      "sublabel": "plans, meetings, schedules, findings",
+      "pos": [
+        770,
+        190
+      ],
+      "size": [
+        210,
+        64
+      ]
+    },
+    {
+      "id": "notif",
+      "type": "backend",
+      "label": "Notifications",
+      "sublabel": "email templates + alerts",
+      "pos": [
+        770,
+        40
+      ],
+      "size": [
+        210,
+        64
+      ]
+    },
+    {
+      "id": "smtp",
+      "type": "external",
+      "label": "SMTP server",
+      "sublabel": "set in Settings",
+      "pos": [
+        1060,
+        40
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "Prisma 7, pg adapter",
+      "pos": [
+        770,
+        390
+      ],
+      "size": [
+        210,
+        64
+      ]
+    },
+    {
+      "id": "keycloak",
+      "type": "external",
+      "label": "Keycloak SSO",
+      "sublabel": "mobile token exchange",
+      "pos": [
+        520,
+        540
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server :3000",
+      "wraps": [
+        "pages",
+        "proxy"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "NestJS API :3001",
+      "wraps": [
+        "guards",
+        "auth",
+        "modules",
+        "notif"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-pages",
+      "from": "browser",
+      "to": "pages",
+      "label": "HTTPS pages",
+      "variant": "emphasis"
+    },
+    {
+      "id": "browser-proxy",
+      "from": "browser",
+      "to": "proxy",
+      "label": "login, fetch"
+    },
+    {
+      "id": "pages-guards",
+      "from": "pages",
+      "to": "guards",
+      "label": "Bearer JWT",
+      "variant": "emphasis"
+    },
+    {
+      "id": "proxy-guards",
+      "from": "proxy",
+      "to": "guards",
+      "label": "client calls, Bearer",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "proxy-auth",
+      "from": "proxy",
+      "to": "auth",
+      "label": "POST /auth/login"
+    },
+    {
+      "id": "keycloak-auth",
+      "from": "keycloak",
+      "to": "auth",
+      "label": "SSO token",
+      "variant": "dashed"
+    },
+    {
+      "id": "guards-modules",
+      "from": "guards",
+      "to": "modules",
+      "label": "authorised",
+      "variant": "emphasis"
+    },
+    {
+      "id": "modules-db",
+      "from": "modules",
+      "to": "db",
+      "label": "Prisma queries",
+      "labelDy": 24
+    },
+    {
+      "id": "auth-db",
+      "from": "auth",
+      "to": "db",
+      "label": "user lookup",
+      "variant": "dashed"
+    },
+    {
+      "id": "modules-notif",
+      "from": "modules",
+      "to": "notif",
+      "label": "alerts",
+      "variant": "dashed"
+    },
+    {
+      "id": "notif-smtp",
+      "from": "notif",
+      "to": "smtp",
+      "label": "SMTP"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Authentication",
+      "items": [
+        "Login goes through /api/session/login to /auth/login",
+        "12 hour JWT in an httpOnly auth_token cookie",
+        "Username or email; SSO exchange at /auth/sso"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Authorization",
+      "items": [
+        "JwtAuthGuard, then PermissionsGuard, on every route",
+        "Grants re-read from the database each request",
+        "Keys such as oe-plans:create and planned-engagements:update"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Shared code",
+      "items": [
+        "@oeportal/shared holds types and plan-item helpers",
+        "Used by both the frontend and the backend"
+      ]
+    }
+  ]
+}

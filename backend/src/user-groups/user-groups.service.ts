@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSIONS } from '../common/permissions';
-import type { UserGroup } from '@auditdesk/shared';
+import type { UserGroup } from '@oeportal/shared';
 
 @Injectable()
 export class UserGroupsService {

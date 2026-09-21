@@ -24,12 +24,12 @@ import {
 import type {
   ExecutionSchedule,
   OpenMeeting,
-  AuditProject,
-  AuditPlan,
+  OePlan,
+  PlannedEngagement,
   User,
   Department,
   ScheduleRow
-} from "@auditdesk/shared";
+} from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -37,7 +37,7 @@ import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems, serializePlanItems, resolveInheritedPlanContent } from "@auditdesk/shared";
+import { parsePlanItems, serializePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -101,10 +101,10 @@ const formatTimeRange = (from: string, to: string) => {
 
 interface ScheduleClientProps {
   initialSchedules: ExecutionSchedule[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
-  auditPlans?: AuditPlan[];
+  plannedEngagements?: PlannedEngagement[];
   currentUser: User | null;
 }
 
@@ -113,7 +113,7 @@ export default function ScheduleClient({
   projects,
   users,
   departments,
-  auditPlans = [],
+  plannedEngagements = [],
   currentUser
 }: ScheduleClientProps) {
   const [schedules, setSchedules] = useState<ExecutionSchedule[]>(initialSchedules.filter(s => s.language !== "finding" && s.language !== "meeting"));
@@ -133,27 +133,27 @@ export default function ScheduleClient({
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("1");
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
 
   // "Version #" is the Planned Engagement's own department version (e.g. the
   // "V2" already shown as the OE Plan Department's version elsewhere) - not a
   // count recomputed from this project's own released execution schedules.
   // Same department-resolution fallback as meetings-client.tsx's
-  // getDepartmentWithVersion: explicit auditPlanId match, then annualPlanId +
+  // getDepartmentWithVersion: explicit plannedEngagementId match, then annualPlanId +
   // topic match, then a topic-only match across all Planned Engagements.
-  const resolveDepartmentVersion = (dept: string, proj: AuditProject | null | undefined): string => {
+  const resolveDepartmentVersion = (dept: string, proj: OePlan | null | undefined): string => {
     if (!dept) return "V1";
     const cleanDept = dept.trim().toLowerCase();
 
-    if (proj?.auditPlanId) {
-      const ap = auditPlans.find(a => a.id === proj.auditPlanId);
+    if (proj?.plannedEngagementId) {
+      const ap = plannedEngagements.find(a => a.id === proj.plannedEngagementId);
       if (ap && ap.topic.toLowerCase() === cleanDept) return ap.version || "V1";
     }
     if (proj?.annualPlanId) {
-      const ap = auditPlans.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === cleanDept);
+      const ap = plannedEngagements.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === cleanDept);
       if (ap) return ap.version || "V1";
     }
-    const ap = auditPlans.find(a => a.topic.toLowerCase() === cleanDept);
+    const ap = plannedEngagements.find(a => a.topic.toLowerCase() === cleanDept);
     return ap?.version || "V1";
   };
 
@@ -164,18 +164,18 @@ export default function ScheduleClient({
     const firstDept = departmentsStr.split(",").map(d => d.trim()).filter(Boolean)[0] || "";
     const version = resolveDepartmentVersion(firstDept, proj);
     setVisitNumber(version.replace(/^V/i, "") || "1");
-  }, [selectedProjectId, departmentsStr, modalMode, projects, auditPlans]);
-  const [auditPeriodStart, setAuditPeriodStart] = useState("");
-  const [auditPeriodEnd, setAuditPeriodEnd] = useState("");
+  }, [selectedProjectId, departmentsStr, modalMode, projects, plannedEngagements]);
+  const [oePeriodStart, setOePeriodStart] = useState("");
+  const [oePeriodEnd, setOePeriodEnd] = useState("");
 
-  const handleAuditPeriodStartChange = (val: string) => {
-    setAuditPeriodStart(val);
-    setAuditPeriod(val && auditPeriodEnd ? `${val} to ${auditPeriodEnd}` : val || auditPeriodEnd || "");
+  const handleOePeriodStartChange = (val: string) => {
+    setOePeriodStart(val);
+    setOePeriod(val && oePeriodEnd ? `${val} to ${oePeriodEnd}` : val || oePeriodEnd || "");
   };
 
-  const handleAuditPeriodEndChange = (val: string) => {
-    setAuditPeriodEnd(val);
-    setAuditPeriod(auditPeriodStart && val ? `${auditPeriodStart} to ${val}` : auditPeriodStart || val || "");
+  const handleOePeriodEndChange = (val: string) => {
+    setOePeriodEnd(val);
+    setOePeriod(oePeriodStart && val ? `${oePeriodStart} to ${val}` : oePeriodStart || val || "");
   };
 
   const [leadExecution, setLeadExecution] = useState("");
@@ -243,7 +243,7 @@ export default function ScheduleClient({
   }));
 
   const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
-  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "AP-DRQ");
+  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "OE-DRQ");
   const dataRequestOptions = availableDataRequests.map(d => ({
     value: d.id,
     label: d.id,
@@ -253,10 +253,10 @@ export default function ScheduleClient({
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
     if (currentUser?.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser?.id || proj.leadAuditorId === currentUser?.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser?.name)) return true;
-    if (proj.auditorIds?.includes(currentUser?.id)) return true;
+    if (proj.leaderId === currentUser?.id || proj.leaderId === currentUser?.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser?.name)) return true;
+    if (proj.memberIds?.includes(currentUser?.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser?.id) || picList.includes(currentUser?.name)) return true;
     return false;
@@ -297,17 +297,17 @@ export default function ScheduleClient({
     
     const parsedEnd = project.endDate ? project.endDate.split("T")[0] : "";
     const period = parsedStart && parsedEnd ? `${parsedStart} to ${parsedEnd}` : parsedStart || parsedEnd || "";
-    setAuditPeriod(period);
-    setAuditPeriodStart(parsedStart);
-    setAuditPeriodEnd(parsedEnd);
+    setOePeriod(period);
+    setOePeriodStart(parsedStart);
+    setOePeriodEnd(parsedEnd);
     
     // Auto-derive Execution Leader from project
-    const leadUser = users.find(u => u.id === project.leadAuditorId || u.name === project.leadAuditorId);
-    const leadName = leadUser ? leadUser.name : (project.leadAuditorId || "");
+    const leadUser = users.find(u => u.id === project.leaderId || u.name === project.leaderId);
+    const leadName = leadUser ? leadUser.name : (project.leaderId || "");
 
-    // Auto-derive Auditors from project
-    const auditorNamesClean = project.auditorNames
-      ? project.auditorNames.split(",").map(s => {
+    // Auto-derive OE Members from project
+    const memberNamesClean = project.memberNames
+      ? project.memberNames.split(",").map(s => {
           const clean = s.trim();
           const u = users.find(user => user.name === clean || user.id === clean);
           return u ? u.name : clean;
@@ -324,16 +324,16 @@ export default function ScheduleClient({
       : "";
 
     setLeadExecution(leadName);
-    setTeamMembers(auditorNamesClean);
+    setTeamMembers(memberNamesClean);
     setAdditionalAttendees(attendeesClean);
     setStandards("Work Procedure, work instruction, and policy");
 
     // Resolve inherited objectives/scope from the linked Planned Engagement -
-    // AuditProject.objectives/scope alone can be empty or stale.
-    const linkedAuditPlan = project.auditPlanId
-      ? auditPlans.find(ap => ap.id === project.auditPlanId)
+    // OePlan.objectives/scope alone can be empty or stale.
+    const linkedPlannedEngagement = project.plannedEngagementId
+      ? plannedEngagements.find(ap => ap.id === project.plannedEngagementId)
       : null;
-    const inherited = resolveInheritedPlanContent(project, linkedAuditPlan);
+    const inherited = resolveInheritedPlanContent(project, linkedPlannedEngagement);
     setObjectives(inherited.objectives);
     setScope(inherited.scope);
 
@@ -349,9 +349,9 @@ export default function ScheduleClient({
     setAddress("HB-HQ");
     setVisitNumber("1");
     setActualVisitDate("");
-    setAuditPeriod("");
-    setAuditPeriodStart("");
-    setAuditPeriodEnd("");
+    setOePeriod("");
+    setOePeriodStart("");
+    setOePeriodEnd("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
@@ -372,14 +372,14 @@ export default function ScheduleClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
-    const parts = (sched.auditPeriod || "").split(" to ");
+    setOePeriod(sched.oePeriod);
+    const parts = (sched.oePeriod || "").split(" to ");
     if (parts.length === 2) {
-      setAuditPeriodStart(parts[0]);
-      setAuditPeriodEnd(parts[1]);
+      setOePeriodStart(parts[0]);
+      setOePeriodEnd(parts[1]);
     } else {
-      setAuditPeriodStart("");
-      setAuditPeriodEnd("");
+      setOePeriodStart("");
+      setOePeriodEnd("");
     }
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
@@ -435,7 +435,7 @@ export default function ScheduleClient({
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
@@ -483,7 +483,7 @@ export default function ScheduleClient({
               templateId: "schedule",
               projectId: payload.projectId,
               variables: {
-                auditPeriod: payload.auditPeriod,
+                oePeriod: payload.oePeriod,
                 leadExecution: payload.leadExecution,
                 standards: payload.standards
               }
@@ -577,7 +577,7 @@ export default function ScheduleClient({
   };
 
   const addRow = () => {
-    const newRow = { day: "", date: new Date().toISOString().split('T')[0], time: "09:00 AM - 10:00 AM", auditScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
+    const newRow = { day: "", date: new Date().toISOString().split('T')[0], time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
     setRows([...rows, newRow]);
     setActiveRowIndex(rows.length);
     setDraftRow({ ...newRow });
@@ -605,7 +605,7 @@ export default function ScheduleClient({
 
   const saveDraftRow = () => {
     if (activeRowIndex !== null && draftRow) {
-      if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
+      if (!draftRow.oeScope || draftRow.oeScope.trim() === "") {
         showFeedback("Please select at least one OE Scope for this slot.", "error");
         return;
       }
@@ -623,7 +623,7 @@ export default function ScheduleClient({
         original.day !== draftRow.day ||
         original.date !== draftRow.date ||
         original.time !== draftRow.time ||
-        original.auditScope !== draftRow.auditScope ||
+        original.oeScope !== draftRow.oeScope ||
         original.activity !== draftRow.activity ||
         original.conductBy !== draftRow.conductBy ||
         original.pIncharge !== draftRow.pIncharge ||
@@ -874,7 +874,7 @@ export default function ScheduleClient({
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
               
-              {/* Audit Plan selection */}
+              {/* OE Plan selection */}
               <div className="flex flex-col md:flex-row gap-4 items-center no-print">
                 <div className="flex-1 min-w-[200px]">
                   <label className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">OE Plan</label>
@@ -967,15 +967,15 @@ export default function ScheduleClient({
                           <div className="flex items-center gap-2 max-w-sm">
                             <input 
                               type="date"
-                              value={auditPeriodStart}
-                              onChange={(e) => handleAuditPeriodStartChange(e.target.value)}
+                              value={oePeriodStart}
+                              onChange={(e) => handleOePeriodStartChange(e.target.value)}
                               className="w-1/2 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
                             />
                             <span className="text-slate-400 font-bold text-xs">to</span>
                             <input 
                               type="date"
-                              value={auditPeriodEnd}
-                              onChange={(e) => handleAuditPeriodEndChange(e.target.value)}
+                              value={oePeriodEnd}
+                              onChange={(e) => handleOePeriodEndChange(e.target.value)}
                               className="w-1/2 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
                             />
                           </div>
@@ -1075,9 +1075,9 @@ export default function ScheduleClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="OE Objectives"
-                            items={parsePlanItems(objectives, "IAP-OBJ")}
+                            items={parsePlanItems(objectives, "IOE-OBJ")}
                             onChange={() => {}}
-                            prefix="IAP-OBJ"
+                            prefix="IOE-OBJ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1092,9 +1092,9 @@ export default function ScheduleClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="OE Scope"
-                            items={parsePlanItems(scope, "IAP-ISCP")}
+                            items={parsePlanItems(scope, "IOE-SCP")}
                             onChange={() => {}}
-                            prefix="IAP-ISCP"
+                            prefix="IOE-SCP"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1161,9 +1161,9 @@ export default function ScheduleClient({
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800">
                               {(() => {
-                                const available = parsePlanItems(scope, "IAP-ISCP");
-                                if (!row.auditScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                                const ids = row.auditScope.split(",").map(s => s.trim()).filter(Boolean);
+                                const available = parsePlanItems(scope, "IOE-SCP");
+                                if (!row.oeScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                const ids = row.oeScope.split(",").map(s => s.trim()).filter(Boolean);
                                 if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
                                 return (
                                   <div className="flex flex-col gap-3">
@@ -1261,8 +1261,8 @@ export default function ScheduleClient({
                     ? draftRow.pIncharge.split(",").map(name => name.trim()).filter(Boolean)
                     : [];
 
-                  const auditorOptions = users
-                    .filter(u => u.role === "ADMIN" || u.role === "LEAD_AUDITOR" || u.role === "AUDITOR")
+                  const memberOptions = users
+                    .filter(u => u.role === "ADMIN" || u.role === "OE_LEADER" || u.role === "OE_MEMBER")
                     .map(u => ({
                       value: u.name,
                       label: u.name,
@@ -1275,8 +1275,8 @@ export default function ScheduleClient({
                     subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
                   }));
 
-                  const availableAuditScopes = parsePlanItems(scope, "IAP-ISCP");
-                  const auditScopeOptions = availableAuditScopes.map(o => ({
+                  const availableOeScopes = parsePlanItems(scope, "IOE-SCP");
+                  const oeScopeOptions = availableOeScopes.map(o => ({
                     value: o.id,
                     label: o.id,
                     subLabel: (o.text || "").substring(0, 50) + ((o.text || "").length > 50 ? "..." : "")
@@ -1317,7 +1317,7 @@ export default function ScheduleClient({
                             >
                               <span className="flex items-center gap-2">
                                 <Calendar className="w-3.5 h-3.5 text-[#0066cc]" />
-                                <span>Execution Parameters (Date, Time, Auditors, PIC)</span>
+                                <span>Execution Parameters (Date, Time, OE Members, PIC)</span>
                               </span>
                               <ChevronRight className={`w-4 h-4 transition-transform duration-205 text-slate-400 ${isParamsExpanded ? "rotate-90" : ""}`} />
                             </button>
@@ -1387,12 +1387,12 @@ export default function ScheduleClient({
                                 <div className="grid grid-cols-2 gap-4">
                                   {/* Conduct By Dropdown */}
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Conducted By (Auditors)</label>
+                                    <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Conducted By (OE Members)</label>
                                     <MultiSelect
                                       selectedValues={conductByArray}
                                       onChange={(values) => updateDraftField("conductBy", values.join(", "))}
-                                      options={auditorOptions}
-                                      placeholder="Select auditors or type custom name..."
+                                      options={memberOptions}
+                                      placeholder="Select OE members or type custom name..."
                                     />
                                   </div>
 
@@ -1417,14 +1417,14 @@ export default function ScheduleClient({
                             <div className="space-y-1">
                               <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">OE Scope</label>
                               <MultiSelect
-                                selectedValues={draftRow.auditScope ? draftRow.auditScope.split(",").map(s => s.trim()).filter(Boolean) : []}
-                                onChange={(values) => updateDraftField("auditScope", values.join(", "))}
-                                options={auditScopeOptions}
+                                selectedValues={draftRow.oeScope ? draftRow.oeScope.split(",").map(s => s.trim()).filter(Boolean) : []}
+                                onChange={(values) => updateDraftField("oeScope", values.join(", "))}
+                                options={oeScopeOptions}
                                 placeholder="Select OE scope..."
                               />
                               <div className="mt-2">
                                 {(() => {
-                                  const ids = (draftRow.auditScope || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  const ids = (draftRow.oeScope || "").split(",").map(s => s.trim()).filter(Boolean);
                                   if (ids.length === 0) {
                                     return (
                                       <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/60 dark:bg-slate-900/50 text-xs text-slate-400 italic font-sans">
@@ -1432,13 +1432,13 @@ export default function ScheduleClient({
                                       </div>
                                     );
                                   }
-                                  const items = ids.map(id => availableAuditScopes.find(o => o.id === id) || { id, text: "" });
+                                  const items = ids.map(id => availableOeScopes.find(o => o.id === id) || { id, text: "" });
                                   return (
                                     <PlanItemEditor
                                       sectionTitle="OE Scope"
                                       items={items}
                                       onChange={() => {}}
-                                      prefix="IAP-ISCP"
+                                      prefix="IOE-SCP"
                                       editable={false}
                                       hideHeader={true}
                                     />
@@ -1472,7 +1472,7 @@ export default function ScheduleClient({
                                       sectionTitle="Data Request"
                                       items={items}
                                       onChange={() => {}}
-                                      prefix="AP-DRQ"
+                                      prefix="OE-DRQ"
                                       editable={false}
                                       hideHeader={true}
                                     />
@@ -1529,9 +1529,9 @@ export default function ScheduleClient({
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-sans text-[10px] whitespace-pre-wrap">{row.time || "Time not selected"}</td>
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800">
                             {(() => {
-                              const available = parsePlanItems(scope, "IAP-ISCP");
-                              if (!row.auditScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                              const ids = row.auditScope.split(",").map(s => s.trim()).filter(Boolean);
+                              const available = parsePlanItems(scope, "IOE-SCP");
+                              if (!row.oeScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                              const ids = row.oeScope.split(",").map(s => s.trim()).filter(Boolean);
                               if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
                               return (
                                 <div className="flex flex-col gap-3">

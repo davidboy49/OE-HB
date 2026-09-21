@@ -120,7 +120,7 @@ export class ExecutionSchedulesController {
     return this.executionSchedulesService.remove(id);
   }
 
-  /** Public: an unauthenticated auditee scanning a physical QR code has no account. */
+  /** Public: an unauthenticated department PIC scanning a physical QR code has no account. */
   @Public()
   @Get('qr/:qrToken')
   findByQrToken(@Param('qrToken') qrToken: string) {

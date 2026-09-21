@@ -80,9 +80,9 @@ export default function QRCodeModal({
             <X className="w-5 h-5" />
           </button>
 
-          {/* Audit Plan Title */}
+          {/* OE Plan Title */}
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-[0.25em] font-roboto">
-            Audit Plan
+            OE Plan
           </h3>
 
           {/* Project Code Badge */}
@@ -108,7 +108,7 @@ export default function QRCodeModal({
             {dataUrl ? (
               <img 
                 src={dataUrl} 
-                alt="Audit Plan QR Code" 
+                alt="OE Plan QR Code" 
                 className="w-[220px] h-[220px] object-contain rounded-xl"
               />
             ) : (

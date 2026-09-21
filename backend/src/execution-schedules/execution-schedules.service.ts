@@ -9,7 +9,7 @@ export interface CreateExecutionScheduleInput {
   address: string;
   visitNumber: string;
   actualVisitDate: string;
-  auditPeriod: string;
+  oePeriod: string;
   leadExecution: string;
   teamMembers: string;
   additionalAttendees: string;
@@ -30,7 +30,7 @@ export interface UpdateExecutionScheduleInput {
   address?: string;
   visitNumber?: string;
   actualVisitDate?: string;
-  auditPeriod?: string;
+  oePeriod?: string;
   leadExecution?: string;
   teamMembers?: string;
   additionalAttendees?: string;
@@ -107,7 +107,7 @@ export class ExecutionSchedulesService {
       address: s.address,
       visitNumber: s.visitNumber,
       actualVisitDate: s.actualVisitDate,
-      auditPeriod: s.auditPeriod,
+      oePeriod: s.oePeriod,
       leadExecution: s.leadExecution,
       teamMembers: s.teamMembers,
       additionalAttendees: s.additionalAttendees,
@@ -316,7 +316,7 @@ export class ExecutionSchedulesService {
       address: s.address,
       visitNumber: s.visitNumber,
       actualVisitDate: s.actualVisitDate,
-      auditPeriod: s.auditPeriod,
+      oePeriod: s.oePeriod,
       leadExecution: s.leadExecution,
       teamMembers: s.teamMembers,
       additionalAttendees: s.additionalAttendees,

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import { getCurrentUserServer } from "@/lib/auth";
-import type { AnnualPlan, User, Department, BusinessUnit } from "@auditdesk/shared";
+import type { AnnualPlan, User, Department, BusinessUnit } from "@oeportal/shared";
 import AnnualPlansClient from "./annual-plans-client";
 
 export default async function AnnualPlansPage() {

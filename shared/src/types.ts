@@ -16,7 +16,7 @@ export interface UserGroup {
   description: string | null;
 }
 
-export type UserRole = "ADMIN" | "LEAD_AUDITOR" | "AUDITOR" | "AUDITEE";
+export type UserRole = "ADMIN" | "OE_LEADER" | "OE_MEMBER" | "DEPT_PIC";
 
 export interface User {
   id: string;
@@ -41,7 +41,7 @@ export interface Attachment {
   createdAt: string;
 }
 
-export interface AuditProject {
+export interface OePlan {
   id: string;
   name: string;
   code: string;
@@ -54,7 +54,7 @@ export interface AuditProject {
   planningDetails: string;
   startDate: string;
   endDate: string;
-  leadAuditorId: string | null;
+  leaderId: string | null;
 
   // Custom Scoping details fields
   objectives: string;
@@ -69,8 +69,8 @@ export interface AuditProject {
   approvals: string;
   deptPicConfirmations?: string;
 
-  auditorIds?: string[]; // Array of selected auditor user IDs
-  auditorNames?: string;
+  memberIds?: string[]; // Array of selected member user IDs
+  memberNames?: string;
   attachments?: Attachment[];
   findings?: {
     id: string;
@@ -79,7 +79,7 @@ export interface AuditProject {
     status: string;
     severity?: string;
     recommendation?: string;
-    auditorName?: string;
+    memberName?: string;
     createdAt?: string;
     executionScheduleId?: string;
   }[];
@@ -87,7 +87,7 @@ export interface AuditProject {
   openMeetings?: OpenMeeting[];
 
   annualPlanId?: string | null;
-  auditPlanId?: string | null;
+  plannedEngagementId?: string | null;
 }
 
 export interface Finding {
@@ -100,8 +100,8 @@ export interface Finding {
   executionScheduleId: string;
   projectId?: string;
   projectName?: string;
-  auditorId: string;
-  auditorName?: string;
+  memberId: string;
+  memberName?: string;
   createdAt: string;
 }
 
@@ -109,7 +109,7 @@ export interface ScheduleRow {
   day?: string;
   date: string;
   time: string;
-  auditScope?: string;
+  oeScope?: string;
   activity: string;
   conductBy: string;
   pIncharge: string;
@@ -133,7 +133,7 @@ export interface ExecutionSchedule {
   address: string;
   visitNumber: string;
   actualVisitDate: string;
-  auditPeriod: string;
+  oePeriod: string;
   leadExecution: string;
   teamMembers: string;
   additionalAttendees: string;
@@ -162,7 +162,7 @@ export interface OpenMeeting {
   address: string;
   visitNumber: string;
   actualVisitDate: string;
-  auditPeriod: string;
+  oePeriod: string;
   leadExecution: string;
   teamMembers: string;
   additionalAttendees: string;
@@ -193,7 +193,7 @@ export interface AnnualPlan {
   updatedAt?: string;
 }
 
-export interface AuditPlan {
+export interface PlannedEngagement {
   id: string;
   annualPlanId: string;
   no: string;
@@ -212,8 +212,8 @@ export interface AuditPlan {
   nextVersion?: string;
   isProcessed?: boolean;
   isApproved?: boolean;
-  isUsed?: boolean; // true once an Individual OE Plan (AuditProject) has been created from this engagement
-  individualPlanStatus?: AuditProject["status"]; // status of the (latest) Individual OE Plan created from this engagement
+  isUsed?: boolean; // true once an Individual OE Plan (OePlan) has been created from this engagement
+  individualPlanStatus?: OePlan["status"]; // status of the (latest) Individual OE Plan created from this engagement
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;

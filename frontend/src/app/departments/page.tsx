@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import { getCurrentUserServer } from "@/lib/auth";
-import type { User, Department, UserGroup } from "@auditdesk/shared";
+import type { User, Department, UserGroup } from "@oeportal/shared";
 import DepartmentsClient from "./departments-client";
 
 export default async function DepartmentsPage() {

@@ -30,7 +30,7 @@ export class UpdateExecutionScheduleDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  auditPeriod?: string;
+  oePeriod?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

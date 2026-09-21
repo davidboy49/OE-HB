@@ -26,7 +26,7 @@ export class UpdateOpenMeetingDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  auditPeriod?: string;
+  oePeriod?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -56,7 +56,8 @@ export class UpdateOpenMeetingDto {
   standards?: string;
 
   @ApiPropertyOptional({
-    description: 'Free-form status string; e.g. DRAFT/RELEASED.',
+    description:
+      'Ignored - status is server-controlled. Use PATCH /meetings/:id/status.',
   })
   @IsOptional()
   @IsString()

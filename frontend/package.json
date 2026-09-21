@@ -1,5 +1,5 @@
 {
-  "name": "@auditdesk/frontend",
+  "name": "@oeportal/frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@auditdesk/shared": "*",
+    "@oeportal/shared": "*",
     "@tiptap/extension-link": "^3.27.2",
     "@tiptap/extension-table": "^3.27.2",
     "@tiptap/extension-table-cell": "^3.27.2",

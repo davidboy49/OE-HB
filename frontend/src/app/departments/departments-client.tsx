@@ -9,7 +9,7 @@ import {
   Pencil,
   Trash2
 } from "lucide-react";
-import type { User, Department, UserGroup } from "@auditdesk/shared";
+import type { User, Department, UserGroup } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -142,9 +142,9 @@ export default function DepartmentsClient({
 
   const roleFilterOptions = [
     { label: "Admin", value: "ADMIN" },
-    { label: "OE Leader", value: "LEAD_AUDITOR" },
-    { label: "Auditor", value: "AUDITOR" },
-    { label: "Auditee", value: "AUDITEE" }
+    { label: "OE Leader", value: "OE_LEADER" },
+    { label: "OE Member", value: "OE_MEMBER" },
+    { label: "Department PIC", value: "DEPT_PIC" }
   ];
 
   return (

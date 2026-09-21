@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AnnualPlan } from '@auditdesk/shared';
+import type { AnnualPlan } from '@oeportal/shared';
 
 @Injectable()
 export class AnnualPlansService {
@@ -89,7 +89,7 @@ export class AnnualPlansService {
 
   /** Mirrors dbService.getApprovedTopicCounts: occurrence count per topic across APPROVED annual plans. */
   async getApprovedTopicCounts(): Promise<Record<string, number>> {
-    const approvedPlans = await this.prisma.auditPlan.findMany({
+    const approvedPlans = await this.prisma.plannedEngagement.findMany({
       where: {
         annualPlan: {
           status: 'APPROVED',

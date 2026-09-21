@@ -1,4 +1,4 @@
-import type { UserRole } from '@auditdesk/shared';
+import type { UserRole } from '@oeportal/shared';
 
 /**
  * Single source of truth for the granular permission system: every capability
@@ -39,25 +39,25 @@ export const PERMISSIONS: PermissionDef[] = [
     description: 'Grant/revoke permissions on a group',
   },
 
-  // Audit Projects
-  { key: 'audit-projects:create', description: 'Create audit projects' },
-  { key: 'audit-projects:update', description: 'Edit audit projects' },
-  { key: 'audit-projects:delete', description: 'Delete audit projects' },
+  // OE Plans
+  { key: 'oe-plans:create', description: 'Create Individual OE Plans' },
+  { key: 'oe-plans:update', description: 'Edit Individual OE Plans' },
+  { key: 'oe-plans:delete', description: 'Delete Individual OE Plans' },
   {
-    key: 'audit-projects:submit',
-    description: 'Submit an individual audit plan for approval',
+    key: 'oe-plans:submit',
+    description: 'Submit an Individual OE Plan for approval',
   },
   {
-    key: 'audit-projects:approve',
-    description: 'Approve, reject, or reopen a submitted individual audit plan',
+    key: 'oe-plans:approve',
+    description: 'Approve, reject, or reopen a submitted Individual OE Plan',
   },
   {
-    key: 'audit-projects:close',
-    description: 'Close a released individual audit plan',
+    key: 'oe-plans:close',
+    description: 'Close a released Individual OE Plan',
   },
   {
-    key: 'audit-projects:reopen',
-    description: 'Reopen a closed individual audit plan',
+    key: 'oe-plans:reopen',
+    description: 'Reopen a closed Individual OE Plan',
   },
 
   // Execution Schedules
@@ -88,8 +88,8 @@ export const PERMISSIONS: PermissionDef[] = [
   },
 
   // Findings
-  { key: 'findings:create', description: 'Log audit findings' },
-  { key: 'findings:update', description: 'Edit audit findings' },
+  { key: 'findings:create', description: 'Log OE findings' },
+  { key: 'findings:update', description: 'Edit OE findings' },
 
   // Attachments
   { key: 'attachments:create', description: 'Upload attachments' },
@@ -105,10 +105,10 @@ export const PERMISSIONS: PermissionDef[] = [
     description: 'Approve or reject a submitted annual plan',
   },
 
-  // Audit Plans
-  { key: 'audit-plans:create', description: 'Create audit plans' },
-  { key: 'audit-plans:update', description: 'Edit audit plans' },
-  { key: 'audit-plans:delete', description: 'Delete audit plans' },
+  // OE Plans
+  { key: 'planned-engagements:create', description: 'Create Planned Engagements' },
+  { key: 'planned-engagements:update', description: 'Edit Planned Engagements' },
+  { key: 'planned-engagements:delete', description: 'Delete Planned Engagements' },
 
   // Notifications
   {
@@ -139,11 +139,11 @@ export const PERMISSION_KEYS = PERMISSIONS.map((p) => p.key);
  */
 export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
   ADMIN: PERMISSION_KEYS, // unused in practice - ADMIN bypasses the guard entirely
-  LEAD_AUDITOR: PERMISSION_KEYS.filter((k) => k !== 'notifications:configure'),
-  AUDITOR: [
-    'audit-projects:create',
-    'audit-projects:update',
-    'audit-projects:submit',
+  OE_LEADER: PERMISSION_KEYS.filter((k) => k !== 'notifications:configure'),
+  OE_MEMBER: [
+    'oe-plans:create',
+    'oe-plans:update',
+    'oe-plans:submit',
     'execution-schedules:create',
     'execution-schedules:update',
     'meetings:create',
@@ -156,10 +156,10 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'annual-plans:create',
     'annual-plans:update',
     'annual-plans:submit',
-    'audit-plans:create',
-    'audit-plans:update',
+    'planned-engagements:create',
+    'planned-engagements:update',
     'notifications:send-test',
     'notifications:send',
   ],
-  AUDITEE: ['attachments:create', 'notifications:send'],
+  DEPT_PIC: ['attachments:create', 'notifications:send'],
 };

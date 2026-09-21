@@ -6,17 +6,17 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CodeGeneratorService } from '../code-generator/code-generator.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
-import type { AuditProject } from '@auditdesk/shared';
-import type { UpdateAuditProjectDto } from './dto/update-audit-project.dto';
+import type { OePlan } from '@oeportal/shared';
+import type { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 /** PLANNING -> SUBMITTED_FOR_APPROVAL -> RELEASED -> CLOSED, plus reject/reopen loops back a step. */
 const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
-  'PLANNING->SUBMITTED_FOR_APPROVAL': 'audit-projects:submit',
-  'SUBMITTED_FOR_APPROVAL->RELEASED': 'audit-projects:approve',
-  'SUBMITTED_FOR_APPROVAL->PLANNING': 'audit-projects:approve',
-  'RELEASED->CLOSED': 'audit-projects:close',
-  'CLOSED->RELEASED': 'audit-projects:reopen',
+  'PLANNING->SUBMITTED_FOR_APPROVAL': 'oe-plans:submit',
+  'SUBMITTED_FOR_APPROVAL->RELEASED': 'oe-plans:approve',
+  'SUBMITTED_FOR_APPROVAL->PLANNING': 'oe-plans:approve',
+  'RELEASED->CLOSED': 'oe-plans:close',
+  'CLOSED->RELEASED': 'oe-plans:reopen',
 };
 
 /**
@@ -25,23 +25,23 @@ const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
  * returned object shape matches exactly what the frontend already expects.
  */
 @Injectable()
-export class AuditProjectsService {
+export class OePlansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly codeGenerator: CodeGeneratorService,
     private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
-  async findAll(): Promise<AuditProject[]> {
-    const projects = await this.prisma.auditProject.findMany({
+  async findAll(): Promise<OePlan[]> {
+    const projects = await this.prisma.oePlan.findMany({
       include: {
-        auditors: true,
+        members: true,
         attachments: true,
         executionSchedules: {
           include: {
             findings: {
               include: {
-                auditor: true,
+                member: true,
               },
             },
           },
@@ -49,7 +49,7 @@ export class AuditProjectsService {
         openMeetings: {
           where: { isDeleted: false },
         },
-        auditPlan: true,
+        plannedEngagement: true,
       },
       orderBy: { code: 'desc' },
       // This DB is remote (~200ms/round-trip); the default "query" strategy issues
@@ -66,15 +66,15 @@ export class AuditProjectsService {
       workflowStage: p.workflowStage as any,
       createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
-      departments: p.auditPlan?.topic || p.departments,
+      departments: p.plannedEngagement?.topic || p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      auditPlanId: p.auditPlanId || undefined,
+      plannedEngagementId: p.plannedEngagementId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
-      leadAuditorId: p.leadAuditorId,
-      auditorNames: p.auditorNames,
+      leaderId: p.leaderId,
+      memberNames: p.memberNames,
       objectives: p.objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -85,7 +85,7 @@ export class AuditProjectsService {
       focusArea: p.focusArea,
       opExTimeline: p.opExTimeline,
       approvals: p.approvals,
-      auditorIds: p.auditors.map((a) => a.id),
+      memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>
             (es.findings || []).map((f) => ({
@@ -96,7 +96,7 @@ export class AuditProjectsService {
               severity: f.severity,
               recommendation: f.recommendation,
               executionScheduleId: f.executionScheduleId,
-              auditorName: f.auditor?.name,
+              memberName: f.member?.name,
               createdAt: f.createdAt.toISOString(),
             })),
           )
@@ -119,7 +119,7 @@ export class AuditProjectsService {
         address: m.address,
         visitNumber: m.visitNumber,
         actualVisitDate: m.actualVisitDate,
-        auditPeriod: m.auditPeriod,
+        oePeriod: m.oePeriod,
         leadExecution: m.leadExecution,
         teamMembers: m.teamMembers,
         additionalAttendees: m.additionalAttendees,
@@ -148,13 +148,13 @@ export class AuditProjectsService {
   }
 
   /** A Planned Engagement can back at most one Individual OE Plan. */
-  private async ensureAuditPlanAvailable(
-    auditPlanId: string,
+  private async ensurePlannedEngagementAvailable(
+    plannedEngagementId: string,
     excludeProjectId?: string,
   ): Promise<void> {
-    const existing = await this.prisma.auditProject.findFirst({
+    const existing = await this.prisma.oePlan.findFirst({
       where: {
-        auditPlanId,
+        plannedEngagementId,
         ...(excludeProjectId ? { id: { not: excludeProjectId } } : {}),
       },
     });
@@ -173,49 +173,49 @@ export class AuditProjectsService {
     planningDetails: string,
     startDate: string,
     endDate: string,
-    leadAuditorId: string | null,
+    leaderId: string | null,
     departments: string = '',
     annualPlanId: string | null = null,
-    auditPlanId: string | null = null,
+    plannedEngagementId: string | null = null,
     createdBy: string = '',
-  ): Promise<AuditProject> {
+  ): Promise<OePlan> {
     let normalizedCode = (code || '').trim().toUpperCase();
 
     if (!normalizedCode || normalizedCode === 'AUTO') {
       normalizedCode = await this.codeGenerator.generateDocumentCode('OEP');
     }
 
-    const existing = await this.prisma.auditProject.findFirst({
+    const existing = await this.prisma.oePlan.findFirst({
       where: { code: normalizedCode },
     });
     if (existing) {
       throw new ConflictException(
-        `An Audit Plan with code ${normalizedCode} already exists.`,
+        `An OE Plan with code ${normalizedCode} already exists.`,
       );
     }
 
     let inheritedObjectives = '';
 
-    if (auditPlanId) {
-      const parentAuditPlan = await this.prisma.auditPlan.findUnique({
-        where: { id: auditPlanId },
+    if (plannedEngagementId) {
+      const parentPlannedEngagement = await this.prisma.plannedEngagement.findUnique({
+        where: { id: plannedEngagementId },
         include: { annualPlan: true },
       });
-      if (parentAuditPlan?.annualPlan?.status !== 'APPROVED') {
+      if (parentPlannedEngagement?.annualPlan?.status !== 'APPROVED') {
         throw new BadRequestException(
-          'The parent Annual Plan must be APPROVED before an Individual Audit Plan can be created under it.',
+          'The parent Annual Plan must be APPROVED before an Individual OE Plan can be created under it.',
         );
       }
-      await this.ensureAuditPlanAvailable(auditPlanId);
+      await this.ensurePlannedEngagementAvailable(plannedEngagementId);
       // Objectives are inherited from the Planned Engagement as plain text (the
       // editor shows them read-only, never entered independently). Scope is NOT
-      // copied here: AuditProject.scope holds a { inactiveIds, extraItems } JSON
+      // copied here: OePlan.scope holds a { inactiveIds, extraItems } JSON
       // override on top of the Planned Engagement's scope, not the scope text
       // itself - see ScopeOverride in planning-client.tsx.
-      inheritedObjectives = parentAuditPlan.objectives || '';
+      inheritedObjectives = parentPlannedEngagement.objectives || '';
     }
 
-    const p = await this.prisma.auditProject.create({
+    const p = await this.prisma.oePlan.create({
       data: {
         name,
         code: normalizedCode,
@@ -224,14 +224,14 @@ export class AuditProjectsService {
         planningDetails,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
-        leadAuditorId,
-        auditorNames: '',
+        leaderId,
+        memberNames: '',
         workflowStage: 'DRAFTING',
         createdBy,
         deptPicIds: '',
         departments,
         annualPlanId,
-        auditPlanId,
+        plannedEngagementId,
         objectives: inheritedObjectives,
         riskProcess: '',
         riskClass: '',
@@ -246,13 +246,13 @@ export class AuditProjectsService {
           '{"preparedByName":"","preparedByTitle":"","preparedDate":"","approvedByName":"","approvedByTitle":"","approvedDate":""}',
       },
       include: {
-        auditors: true,
+        members: true,
         attachments: true,
         executionSchedules: {
           include: {
             findings: {
               include: {
-                auditor: true,
+                member: true,
               },
             },
           },
@@ -270,13 +270,13 @@ export class AuditProjectsService {
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      auditPlanId: p.auditPlanId || undefined,
+      plannedEngagementId: p.plannedEngagementId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
-      leadAuditorId: p.leadAuditorId,
-      auditorNames: p.auditorNames,
+      leaderId: p.leaderId,
+      memberNames: p.memberNames,
       objectives: p.objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -287,7 +287,7 @@ export class AuditProjectsService {
       focusArea: p.focusArea,
       opExTimeline: p.opExTimeline,
       approvals: p.approvals,
-      auditorIds: p.auditors.map((a) => a.id),
+      memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>
             (es.findings || []).map((f) => ({
@@ -298,7 +298,7 @@ export class AuditProjectsService {
               severity: f.severity,
               recommendation: f.recommendation,
               executionScheduleId: f.executionScheduleId,
-              auditorName: f.auditor?.name,
+              memberName: f.member?.name,
               createdAt: f.createdAt.toISOString(),
             })),
           )
@@ -329,10 +329,10 @@ export class AuditProjectsService {
    */
   async assertUpdateAllowed(
     id: string,
-    updates: UpdateAuditProjectDto,
+    updates: UpdateOePlanDto,
     user: AuthenticatedUser,
   ): Promise<void> {
-    const current = await this.prisma.auditProject.findUnique({
+    const current = await this.prisma.oePlan.findUnique({
       where: { id },
       select: { status: true },
     });
@@ -344,7 +344,7 @@ export class AuditProjectsService {
     if (!isStatusChange) {
       await this.permissionsResolver.requirePermission(
         user,
-        'audit-projects:update',
+        'oe-plans:update',
       );
       return;
     }
@@ -356,7 +356,7 @@ export class AuditProjectsService {
       // generic edit permission rather than hard-blocking an unknown case.
       await this.permissionsResolver.requirePermission(
         user,
-        'audit-projects:update',
+        'oe-plans:update',
       );
       return;
     }
@@ -365,28 +365,28 @@ export class AuditProjectsService {
 
   async update(
     id: string,
-    updates: UpdateAuditProjectDto,
-  ): Promise<AuditProject | null> {
-    let auditorConnections: { set: { id: string }[] } | undefined = undefined;
-    if (updates.auditorIds) {
+    updates: UpdateOePlanDto,
+  ): Promise<OePlan | null> {
+    let memberConnections: { set: { id: string }[] } | undefined = undefined;
+    if (updates.memberIds) {
       const validUsers = await this.prisma.user.findMany({
         where: {
           OR: [
-            { id: { in: updates.auditorIds } },
-            { name: { in: updates.auditorIds } },
+            { id: { in: updates.memberIds } },
+            { name: { in: updates.memberIds } },
           ],
         },
       });
-      auditorConnections = {
+      memberConnections = {
         set: validUsers.map((u) => ({ id: u.id })),
       };
     }
 
-    if (updates.auditPlanId) {
-      await this.ensureAuditPlanAvailable(updates.auditPlanId, id);
+    if (updates.plannedEngagementId) {
+      await this.ensurePlannedEngagementAvailable(updates.plannedEngagementId, id);
     }
 
-    const p = await this.prisma.auditProject.update({
+    const p = await this.prisma.oePlan.update({
       where: { id },
       data: {
         name: updates.name,
@@ -398,8 +398,8 @@ export class AuditProjectsService {
         planningDetails: updates.planningDetails,
         startDate: updates.startDate ? new Date(updates.startDate) : undefined,
         endDate: updates.endDate ? new Date(updates.endDate) : undefined,
-        leadAuditorId: updates.leadAuditorId,
-        auditorNames: updates.auditorNames,
+        leaderId: updates.leaderId,
+        memberNames: updates.memberNames,
         objectives: updates.objectives,
         riskProcess: updates.riskProcess,
         riskClass: updates.riskClass,
@@ -411,17 +411,17 @@ export class AuditProjectsService {
         opExTimeline: updates.opExTimeline,
         approvals: updates.approvals,
         annualPlanId: updates.annualPlanId,
-        auditPlanId: updates.auditPlanId,
-        auditors: auditorConnections,
+        plannedEngagementId: updates.plannedEngagementId,
+        members: memberConnections,
       },
       include: {
-        auditors: true,
+        members: true,
         attachments: true,
         executionSchedules: {
           include: {
             findings: {
               include: {
-                auditor: true,
+                member: true,
               },
             },
           },
@@ -446,13 +446,13 @@ export class AuditProjectsService {
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      auditPlanId: p.auditPlanId || undefined,
+      plannedEngagementId: p.plannedEngagementId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
-      leadAuditorId: p.leadAuditorId,
-      auditorNames: p.auditorNames,
+      leaderId: p.leaderId,
+      memberNames: p.memberNames,
       objectives: p.objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -463,7 +463,7 @@ export class AuditProjectsService {
       focusArea: p.focusArea,
       opExTimeline: p.opExTimeline,
       approvals: p.approvals,
-      auditorIds: p.auditors.map((a) => a.id),
+      memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>
             (es.findings || []).map((f) => ({
@@ -474,7 +474,7 @@ export class AuditProjectsService {
               severity: f.severity,
               recommendation: f.recommendation,
               executionScheduleId: f.executionScheduleId,
-              auditorName: f.auditor?.name,
+              memberName: f.member?.name,
               createdAt: f.createdAt.toISOString(),
             })),
           )
@@ -497,7 +497,7 @@ export class AuditProjectsService {
         address: m.address,
         visitNumber: m.visitNumber,
         actualVisitDate: m.actualVisitDate,
-        auditPeriod: m.auditPeriod,
+        oePeriod: m.oePeriod,
         leadExecution: m.leadExecution,
         teamMembers: m.teamMembers,
         additionalAttendees: m.additionalAttendees,
@@ -527,7 +527,7 @@ export class AuditProjectsService {
 
   async remove(id: string): Promise<boolean> {
     try {
-      await this.prisma.auditProject.delete({
+      await this.prisma.oePlan.delete({
         where: { id },
       });
       return true;

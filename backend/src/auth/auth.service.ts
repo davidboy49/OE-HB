@@ -15,14 +15,31 @@ export class AuthService {
     private readonly keycloakService: KeycloakService,
   ) {}
 
+  /**
+   * Resolves a login identifier to a user: an exact email, or - when it has no "@" -
+   * a bare username matching the part of the email before the "@" (so "oe" finds
+   * oe@oe.com). A bare username is only accepted when it matches exactly one account.
+   */
+  private async findUserByLogin(identifier: string) {
+    const login = identifier.trim();
+    const exact = await this.prisma.user.findUnique({ where: { email: login } });
+    if (exact || login.includes('@')) return exact;
+
+    const matches = await this.prisma.user.findMany({
+      where: { email: { startsWith: `${login}@`, mode: 'insensitive' } },
+      take: 2,
+    });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   /** Used by LocalStrategy. Throws (not just returns null) so Passport surfaces a clean 401. */
   async validateUser(
     email: string,
     password: string,
   ): Promise<AuthenticatedUser> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.findUserByLogin(email);
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid username or password');
     }
     if (!user.passwordHash) {
       throw new UnauthorizedException(
@@ -31,7 +48,7 @@ export class AuthService {
     }
     const matches = await bcrypt.compare(password, user.passwordHash);
     if (!matches) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid username or password');
     }
 
     return {
@@ -71,7 +88,7 @@ export class AuthService {
   /**
    * Exchanges a Keycloak access token (from the mobile app's existing SSO
    * login) for our own JWT. The Keycloak account must map to an existing
-   * AuditDesk user by email - we don't self-provision accounts here, since
+   * OE Portal user by email - we don't self-provision accounts here, since
    * role/department/permissions are assigned deliberately by an admin.
    */
   async validateSso(keycloakToken: string): Promise<AuthenticatedUser> {
@@ -82,7 +99,7 @@ export class AuthService {
     });
     if (!user) {
       throw new UnauthorizedException(
-        `No AuditDesk account found for ${claims.email} - contact an admin`,
+        `No OE Portal account found for ${claims.email} - contact an admin`,
       );
     }
 

@@ -19,7 +19,7 @@ export class AuthController {
   login(
     // LocalAuthGuard reads req.body directly for the strategy; this @Body()
     // exists purely so the global ValidationPipe rejects a malformed request
-    // (bad email format, empty password) before the strategy even runs.
+    // (empty username or password) before the strategy even runs.
     @Body() _dto: LoginDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {

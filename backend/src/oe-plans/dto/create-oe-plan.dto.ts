@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
-export class CreateAuditProjectDto {
+export class CreateOePlanDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -44,7 +44,7 @@ export class CreateAuditProjectDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  leadAuditorId?: string | null;
+  leaderId?: string | null;
 
   @ApiPropertyOptional({ default: '' })
   @IsOptional()
@@ -59,5 +59,5 @@ export class CreateAuditProjectDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  auditPlanId?: string | null;
+  plannedEngagementId?: string | null;
 }
