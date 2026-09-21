@@ -17,9 +17,9 @@ import { UpdateExecutionScheduleDto } from './dto/update-execution-schedule.dto'
 import { RecordConsentDto } from './dto/record-consent.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
-import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { AccessScopeService } from '../common/access-scope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('execution-schedules')
@@ -28,11 +28,15 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 export class ExecutionSchedulesController {
   constructor(
     private readonly executionSchedulesService: ExecutionSchedulesService,
+    private readonly accessScope: AccessScopeService,
   ) {}
 
   @Get()
-  findAll() {
-    return this.executionSchedulesService.findAll();
+  @RequirePermission('execution-schedules:view')
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.executionSchedulesService.findAll(
+      await this.accessScope.schedules(user.sub),
+    );
   }
 
   @Post()
@@ -42,15 +46,21 @@ export class ExecutionSchedulesController {
     action: 'CREATE_SCHEDULE',
     details: `Created execution schedule for project ID: ${req.body.projectId}`,
   }))
-  create(
+  async create(
     @Body() dto: CreateExecutionScheduleDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('oePlan', dto.projectId, user.sub);
     return this.executionSchedulesService.create(dto, user.name);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  @RequirePermission('execution-schedules:view')
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.findOne(id);
   }
 
@@ -80,6 +90,7 @@ export class ExecutionSchedulesController {
     @Req() req: Request,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     const oldSchedule = await this.executionSchedulesService.findOne(id);
     const result = await this.executionSchedulesService.update(
       id,
@@ -116,15 +127,12 @@ export class ExecutionSchedulesController {
     action: 'DELETE_SCHEDULE',
     details: `Deleted execution schedule ID: ${req.params.id}`,
   }))
-  remove(@Param('id') id: string) {
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.remove(id);
-  }
-
-  /** Public: an unauthenticated department PIC scanning a physical QR code has no account. */
-  @Public()
-  @Get('qr/:qrToken')
-  findByQrToken(@Param('qrToken') qrToken: string) {
-    return this.executionSchedulesService.findByQrToken(qrToken);
   }
 
   /**
@@ -139,12 +147,13 @@ export class ExecutionSchedulesController {
     action: 'RECORD_DEPARTMENT_CONSENT',
     details: `User ${(req as any).user?.name} (${req.params.departmentId}) recorded consent status: ${req.body.status} for schedule ${req.params.id}`,
   }))
-  recordConsent(
+  async recordConsent(
     @Param('id') id: string,
     @Param('departmentId') departmentId: string,
     @Body() dto: RecordConsentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.updateDepartmentConsent(
       id,
       departmentId,

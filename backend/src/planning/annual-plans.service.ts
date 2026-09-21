@@ -1,13 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AnnualPlan } from '@oeportal/shared';
+import type { Prisma } from '../generated/prisma/client';
 
 @Injectable()
 export class AnnualPlansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<AnnualPlan[]> {
+  /** `where` is the caller's view scope (see AccessScopeService); omit only for internal use. */
+  async findAll(
+    where: Prisma.AnnualPlanWhereInput = {},
+  ): Promise<AnnualPlan[]> {
     const plans = await this.prisma.annualPlan.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return plans.map((p) => ({
@@ -17,6 +23,7 @@ export class AnnualPlansService {
       comment: p.comment,
       status: p.status,
       createdBy: p.createdBy,
+      qrToken: p.qrToken,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     }));
@@ -38,6 +45,7 @@ export class AnnualPlansService {
       comment: p.comment,
       status: p.status,
       createdBy: p.createdBy,
+      qrToken: p.qrToken,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };
@@ -60,6 +68,29 @@ export class AnnualPlansService {
       comment: p.comment,
       status: p.status,
       createdBy: p.createdBy,
+      qrToken: p.qrToken,
+      createdAt: p.createdAt.toISOString(),
+      updatedAt: p.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Issues a fresh QR token. The old one stops working immediately, so a printed or
+   * leaked QR code can be revoked without touching the plan itself.
+   */
+  async rotateQrToken(id: string): Promise<AnnualPlan> {
+    const p = await this.prisma.annualPlan.update({
+      where: { id },
+      data: { qrToken: randomUUID() },
+    });
+    return {
+      id: p.id,
+      planName: p.planName,
+      period: p.period,
+      comment: p.comment,
+      status: p.status,
+      createdBy: p.createdBy,
+      qrToken: p.qrToken,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };
@@ -77,6 +108,7 @@ export class AnnualPlansService {
       comment: p.comment,
       status: p.status,
       createdBy: p.createdBy,
+      qrToken: p.qrToken,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };
@@ -88,21 +120,27 @@ export class AnnualPlansService {
   }
 
   /** Mirrors dbService.getApprovedTopicCounts: occurrence count per topic across APPROVED annual plans. */
-  async getApprovedTopicCounts(): Promise<Record<string, number>> {
+  async getApprovedTopicCounts(
+    projectScope: Prisma.PlannedEngagementWhereInput = {},
+  ): Promise<Record<string, number>> {
     const approvedPlans = await this.prisma.plannedEngagement.findMany({
       where: {
         annualPlan: {
           status: 'APPROVED',
         },
+        ...projectScope,
       },
       select: {
         topic: true,
+        departmentId: true,
       },
       orderBy: { createdAt: 'asc' },
     });
     const counts: Record<string, number> = {};
     for (const p of approvedPlans) {
-      const key = (p.topic || '').trim().toLowerCase();
+      // Versions count per department (its id), so two Business Units can both have a
+      // "Finance"; older rows without a department fall back to the topic text.
+      const key = p.departmentId ?? (p.topic || '').trim().toLowerCase();
       counts[key] = (counts[key] || 0) + 1;
     }
     return counts;

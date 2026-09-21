@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import type { User, UserRole } from '@oeportal/shared';
@@ -24,7 +28,45 @@ export class UsersService {
       groupId: u.groupId,
       departmentName: u.department?.name || null,
       groupName: u.group?.name || null,
+      isActive: u.isActive,
+      ssoLinked: u.keycloakSub !== null,
     }));
+  }
+
+  /**
+   * Turns an account on or off. A deactivated person cannot sign in and any session they
+   * already have stops working on its next request (see JwtStrategy). The last active admin
+   * can never be switched off, so the system cannot lock itself out.
+   */
+  async setActive(userId: string, isActive: boolean): Promise<User> {
+    const target = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!target) throw new NotFoundException('User not found');
+
+    if (!isActive && target.role === 'ADMIN' && target.isActive) {
+      const otherAdmins = await this.prisma.user.count({
+        where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+      });
+      if (otherAdmins === 0) {
+        throw new BadRequestException(
+          'This is the last active admin - at least one admin must stay active.',
+        );
+      }
+    }
+
+    const u = await this.prisma.user.update({
+      where: { id: userId },
+      data: { isActive },
+    });
+    return {
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      role: u.role as UserRole,
+      departmentId: u.departmentId,
+      groupId: u.groupId,
+      isActive: u.isActive,
+      ssoLinked: u.keycloakSub !== null,
+    };
   }
 
   async create(

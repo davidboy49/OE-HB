@@ -29,4 +29,8 @@ All non-public routes require `Authorization: Bearer <token>`. The frontend neve
 
 ## Authorization
 
-Routes are restricted with `@RequirePermission('domain:action')`, enforced by a global `PermissionsGuard` (see `backend/src/common/permissions.ts` for the full capability list). `ADMIN` always bypasses. A user's granted permissions come from their `UserGroup` (`GET /user-groups/:id/permissions`); a user with no group falls back to a fixed default set per role (`DEFAULT_PERMISSIONS_BY_ROLE`), reproducing the original app's behavior for anyone not yet assigned to a group. Where a route has no `@RequirePermission()` decorator, any authenticated user can call it.
+Access is **denied by default**. Every route must declare its rule - `@Public()`, `@RequirePermission('module:action')`, `@DynamicPermission(...)` (the handler picks which permission applies) or `@Authenticated()` (any signed-in user, data scoped to the caller) - and a route with none is refused. The global `PermissionsGuard` enforces it, and `route-inventory.spec.ts` fails the build if a route is undeclared or a record read lacks its `:view` permission. The full list is also shown, read-only, on the Access Control page (`GET /permissions/routes`).
+
+A user's grants come from their `UserGroup` (`GET /user-groups/:id/permissions`, each `{ key, scope }`); a user with no group falls back to `DEFAULT_PERMISSIONS_BY_ROLE`; `ADMIN` holds everything at scope `ALL`. Reading a record module needs its `:view` permission, whose **scope** (`ALL` / `BU` / `DEPARTMENT` / `MEMBER`) limits which records come back; writing needs the write permission AND the record inside that view scope (404 otherwise). Grants are re-read from the database on every request, and a deactivated user (`PATCH /users/:id/active`) is refused on the next one.
+
+Keycloak (see `KEYCLOAK.md`) only authenticates; roles, groups and scopes always live here.

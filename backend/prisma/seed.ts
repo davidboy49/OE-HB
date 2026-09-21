@@ -71,17 +71,14 @@ async function main() {
   await prisma.permission.deleteMany();
   await prisma.permission.createMany({ data: PERMISSIONS });
 
-  await prisma.userGroup.update({
-    where: { id: group1.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER.map((key) => ({ key })) } }
-  });
-  await prisma.userGroup.update({
-    where: { id: group2.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.OE_LEADER.map((key) => ({ key })) } }
-  });
-  await prisma.userGroup.update({
-    where: { id: group3.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER.map((key) => ({ key })) } }
+  const grantsFor = (groupId: string, keys: string[]) =>
+    keys.map((permissionKey) => ({ groupId, permissionKey, scope: "ALL" }));
+  await prisma.groupPermission.createMany({
+    data: [
+      ...grantsFor(group1.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
+      ...grantsFor(group2.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_LEADER),
+      ...grantsFor(group3.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
+    ],
   });
 
   console.log("Permissions seeded and granted to existing groups.");

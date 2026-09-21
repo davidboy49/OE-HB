@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  NotFoundException,
   Param,
   Patch,
   Post,
@@ -15,14 +14,13 @@ import { MeetingsService } from './meetings.service';
 import { CreateOpenMeetingDto } from './dto/create-open-meeting.dto';
 import { UpdateOpenMeetingDto } from './dto/update-open-meeting.dto';
 import { UpdateOpenMeetingStatusDto } from './dto/update-open-meeting-status.dto';
-import { RecordQrConsentDto } from './dto/record-qr-consent.dto';
-import { DepartmentsService } from '../departments/departments.service';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
-import { Public } from '../common/decorators/public.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { DynamicPermission } from '../common/decorators/dynamic-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
+import { AccessScopeService } from '../common/access-scope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 /** DRAFT -> SUBMITTED_FOR_APPROVAL needs submit rights; the approver's decision (approve/reject/reopen) needs approve rights. */
@@ -38,22 +36,37 @@ const STATUS_PERMISSION_BY_TARGET: Record<string, string> = {
 export class MeetingsController {
   constructor(
     private readonly meetingsService: MeetingsService,
-    private readonly departmentsService: DepartmentsService,
     private readonly permissionsResolver: PermissionsResolverService,
+    private readonly accessScope: AccessScopeService,
   ) {}
 
   @Get()
-  findAll() {
-    return this.meetingsService.findAll();
+  @RequirePermission('meetings:view')
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.meetingsService.findAll(
+      await this.accessScope.meetings(user.sub),
+    );
   }
 
   @Get('project/:projectId')
-  findByProject(@Param('projectId') projectId: string) {
-    return this.meetingsService.findByProject(projectId);
+  @RequirePermission('meetings:view')
+  async findByProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.meetingsService.findByProject(
+      projectId,
+      await this.accessScope.meetings(user.sub),
+    );
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  @RequirePermission('meetings:view')
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('meeting', id, user.sub);
     return this.meetingsService.findOne(id);
   }
 
@@ -64,10 +77,11 @@ export class MeetingsController {
     action: 'CREATE_OPEN_MEETING',
     details: `Created open meeting for project ID: ${req.body.projectId}`,
   }))
-  create(
+  async create(
     @Body() dto: CreateOpenMeetingDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('oePlan', dto.projectId, user.sub);
     return this.meetingsService.create(dto, user.name);
   }
 
@@ -78,15 +92,17 @@ export class MeetingsController {
     action: 'UPDATE_OPEN_MEETING',
     details: `Updated open meeting ID: ${req.params.id}`,
   }))
-  update(
+  async update(
     @Param('id') id: string,
     @Body() dto: UpdateOpenMeetingDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('meeting', id, user.sub);
     return this.meetingsService.update(id, dto, user.name);
   }
 
   @Patch(':id/status')
+  @DynamicPermission('meetings:submit', 'meetings:approve')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'UPDATE_OPEN_MEETING_STATUS',
@@ -102,6 +118,7 @@ export class MeetingsController {
       throw new BadRequestException(`Unknown target status: ${dto.status}`);
     }
     await this.permissionsResolver.requirePermission(user, requiredKey);
+    await this.accessScope.assertVisible('meeting', id, user.sub);
     return this.meetingsService.updateStatus(id, dto.status);
   }
 
@@ -112,65 +129,11 @@ export class MeetingsController {
     action: 'DELETE_OPEN_MEETING',
     details: `Deleted open meeting ID: ${req.params.id}`,
   }))
-  remove(@Param('id') id: string) {
-    return this.meetingsService.remove(id);
-  }
-
-  /**
-   * Mirrors getOpenMeetingByQrAction (actions.ts:823-832). Public: an unauthenticated
-   * department PIC scanning a physical QR code has no account. Drops `currentUser` from the
-   * response entirely - there's no reliable identity for an anonymous public request.
-   */
-  @Public()
-  @Get('qr/:qrToken')
-  async findByQrToken(@Param('qrToken') qrToken: string) {
-    const schedule = await this.meetingsService.findByQrToken(qrToken);
-    const departments = await this.departmentsService.findAll();
-    let projectMeetings: any[] = [];
-    if (schedule) {
-      projectMeetings = await this.meetingsService.findByProject(
-        schedule.projectId,
-      );
-    }
-    return { schedule, departments, projectMeetings };
-  }
-
-  /**
-   * Mirrors recordDepartmentConsentAction (actions.ts:834-848), invoked from the QR scan
-   * page (frontend/src/app/meetings/scan/[qrToken]/scan-client.tsx:105-122). The old page
-   * first resolved qrToken -> schedule via getOpenMeetingByQrAction, then called
-   * recordDepartmentConsentAction(schedule.id, ...) with the resolved id. This route
-   * reproduces that in one hop: it re-resolves qrToken to the target schedule/meeting id
-   * itself, so the client only ever needs the qrToken it scanned.
-   *
-   * Public, per the auth-model change: no JWT, so identity is collected directly from the
-   * request body (acceptedByUserName/Email) instead of derived from a session, and
-   * acceptedByUserId is left empty.
-   */
-  @Public()
-  @Post('qr/:qrToken/consent')
-  async recordConsent(
-    @Param('qrToken') qrToken: string,
-    @Body() dto: RecordQrConsentDto,
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    const schedule = await this.meetingsService.findByQrToken(qrToken);
-    if (!schedule)
-      throw new NotFoundException(
-        'No meeting or schedule found for this QR code',
-      );
-
-    return this.meetingsService.updateDepartmentConsent(
-      schedule.id,
-      dto.departmentId,
-      {
-        status: dto.status,
-        acceptedByUserId: '',
-        acceptedByUserName: dto.acceptedByUserName,
-        acceptedByUserEmail: dto.acceptedByUserEmail,
-        timestamp: new Date().toISOString(),
-        comments: dto.comments || '',
-        departmentConcern: dto.departmentConcern || '',
-      },
-    );
+    await this.accessScope.assertVisible('meeting', id, user.sub);
+    return this.meetingsService.remove(id);
   }
 }

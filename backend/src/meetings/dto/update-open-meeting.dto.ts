@@ -73,11 +73,6 @@ export class UpdateOpenMeetingDto {
   @IsString()
   scope?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  departmentConcern?: string;
-
   @ApiPropertyOptional({
     description:
       'JSON-serialized array of schedule rows: [{ date, time, activity, conductBy, pIncharge }]',

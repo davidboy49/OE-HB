@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { assertProjectNotClosed } from '../common/assert-project-status';
 import type { Finding } from '@oeportal/shared';
+import type { Prisma } from '../generated/prisma/client';
 
 const findingInclude = {
   executionSchedule: {
@@ -20,8 +21,10 @@ const findingInclude = {
 export class FindingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<Finding[]> {
+  /** `where` is the caller's view scope (see AccessScopeService). */
+  async findAll(where: Prisma.FindingWhereInput = {}): Promise<Finding[]> {
     const findings = await this.prisma.finding.findMany({
+      where,
       include: findingInclude,
       orderBy: { createdAt: 'desc' },
     });

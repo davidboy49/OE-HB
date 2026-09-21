@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -15,6 +16,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateUserGroupAndDeptDto } from './dto/update-user-group-and-dept.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
+import { SetUserActiveDto } from './dto/set-user-active.dto';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/auth.types';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -29,6 +33,7 @@ export class UsersController {
   ) {}
 
   @Get()
+  @RequirePermission('users:view')
   findAll() {
     return this.usersService.findAll();
   }
@@ -85,6 +90,25 @@ export class UsersController {
       dto.departmentId ?? null,
       dto.groupId ?? null,
     );
+  }
+
+  /** Deactivate or reactivate an account. Takes effect on the person's very next request. */
+  @Patch(':id/active')
+  @RequirePermission('users:update')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: req.body.isActive ? 'ACTIVATE_USER' : 'DEACTIVATE_USER',
+    details: `${req.body.isActive ? 'Reactivated' : 'Deactivated'} user ID: ${req.params.id}`,
+  }))
+  setActive(
+    @Param('id') id: string,
+    @Body() dto: SetUserActiveDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (!dto.isActive && id === actor.sub) {
+      throw new BadRequestException('You cannot deactivate your own account.');
+    }
+    return this.usersService.setActive(id, dto.isActive);
   }
 
   @Patch(':id/password')

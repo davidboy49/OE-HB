@@ -23,7 +23,6 @@ import {
   CheckCircle,
   XCircle,
   Send,
-  QrCode
 } from "lucide-react";
 import type {
   User,
@@ -39,10 +38,9 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
+import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
-import QRCodeModal from "@/components/ui/qr-code-modal";
 import OePlanSelect from "@/components/ui/oe-plan-select";
-import QRCode from "qrcode";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -167,7 +165,6 @@ export default function MeetingsClient({
   const [standards, setStandards] = useState("Meeting Alignment Agenda");
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
-  const [departmentConcern, setDepartmentConcern] = useState("");
   const [rows, setRows] = useState<ScheduleRow[]>([]);
   const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED">("DRAFT");
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
@@ -180,40 +177,6 @@ export default function MeetingsClient({
 
   // Feedback notifier
   const [feedback, setFeedback] = useState<string | null>(null);
-
-  // QR Code Modal State
-  const [qrModalOpen, setQrModalOpen] = useState<boolean>(false);
-  const [qrModalData, setQrModalData] = useState<{
-    qrToken: string;
-    projectTitle: string;
-    projectCode: string;
-    departments: string;
-  } | null>(null);
-
-  // Mini QR State
-  const [miniQrDataUrl, setMiniQrDataUrl] = useState<string>("");
-
-  useEffect(() => {
-    if (isModalOpen && modalMode === "edit" && selectedScheduleId) {
-      const activeSch = schedules.find(s => s.id === selectedScheduleId);
-      if (activeSch?.qrToken) {
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const url = `${origin}/meetings/scan/${activeSch.qrToken}`;
-        QRCode.toDataURL(url, {
-          width: 120,
-          margin: 1,
-          color: {
-            dark: "#05375c",
-            light: "#FFFFFF"
-          }
-        })
-        .then(urlData => setMiniQrDataUrl(urlData))
-        .catch(err => console.error("Failed to generate mini QR", err));
-        return;
-      }
-    }
-    setMiniQrDataUrl("");
-  }, [isModalOpen, modalMode, selectedScheduleId, schedules]);
 
   // Custom dialog alert states
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -398,7 +361,6 @@ export default function MeetingsClient({
     setStandards("Meeting Alignment Agenda");
     setObjectives("");
     setScope("");
-    setDepartmentConcern("");
     setRows([]);
     setMeetingStatus("DRAFT");
     setAttendeeConfirmations({});
@@ -421,7 +383,6 @@ export default function MeetingsClient({
     setAttendeeConfirmations(parseAttendeeConfirmations(sched.attendeeConfirmations));
     setObjectives(sched.objectives);
     setScope(sched.scope);
-    setDepartmentConcern((sched as any).departmentConcern || "");
     
     try {
       setRows(JSON.parse(sched.scheduleRows));
@@ -479,7 +440,6 @@ export default function MeetingsClient({
       status: "DRAFT",
       objectives,
       scope,
-      departmentConcern,
       scheduleRows: JSON.stringify(rows),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name
@@ -1217,19 +1177,20 @@ export default function MeetingsClient({
                         </td>
                       </tr>
 
-                      {/* Row 12: Department Concern */}
+                      {/* Row 12: Department responses (each user in the department answers on their own) */}
                       <tr>
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
                           The Concern of the Department Owner:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
-                          <RichEditor 
-                            value={departmentConcern}
-                            onChange={setDepartmentConcern}
-                            placeholder="Add concerns of the department owner..."
-                            editorClassName="min-h-[120px] max-h-[250px]"
-                            editable={!isLocked}
-                          />
+                          {modalMode === "edit" && selectedScheduleId && meetingStatus === "RELEASED" ? (
+                            <MeetingResponsesPanel meetingId={selectedScheduleId} />
+                          ) : (
+                            <p className="text-xs italic text-slate-400">
+                              Each person in the department answers on their own, from the Annual Plan QR code, once this meeting is
+                              approved and released.
+                            </p>
+                          )}
                         </td>
                       </tr>
 
@@ -1286,17 +1247,6 @@ export default function MeetingsClient({
         </div>
       )}
 
-      {/* Universal QR Code Modal */}
-      {qrModalData && (
-        <QRCodeModal
-          isOpen={qrModalOpen}
-          onClose={() => setQrModalOpen(false)}
-          qrToken={qrModalData.qrToken}
-          projectTitle={qrModalData.projectTitle}
-          projectCode={qrModalData.projectCode}
-          departments={qrModalData.departments}
-        />
-      )}
 
     </div>
   );

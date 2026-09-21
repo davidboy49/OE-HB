@@ -77,11 +77,6 @@ export class CreateOpenMeetingDto {
   @IsNotEmpty()
   scope!: string;
 
-  @ApiPropertyOptional({ description: 'Defaults to "".' })
-  @IsOptional()
-  @IsString()
-  departmentConcern?: string;
-
   @ApiProperty({
     description:
       'JSON-serialized array of schedule rows: [{ date, time, activity, conductBy, pIncharge }]',
@@ -103,18 +98,4 @@ export class CreateOpenMeetingDto {
   @IsOptional()
   @IsString()
   lastModifiedBy?: string;
-
-  @ApiPropertyOptional({
-    description: 'Defaults to projectId, matching dbService.createOpenMeeting.',
-  })
-  @IsOptional()
-  @IsString()
-  qrToken?: string;
-
-  @ApiPropertyOptional({
-    description: 'JSON-serialized consent map. Defaults to "{}".',
-  })
-  @IsOptional()
-  @IsString()
-  departmentConsents?: string;
 }

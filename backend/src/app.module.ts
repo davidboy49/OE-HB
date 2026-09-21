@@ -18,6 +18,7 @@ import { PlanningModule } from './planning/planning.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ExecutionSchedulesModule } from './execution-schedules/execution-schedules.module';
 import { MeetingsModule } from './meetings/meetings.module';
+import { MeetingResponsesModule } from './meeting-responses/meeting-responses.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 
@@ -39,6 +40,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
     NotificationsModule,
     ExecutionSchedulesModule,
     MeetingsModule,
+    MeetingResponsesModule,
   ],
   controllers: [AppController],
   providers: [

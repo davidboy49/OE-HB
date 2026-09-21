@@ -128,8 +128,12 @@ export class ExecutionSchedulesService {
     };
   }
 
-  async findAll(): Promise<any[]> {
+  /** `where` is the caller's view scope (see AccessScopeService). */
+  async findAll(
+    where: Prisma.ExecutionScheduleWhereInput = {},
+  ): Promise<any[]> {
     const schedules = await this.prisma.executionSchedule.findMany({
+      where,
       include: { project: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -164,70 +168,6 @@ export class ExecutionSchedulesService {
     if (!s) return null;
     const confirmationMap = await this.getScheduleAttendeeConfirmations([id]);
     return this.toDto(s, confirmationMap[s.id]);
-  }
-
-  /**
-   * dbService.getExecutionScheduleByQrToken (dbService.ts:1339-1420). Resolves by qrToken,
-   * id, projectId or project code, then merges departments/consents across sibling
-   * schedules on the same project.
-   */
-  async findByQrToken(qrToken: string): Promise<any | null> {
-    const s = await this.prisma.executionSchedule.findFirst({
-      where: {
-        OR: [
-          { qrToken },
-          { id: qrToken },
-          { projectId: qrToken },
-          { project: { code: qrToken } },
-        ],
-      },
-      include: { project: true },
-    });
-    if (!s) return null;
-
-    let mergedDepartments = s.departments;
-    let mergedConsents: Record<string, any> = {};
-    try {
-      mergedConsents = JSON.parse(s.departmentConsents || '{}');
-    } catch {
-      mergedConsents = {};
-    }
-
-    if (s.projectId) {
-      const siblingSchedules = await this.prisma.executionSchedule.findMany({
-        where: { projectId: s.projectId },
-      });
-
-      if (s.project?.departments) {
-        mergedDepartments = s.project.departments;
-      } else {
-        const deptSet = new Set<string>();
-        siblingSchedules.forEach((sib) => {
-          (sib.departments || '').split(',').forEach((d) => {
-            const clean = d.trim();
-            if (clean) deptSet.add(clean);
-          });
-        });
-        if (deptSet.size > 0)
-          mergedDepartments = Array.from(deptSet).join(', ');
-      }
-
-      for (const sib of siblingSchedules) {
-        try {
-          const sibConsents = JSON.parse(sib.departmentConsents || '{}');
-          Object.assign(mergedConsents, sibConsents);
-        } catch {
-          // ignore invalid json
-        }
-      }
-    }
-
-    const confirmationMap = await this.getScheduleAttendeeConfirmations([s.id]);
-    return {
-      ...this.toDto(s, confirmationMap[s.id]),
-      departments: mergedDepartments,
-      departmentConsents: JSON.stringify(mergedConsents),
-    };
   }
 
   /**

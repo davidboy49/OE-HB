@@ -10,55 +10,66 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(uuid())
-  email        String      @unique
-  name         String
-  role         String // "ADMIN", "OE_LEADER", "OE_MEMBER", "DEPT_PIC"
-  passwordHash String? // bcrypt hash; null until an admin sets a password for this user
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  groupId      String?
-  group        UserGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  documents    Document[]
-  findings     Finding[]
-  reports      Report[]
-  projects     OePlan[]    @relation("PlanMembers")
+  id               String            @id @default(uuid())
+  email            String            @unique
+  name             String
+  role             String // "ADMIN", "OE_LEADER", "OE_MEMBER", "DEPT_PIC"
+  passwordHash     String? // bcrypt hash; null until an admin sets a password for this user
+  keycloakSub      String?           @unique // Keycloak's permanent user id ("sub"); set the first time this account signs in through SSO
+  isActive         Boolean           @default(true) // false = cannot sign in and existing sessions stop working on the next request
+  departmentId     String?
+  department       Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  groupId          String?
+  group            UserGroup?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  documents        Document[]
+  findings         Finding[]
+  reports          Report[]
+  projects         OePlan[]          @relation("PlanMembers")
+  meetingResponses MeetingResponse[]
 }
 
 model Department {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  users       User[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String              @id @default(uuid())
+  name               String
+  description        String?
+  businessUnitId     String? // Each Business Unit has its own departments; required by the UI, nullable for legacy rows
+  businessUnit       BusinessUnit?       @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+  users              User[]
+  plannedEngagements PlannedEngagement[]
+  openMeetings       OpenMeeting[]
+  meetingResponses   MeetingResponse[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([businessUnitId, name])
 }
 
 model BusinessUnit {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model UserGroup {
   id          String       @id @default(uuid())
   name        String       @unique
   description String?
-  role        String       @default("DEPT_PIC") // Unused legacy column, kept to avoid a migration - access is controlled by `permissions` below
-  users       User[]
-  permissions Permission[] // granular per-API-action grants for members of this group
+  departments Department[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
 
+model UserGroup {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  description String?
+  role        String            @default("DEPT_PIC") // Unused legacy column, kept to avoid a migration - access is controlled by `permissions` below
+  users       User[]
+  grants      GroupPermission[] // what members of this group may do, and how far (see scope)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
 model Permission {
-  key         String      @id // e.g. "oe-plans:create" - matches @RequirePermission() in code
+  key         String            @id // e.g. "oe-plans:create" - matches @RequirePermission() in code
   description String
-  groups      UserGroup[]
+  grants      GroupPermission[]
 }
 
 model OePlan {
@@ -173,31 +184,34 @@ model ExecutionSchedule {
 }
 
 model OpenMeeting {
-  id                    String   @id @default(uuid())
+  id                    String            @id @default(uuid())
   projectId             String
-  project               OePlan   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  departments           String   @default("")
-  address               String   @default("HQ Main Conference Room / Virtual Meeting")
-  visitNumber           String   @default("01")
+  project               OePlan            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  departmentId          String?
+  department            Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  responses             MeetingResponse[]
+  departments           String            @default("")
+  address               String            @default("HQ Main Conference Room / Virtual Meeting")
+  visitNumber           String            @default("01")
   actualVisitDate       String
   oePeriod              String
   leadExecution         String
-  teamMembers           String   @default("") // Comma-separated list of names
-  additionalAttendees   String   @default("")
-  attendeeConfirmations String   @default("{}")
-  standards             String   @default("Work Procedure, work instruction, and policy")
-  status                String   @default("DRAFT")
-  objectives            String   @default("")
-  scope                 String   @default("")
-  departmentConcern     String   @default("")
+  teamMembers           String            @default("") // Comma-separated list of names
+  additionalAttendees   String            @default("")
+  attendeeConfirmations String            @default("{}")
+  standards             String            @default("Work Procedure, work instruction, and policy")
+  status                String            @default("DRAFT")
+  objectives            String            @default("")
+  scope                 String            @default("")
+  departmentConcern     String            @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
-  ownerName             String   @default("")
-  lastModifiedBy        String   @default("")
-  qrToken               String   @default(uuid())
-  departmentConsents    String   @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
-  isDeleted             Boolean  @default(false)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  ownerName             String            @default("")
+  lastModifiedBy        String            @default("")
+  qrToken               String            @default(uuid())
+  departmentConsents    String            @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
+  isDeleted             Boolean           @default(false)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 }
 
 model ActivityLog {
@@ -241,28 +255,68 @@ model AnnualPlan {
   comment            String              @default("")
   status             String              @default("DRAFT")
   createdBy          String              @default("") // Name of the user who created this plan
+  qrToken            String              @unique @default(dbgenerated("(gen_random_uuid())::text")) // Unguessable, rotatable; the QR code encodes this, never the plan id
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   plannedEngagements PlannedEngagement[]
 }
 
 model PlannedEngagement {
-  id           String     @id @default(uuid())
+  id           String      @id @default(uuid())
   annualPlanId String
-  annualPlan   AnnualPlan @relation(fields: [annualPlanId], references: [id], onDelete: Cascade)
+  annualPlan   AnnualPlan  @relation(fields: [annualPlanId], references: [id], onDelete: Cascade)
   no           String
-  projectName  String     @default("")
-  topic        String
-  bu           String     @default("")
-  type         String     @default("OE")
+  projectName  String      @default("")
+  departmentId String? // The single department this project is for
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  topic        String // Denormalised department name (kept in sync from departmentId)
+  bu           String      @default("") // Denormalised Business Unit name (kept in sync from the department)
+  type         String      @default("OE")
   revieweeIds  String
   conductDate  DateTime
   endDate      DateTime
   durationDay  Int
   purpose      String
-  objectives   String     @default("")
-  scope        String     @default("")
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  objectives   String      @default("")
+  scope        String      @default("")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   oePlans      OePlan[]
+}
+
+/// One response per user per Open Meeting. Identity and department are snapshotted so the
+/// record still reads correctly after the user is renamed, moves department or is deleted.
+model MeetingResponse {
+  id               String      @id @default(uuid())
+  meetingId        String
+  meeting          OpenMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId           String?
+  user             User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  departmentId     String?
+  department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  respondentName   String
+  respondentEmail  String
+  departmentName   String
+  businessUnitName String      @default("")
+  status           String // "ACCEPTED" | "REVISION_REQUESTED"
+  concern          String      @default("") // Sanitised HTML: the respondent's Concern of the Department Owner
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([meetingId, userId])
+  @@index([meetingId])
+}
+
+/// One permission granted to a group, with the scope that limits how far it reaches.
+model GroupPermission {
+  groupId       String
+  group         UserGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  permissionKey String
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+  scope         String     @default("ALL") // ALL | BU | DEPARTMENT | MEMBER - only meaningful for scopable "view" permissions
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@id([groupId, permissionKey])
+  @@index([permissionKey])
 }

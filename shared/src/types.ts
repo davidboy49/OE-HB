@@ -2,6 +2,8 @@ export interface Department {
   id: string;
   name: string;
   description: string | null;
+  businessUnitId?: string | null; // Each Business Unit has its own departments
+  businessUnitName?: string | null;
 }
 
 export interface BusinessUnit {
@@ -14,6 +16,44 @@ export interface UserGroup {
   id: string;
   name: string;
   description: string | null;
+  /** Only present on GET /user-groups. */
+  memberCount?: number;
+  permissionCount?: number;
+}
+
+/** How far a permission grant reaches (see backend/src/common/permissions.ts). */
+export type AccessScope = "ALL" | "BU" | "DEPARTMENT" | "MEMBER";
+export type PermissionRisk = "HIGH_PRIVILEGE" | "CHANGES_DATA";
+
+/** One permission as listed on the Access Control screen (GET /permissions). */
+export interface PermissionCatalogEntry {
+  key: string;
+  title: string;
+  module: string;
+  moduleLabel: string;
+  action: string;
+  risks: PermissionRisk[];
+  /** More than one entry means an admin can choose how far the grant reaches. */
+  scopes: AccessScope[];
+}
+
+/** A permission granted to a group, with its scope (GET/PATCH /user-groups/:id/permissions). */
+export interface GroupGrant {
+  key: string;
+  scope: AccessScope;
+}
+
+/** One API route and what protects it (GET /permissions/routes). */
+export interface ApiRoutePolicy {
+  method: string;
+  path: string;
+  access: "PUBLIC" | "AUTHENTICATED" | "PERMISSION" | "UNDECLARED";
+  /** Permissions that unlock the route (several = the handler picks one, see `dynamic`). */
+  permissions: string[];
+  dynamic: boolean;
+  title: string | null;
+  module: string | null;
+  risks: PermissionRisk[];
 }
 
 export type UserRole = "ADMIN" | "OE_LEADER" | "OE_MEMBER" | "DEPT_PIC";
@@ -27,8 +67,14 @@ export interface User {
   groupId: string | null;
   departmentName?: string | null;
   groupName?: string | null;
+  /** false = deactivated: cannot sign in and existing sessions stop working. Only present on GET /users. */
+  isActive?: boolean;
+  /** true once this account has signed in through Keycloak SSO. Only present on GET /users. */
+  ssoLinked?: boolean;
   /** Effective granular permission keys (see backend/src/common/permissions.ts). Only present on GET /auth/me. */
   permissions?: string[];
+  /** Same keys, each with how far it reaches (ALL / BU / DEPARTMENT / MEMBER). Only present on GET /auth/me. */
+  grants?: Record<string, AccessScope>;
 }
 
 export interface OePlan {
@@ -135,8 +181,6 @@ export interface ExecutionSchedule {
   scheduleRows: string; // JSON
   ownerName?: string;
   lastModifiedBy?: string;
-  qrToken?: string;
-  departmentConsents?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -146,6 +190,7 @@ export interface OpenMeeting {
   projectId: string;
   projectName?: string;
   projectCode?: string;
+  departmentId?: string | null;
   departments: string;
   address: string;
   visitNumber: string;
@@ -162,8 +207,6 @@ export interface OpenMeeting {
   scheduleRows: string; // JSON
   ownerName?: string;
   lastModifiedBy?: string;
-  qrToken?: string;
-  departmentConsents?: string;
   isDeleted?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -176,6 +219,7 @@ export interface AnnualPlan {
   comment: string;
   status: string; // "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
   createdBy?: string; // Name of the user who created this plan
+  qrToken?: string; // Unguessable, rotatable token the plan's QR code encodes
   createdAt?: string;
   updatedAt?: string;
 }
@@ -185,8 +229,9 @@ export interface PlannedEngagement {
   annualPlanId: string;
   no: string;
   projectName: string;
-  topic: string;
-  bu: string;
+  departmentId?: string | null; // The single department this project is for
+  topic: string; // Department name (kept in sync with departmentId)
+  bu: string; // Business Unit name (kept in sync with the department)
   type?: string;
   revieweeIds: string; // Comma-separated User IDs
   conductDate: string; // ISO date string
@@ -204,4 +249,86 @@ export interface PlannedEngagement {
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+// ---- Open Meeting responses (department users answer released meetings) ----
+
+export type MeetingResponseStatus = "ACCEPTED" | "REVISION_REQUESTED";
+
+/** AWAITING/RESPONDED = still open; DONE/MISSED = read-only (with / without any response). */
+export type DepartmentProgress = "AWAITING" | "RESPONDED" | "DONE" | "MISSED";
+
+export interface MeetingResponseItem {
+  id: string;
+  respondentName: string;
+  respondentEmail: string;
+  departmentName: string;
+  businessUnitName: string;
+  status: MeetingResponseStatus;
+  concern: string; // sanitised HTML
+  createdAt: string;
+  updatedAt: string;
+  mine: boolean;
+}
+
+export interface MeetingResponseCard {
+  id: string;
+  projectId: string;
+  projectName: string;
+  projectCode: string;
+  departmentId: string | null;
+  departmentName: string;
+  businessUnitName: string;
+  meetingDate: string;
+  address: string;
+  annualPlanId?: string | null;
+  window: { open: boolean; reason?: string; message?: string };
+  progress: DepartmentProgress;
+  responseCount: number;
+  revisionCount: number;
+  myResponse: MeetingResponseItem | null;
+}
+
+export interface MeetingResponseDetail extends MeetingResponseCard {
+  standards: string;
+  leadExecution: string;
+  teamMembers: string;
+  objectives: string;
+  scope: string;
+  scheduleRows: string; // JSON
+  memberCount: number;
+  responses: MeetingResponseItem[];
+  canRespond: boolean;
+}
+
+export interface ScanPayload {
+  annualPlan: { id: string; planName: string; period: string };
+  viewer: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    departmentId: string | null;
+    departmentName: string | null;
+    businessUnitName: string | null;
+    canViewAll: boolean;
+  };
+  noDepartment: boolean;
+  meetings: MeetingResponseCard[];
+}
+
+export interface RollupRow extends MeetingResponseCard {
+  memberCount: number;
+  responses: MeetingResponseItem[];
+}
+
+export interface RollupPayload {
+  summary: {
+    total: number;
+    done: number;
+    missed: number;
+    open: number;
+    withRevisionRequests: number;
+  };
+  meetings: RollupRow[];
 }

@@ -2,13 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { safeReturnPath } from "@/lib/return-path";
 
-export default function LoginClient() {
+interface LoginClientProps {
+  ssoEnabled?: boolean;
+  /** Set by /api/session/sso/callback when Keycloak sign-in was refused. */
+  ssoError?: string | null;
+  /** The page the visitor was sent here from. */
+  from?: string | null;
+}
+
+export default function LoginClient({ ssoEnabled = false, ssoError = null, from = null }: LoginClientProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(ssoError);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,7 +33,7 @@ export default function LoginClient() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.message ?? "Login failed");
       }
-      router.push("/dashboard");
+      router.push(safeReturnPath(from));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -75,6 +84,19 @@ export default function LoginClient() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        {ssoEnabled && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
+            </div>
+            <a
+              href={`/api/session/sso/start?from=${encodeURIComponent(safeReturnPath(from))}`}
+              className="block w-full rounded-md border border-border bg-background px-4 py-2 text-center text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Sign in with company SSO
+            </a>
+          </>
+        )}
       </div>
     </div>
   );

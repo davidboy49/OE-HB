@@ -23,6 +23,7 @@ export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
   @Get()
+  @RequirePermission('departments:view')
   findAll() {
     return this.departmentsService.findAll();
   }
@@ -39,6 +40,7 @@ export class DepartmentsController {
       dto.id,
       dto.name,
       dto.description ?? '',
+      dto.businessUnitId,
     );
   }
 
@@ -50,7 +52,12 @@ export class DepartmentsController {
     details: `Updated department "${req.params.id}" (${req.body.name})`,
   }))
   update(@Param('id') id: string, @Body() dto: UpdateDepartmentDto) {
-    return this.departmentsService.update(id, dto.name, dto.description ?? '');
+    return this.departmentsService.update(
+      id,
+      dto.name,
+      dto.description ?? '',
+      dto.businessUnitId,
+    );
   }
 
   @Delete(':id')

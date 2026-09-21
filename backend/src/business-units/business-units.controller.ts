@@ -23,6 +23,7 @@ export class BusinessUnitsController {
   constructor(private readonly businessUnitsService: BusinessUnitsService) {}
 
   @Get()
+  @RequirePermission('business-units:view')
   findAll() {
     return this.businessUnitsService.findAll();
   }

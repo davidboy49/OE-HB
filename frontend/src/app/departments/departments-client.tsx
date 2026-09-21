@@ -9,21 +9,24 @@ import {
   Pencil,
   Trash2
 } from "lucide-react";
-import type { User, Department, UserGroup } from "@oeportal/shared";
+import type { User, Department, UserGroup, BusinessUnit } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
+import MultiSelect from "@/components/ui/multi-select";
 
 interface DepartmentsClientProps {
   initialUsers: User[];
   initialDepartments: Department[];
+  businessUnits: BusinessUnit[];
   initialUserGroups: UserGroup[];
   currentUser: User;
 }
 
 export default function DepartmentsClient({ 
   initialUsers, 
-  initialDepartments, 
+  initialDepartments,
+  businessUnits,
   initialUserGroups, 
   currentUser 
 }: DepartmentsClientProps) {
@@ -39,6 +42,7 @@ export default function DepartmentsClient({
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [deptIdInput, setDeptIdInput] = useState("");
   const [deptDescInput, setDeptDescInput] = useState("");
+  const [deptBuInput, setDeptBuInput] = useState(""); // Business Unit id - every department belongs to one
 
   // Feedback
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -51,6 +55,7 @@ export default function DepartmentsClient({
     setModalMode("create");
     setDeptIdInput("");
     setDeptDescInput("");
+    setDeptBuInput("");
     setIsModalOpen(true);
   };
 
@@ -62,12 +67,17 @@ export default function DepartmentsClient({
     setModalMode("edit");
     setDeptIdInput(dept.id);
     setDeptDescInput(dept.description || "");
+    setDeptBuInput(dept.businessUnitId || "");
     setIsModalOpen(true);
   };
 
   const handleSaveDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deptIdInput.trim() || !deptDescInput.trim()) return;
+    if (!deptBuInput) {
+      showFeedback("Error: Please select the Business Unit this department belongs to.");
+      return;
+    }
 
     const formattedId = deptIdInput.trim().toUpperCase();
     const description = deptDescInput.trim();
@@ -81,7 +91,7 @@ export default function DepartmentsClient({
         }
         const newDept = await clientApi<Department>("/departments", {
           method: "POST",
-          body: JSON.stringify({ id: formattedId, name: description, description }),
+          body: JSON.stringify({ id: formattedId, name: description, description, businessUnitId: deptBuInput }),
         });
         if (newDept) {
           setDepartments([...departments, newDept]);
@@ -93,7 +103,7 @@ export default function DepartmentsClient({
         if (!selectedDeptId) return;
         const updated = await clientApi<Department>(`/departments/${selectedDeptId}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: description, description }),
+          body: JSON.stringify({ name: description, description, businessUnitId: deptBuInput }),
         });
         if (updated) {
           setDepartments(departments.map(d => d.id === selectedDeptId ? updated : d));
@@ -191,8 +201,9 @@ export default function DepartmentsClient({
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-700 uppercase font-sans font-bold">
               <tr>
-                <th className="px-12 py-4 w-1/4">ID</th>
-                <th className="px-12 py-4 w-3/4">Description</th>
+                <th className="px-12 py-4 w-1/5">ID</th>
+                <th className="px-12 py-4 w-1/4">Business Unit</th>
+                <th className="px-12 py-4 w-1/2">Description</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
@@ -209,6 +220,9 @@ export default function DepartmentsClient({
                       {dept.id}
                     </td>
                     <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
+                      {dept.businessUnitName || <span className="italic text-amber-600">Not assigned</span>}
+                    </td>
+                    <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
                       {dept.description || dept.name}
                     </td>
                   </tr>
@@ -216,7 +230,7 @@ export default function DepartmentsClient({
               })}
               {filteredDepartments.length === 0 && (
                 <tr>
-                  <td colSpan={2} className="px-12 py-8 text-center text-slate-400 font-sans text-xs">
+                  <td colSpan={3} className="px-12 py-8 text-center text-slate-400 font-sans text-xs">
                     No departments found.
                   </td>
                 </tr>
@@ -260,6 +274,19 @@ export default function DepartmentsClient({
                   placeholder="e.g. FIN"
                   className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#05375c] text-slate-800 dark:text-slate-250 disabled:opacity-50"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">Business Unit *</label>
+                <div className="border border-slate-200 dark:border-slate-700 rounded">
+                  <MultiSelect
+                    selectedValues={deptBuInput ? [deptBuInput] : []}
+                    onChange={(values) => setDeptBuInput(values[0] || "")}
+                    singleSelect={true}
+                    options={businessUnits.map((b) => ({ value: b.id, label: b.name, subLabel: b.description || undefined }))}
+                    placeholder="Select Business Unit..."
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">

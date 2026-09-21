@@ -429,6 +429,11 @@ export default function ScheduleClient({
       return false;
     }
 
+    if (!additionalAttendees.trim()) {
+      showFeedback("Please add at least one additional attendee before saving.");
+      return false;
+    }
+
     const payload = {
       projectId: selectedProjectId,
       departments: departmentsStr,
@@ -1017,7 +1022,7 @@ export default function ScheduleClient({
                       {/* Row 7: Additional Attendees and Roles */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 leading-normal">
-                          Additional Attendees and Roles:
+                          Additional Attendees and Roles *:
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect

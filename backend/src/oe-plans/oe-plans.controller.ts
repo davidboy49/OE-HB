@@ -15,18 +15,26 @@ import { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { DynamicPermission } from '../common/decorators/dynamic-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AccessScopeService } from '../common/access-scope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('oe-plans')
 @ApiBearerAuth()
 @Controller('oe-plans')
 export class OePlansController {
-  constructor(private readonly oePlansService: OePlansService) {}
+  constructor(
+    private readonly oePlansService: OePlansService,
+    private readonly accessScope: AccessScopeService,
+  ) {}
 
   @Get()
-  findAll() {
-    return this.oePlansService.findAll();
+  @RequirePermission('oe-plans:view')
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.oePlansService.findAll(
+      await this.accessScope.oePlanReadScope(user.sub),
+    );
   }
 
   @Post()
@@ -36,7 +44,15 @@ export class OePlansController {
     action: 'CREATE_PROJECT',
     details: `Created project "${req.body.name}" (Code: ${result.code})`,
   }))
-  create(@Body() dto: CreateOePlanDto, @CurrentUser() user: AuthenticatedUser) {
+  async create(
+    @Body() dto: CreateOePlanDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible(
+      'plannedEngagement',
+      dto.plannedEngagementId,
+      user.sub,
+    );
     return this.oePlansService.create(
       dto.name,
       dto.code ?? 'AUTO',
@@ -60,6 +76,13 @@ export class OePlansController {
    * one applies and throws ForbiddenException if the caller lacks it.
    */
   @Patch(':id')
+  @DynamicPermission(
+    'oe-plans:update',
+    'oe-plans:submit',
+    'oe-plans:approve',
+    'oe-plans:close',
+    'oe-plans:reopen',
+  )
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'UPDATE_PROJECT',
@@ -70,6 +93,7 @@ export class OePlansController {
     @Body() dto: UpdateOePlanDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('oePlan', id, user.sub);
     await this.oePlansService.assertUpdateAllowed(id, dto, user);
     return this.oePlansService.update(id, dto);
   }
@@ -81,7 +105,11 @@ export class OePlansController {
     action: 'DELETE_PROJECT',
     details: `Deleted project ID: ${req.params.id}`,
   }))
-  remove(@Param('id') id: string) {
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('oePlan', id, user.sub);
     return this.oePlansService.remove(id);
   }
 }

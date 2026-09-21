@@ -139,19 +139,25 @@ export default function PlanningClient({ initialProjects, users, departments, an
   useEffect(() => {
     if (selectedProject?.id) {
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const scanUrl = `${origin}/meetings/scan/${selectedProject.id}`;
+      // One QR per Annual Plan: it opens the signed-in "my department's meetings" page.
+      const annualPlanToken = annualPlans?.find(a => a.id === selectedProject.annualPlanId)?.qrToken;
+      const scanUrl = annualPlanToken ? `${origin}/scan/${annualPlanToken}` : "";
       const planningUrl = `${origin}/planning?id=${selectedProject.id}`;
 
-      QRCode.toDataURL(scanUrl, {
-        width: 400,
-        margin: 2,
-        color: {
-          dark: "#000000",
-          light: "#FFFFFF"
-        }
-      })
-        .then((url) => setScanQrDataUrl(url))
-        .catch((err) => console.error("Failed to generate scan QR", err));
+      if (scanUrl) {
+        QRCode.toDataURL(scanUrl, {
+          width: 400,
+          margin: 2,
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF"
+          }
+        })
+          .then((url) => setScanQrDataUrl(url))
+          .catch((err) => console.error("Failed to generate scan QR", err));
+      } else {
+        setScanQrDataUrl("");
+      }
 
       QRCode.toDataURL(planningUrl, {
         width: 600,
@@ -167,7 +173,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
       setScanQrDataUrl("");
       setPlanningQrDataUrl("");
     }
-  }, [selectedProject?.id]);
+  }, [selectedProject?.id, selectedProject?.annualPlanId, annualPlans]);
 
   const [editName, setEditName] = useState("");
   const [editStatus, setEditStatus] = useState<any>("PLANNING");
@@ -1273,7 +1279,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               }
                               return filtered.map(ap => ({
                                 value: ap.id,
-                                label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
+                                label: ap.projectName || ap.topic,
+                                subLabel: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                               }));
                             })()}
                             placeholder={newAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
@@ -1657,7 +1664,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             }
                             return filtered.map(ap => ({
                               value: ap.id,
-                              label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
+                              label: ap.projectName || ap.topic,
+                              subLabel: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                             }));
                           })()}
                           placeholder={editAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
@@ -2451,7 +2459,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   />
                 ) : (
                   <div className="w-[220px] h-[220px] flex items-center justify-center text-slate-400 text-sm">
-                    Generating QR...
+                    QR available once the Annual Plan is approved
                   </div>
                 )}
                 {/* Center Hanuman Logo */}
@@ -2468,7 +2476,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
               {/* Remarks Text */}
               <p className="text-[11.5px] text-slate-500 font-roboto font-normal leading-tight px-1">
-                Scan to access your department Open Meetings.
+                Scan (sign-in required) to see your department's Open Meetings.
               </p>
 
               {/* Action Buttons */}

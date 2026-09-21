@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
 import type { OePlan, Department, User } from "@oeportal/shared";
 import {
   Building2,
@@ -15,13 +14,12 @@ import {
 import Link from "next/link";
 
 export default async function DashboardPage() {
-  const user = await getCurrentUserServer();
-  if (!user) redirect("/login");
+  const user = await guardPage("/dashboard");
 
   const [projects, users, departments] = await Promise.all([
     apiFetch<OePlan[]>("/oe-plans"),
-    apiFetch<User[]>("/users"),
-    apiFetch<Department[]>("/departments"),
+    fetchOr<User[]>("/users", []),
+    fetchOr<Department[]>("/departments", []),
   ]);
 
   // Metrics calculations
@@ -35,7 +33,7 @@ export default async function DashboardPage() {
       {/* Welcome Banner */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">OE Desk Portal</h1>
+          <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">OE Portal</h1>
           <p className="text-xs text-muted-foreground">
             Welcome back, <span className="text-slate-800 dark:text-slate-200 font-semibold">{user.name}</span>. Below is the operational compliance status for Hanuman Estate.
           </p>

@@ -1,34 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, X, Download, Link } from "lucide-react";
+import { Check, X, Download, Link, RefreshCw } from "lucide-react";
 import QRCode from "qrcode";
 
 interface QRCodeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** The Annual Plan's QR token - the code encodes this, never the plan's id. */
   qrToken: string;
-  projectTitle: string;
-  projectCode: string;
-  departments?: string;
+  planName: string;
+  period: string;
+  /** When given, shows a "Reset QR code" button that revokes the current code. */
+  onRotate?: () => Promise<void>;
 }
 
 export default function QRCodeModal({
   isOpen,
   onClose,
   qrToken,
-  projectTitle,
-  projectCode,
-  departments = "IT, Finance, Operations"
+  planName,
+  period,
+  onRotate,
 }: QRCodeModalProps) {
   const [dataUrl, setDataUrl] = useState<string>("");
   const [scanUrl, setScanUrl] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
+  const [rotating, setRotating] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) return;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/meetings/scan/${qrToken}`;
+    const url = `${origin}/scan/${qrToken}`;
     setScanUrl(url);
 
     QRCode.toDataURL(url, {
@@ -55,10 +58,21 @@ export default function QRCodeModal({
     if (!dataUrl) return;
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = `QR-${projectCode}.png`;
+    a.download = `QR-${planName.replace(/[^a-z0-9]+/gi, "-")}-${period}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const handleRotate = async () => {
+    if (!onRotate) return;
+    if (!window.confirm("Reset this QR code? The current QR code, including any printed copies, will stop working immediately.")) return;
+    setRotating(true);
+    try {
+      await onRotate();
+    } finally {
+      setRotating(false);
+    }
   };
 
   return (
@@ -80,15 +94,15 @@ export default function QRCodeModal({
             <X className="w-5 h-5" />
           </button>
 
-          {/* OE Plan Title */}
+          {/* Annual OE Plan Title */}
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-[0.25em] font-roboto">
-            OE Plan
+            Annual OE Plan
           </h3>
 
           {/* Project Code Badge */}
           <div className="inline-block px-5 py-1.5 rounded-lg bg-[#070c18]/90 border border-[#c79646]/30 shadow-inner">
             <span className="text-xl font-bold tracking-wider text-[#d9a84e] font-mono">
-              {projectCode}
+              {period || planName}
             </span>
           </div>
         </div>
@@ -108,7 +122,7 @@ export default function QRCodeModal({
             {dataUrl ? (
               <img 
                 src={dataUrl} 
-                alt="OE Plan QR Code" 
+                alt="Annual OE Plan QR Code" 
                 className="w-[220px] h-[220px] object-contain rounded-xl"
               />
             ) : (
@@ -130,7 +144,9 @@ export default function QRCodeModal({
 
           {/* Remarks Text */}
           <p className="text-[11.5px] text-slate-500 font-roboto font-normal leading-tight px-1">
-            Scan to access your department Open Meetings.
+            {planName}
+            <br />
+            Scan to see your department&apos;s Open Meetings. Sign-in required.
           </p>
 
           {/* Action Buttons */}
@@ -157,6 +173,18 @@ export default function QRCodeModal({
               Download QR
             </button>
           </div>
+
+          {onRotate && (
+            <button
+              type="button"
+              onClick={handleRotate}
+              disabled={rotating}
+              className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-red-600 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${rotating ? "animate-spin" : ""}`} />
+              Reset QR code
+            </button>
+          )}
         </div>
       </div>
     </div>

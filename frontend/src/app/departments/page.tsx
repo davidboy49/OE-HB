@@ -1,17 +1,16 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { User, Department, UserGroup } from "@oeportal/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { User, Department, UserGroup, BusinessUnit } from "@oeportal/shared";
 import DepartmentsClient from "./departments-client";
 
 export default async function DepartmentsPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/departments");
 
-  const [users, departments, userGroups] = await Promise.all([
-    apiFetch<User[]>("/users"),
+  const [users, departments, userGroups, businessUnits] = await Promise.all([
+    fetchOr<User[]>("/users", []),
     apiFetch<Department[]>("/departments"),
-    apiFetch<UserGroup[]>("/user-groups"),
+    fetchOr<UserGroup[]>("/user-groups", []),
+    fetchOr<BusinessUnit[]>("/business-units", []),
   ]);
 
   return (
@@ -19,6 +18,7 @@ export default async function DepartmentsPage() {
       initialUsers={users}
       initialDepartments={departments}
       initialUserGroups={userGroups}
+      businessUnits={businessUnits}
       currentUser={currentUser}
     />
   );

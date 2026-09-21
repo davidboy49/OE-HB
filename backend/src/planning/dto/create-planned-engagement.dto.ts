@@ -24,15 +24,10 @@ export class CreatePlannedEngagementDto {
   @IsNotEmpty()
   projectName!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'The single department this project is for' })
   @IsString()
   @IsNotEmpty()
-  topic!: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  bu!: string;
+  departmentId!: string;
 
   @ApiPropertyOptional({ default: 'OE' })
   @IsOptional()

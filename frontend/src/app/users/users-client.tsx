@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 
-import { Users, Plus, Lock, Mail, X, KeyRound, Save, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { Users, Plus, Lock, Mail, X, KeyRound, Power, Save, ShieldCheck } from "lucide-react";
 import type { User, Department, UserGroup, UserRole } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
-import type { PermissionDef } from "./permission-types";
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -15,7 +15,6 @@ interface UsersClientProps {
   initialUsers: User[];
   initialDepartments: Department[];
   initialUserGroups: UserGroup[];
-  allPermissions: PermissionDef[];
   currentUser: User;
 }
 
@@ -25,7 +24,6 @@ export default function UsersClient({
   initialUsers,
   initialDepartments,
   initialUserGroups,
-  allPermissions,
   currentUser
 }: UsersClientProps) {
   const [activeTab, setActiveTab] = useState<Tab>("users");
@@ -57,11 +55,6 @@ export default function UsersClient({
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
 
-  // Inline group permissions editor (admin only) - expands within the group's card
-  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
-  const [groupPermissionKeys, setGroupPermissionKeys] = useState<Set<string>>(new Set());
-  const [permissionsLoading, setPermissionsLoading] = useState(false);
-
   // Feedback
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -71,6 +64,7 @@ export default function UsersClient({
   const canSetPassword = RBAC.can(currentUser, "users:set-password");
   const canCreateGroup = RBAC.can(currentUser, "user-groups:create");
   const canManageGroupPermissions = RBAC.can(currentUser, "user-groups:manage-permissions");
+  const canViewGroupPermissions = RBAC.can(currentUser, "user-groups:view");
 
   // Assignment handlers
   const handleAssignGroup = async (userId: string, groupId: string | null) => {
@@ -186,6 +180,23 @@ export default function UsersClient({
     }
   };
 
+  const handleToggleActive = async () => {
+    const u = users.find((x) => x.id === selectedUserId);
+    if (!u) return;
+    const makeActive = u.isActive === false;
+    if (!makeActive && !window.confirm(`Deactivate ${u.name}? They will be signed out and unable to sign in until reactivated.`)) return;
+    try {
+      const updated = await clientApi<User>(`/users/${u.id}/active`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: makeActive }),
+      });
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, isActive: updated.isActive } : x)));
+      showFeedback(makeActive ? `${u.name} reactivated.` : `${u.name} deactivated.`);
+    } catch (err: unknown) {
+      showFeedback(`Error: ${getErrorMessage(err)}`);
+    }
+  };
+
   const openSetPasswordModal = () => {
     if (!selectedUserId) return;
     setNewPassword("");
@@ -209,61 +220,6 @@ export default function UsersClient({
       showFeedback(`Error: ${getErrorMessage(err)}`);
     }
   };
-
-  const togglePermissionsPanel = async (group: UserGroup) => {
-    if (expandedGroupId === group.id) {
-      setExpandedGroupId(null);
-      return;
-    }
-    setExpandedGroupId(group.id);
-    setPermissionsLoading(true);
-    try {
-      const keys = await clientApi<string[]>(`/user-groups/${group.id}/permissions`);
-      setGroupPermissionKeys(new Set(keys));
-    } catch (err: unknown) {
-      showFeedback(`Error: ${getErrorMessage(err)}`);
-      setExpandedGroupId(null);
-    } finally {
-      setPermissionsLoading(false);
-    }
-  };
-
-  const togglePermission = (key: string) => {
-    setGroupPermissionKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const handleSavePermissions = async (group: UserGroup) => {
-    try {
-      await clientApi(`/user-groups/${group.id}/permissions`, {
-        method: "PATCH",
-        body: JSON.stringify({ permissionKeys: Array.from(groupPermissionKeys) }),
-      });
-      showFeedback(`Permissions updated for "${group.name}".`);
-      setExpandedGroupId(null);
-    } catch (err: unknown) {
-      showFeedback(`Error: ${getErrorMessage(err)}`);
-    }
-  };
-
-  // Only show/offer permissions the current user actually holds themselves - you can't
-  // grant what you don't have. Backend enforces this too (see UserGroupsController);
-  // this just keeps the checkbox list honest. Grants outside this set (made by someone
-  // with broader access) stay in groupPermissionKeys untouched since their checkbox
-  // never renders, so saving here can't silently revoke them.
-  const assignablePermissions = allPermissions.filter((perm) => RBAC.can(currentUser, perm.key));
-  const hasHiddenGrants = Array.from(groupPermissionKeys).some((key) => !RBAC.can(currentUser, key));
-
-  // Group permission keys by domain (text before ":") for a readable matrix.
-  const permissionsByDomain = assignablePermissions.reduce<Record<string, PermissionDef[]>>((acc, perm) => {
-    const domain = perm.key.split(":")[0];
-    (acc[domain] ||= []).push(perm);
-    return acc;
-  }, {});
 
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -372,15 +328,27 @@ export default function UsersClient({
             activeFilterCountLabel={roleFilter === "ALL" ? "ALL" : "FILTERED"}
           />
 
-          {canSetPassword && selectedUserId && (
-            <div className="px-4 py-2 border-b border-border bg-muted/40">
-              <button
-                type="button"
-                onClick={openSetPasswordModal}
-                className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5" /> Set Password for Selected User
-              </button>
+          {selectedUserId && (canSetPassword || (canEditUser && selectedUserId !== currentUser.id)) && (
+            <div className="px-4 py-2 border-b border-border bg-muted/40 flex flex-wrap items-center gap-x-5 gap-y-1">
+              {canSetPassword && (
+                <button
+                  type="button"
+                  onClick={openSetPasswordModal}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" /> Set Password for Selected User
+                </button>
+              )}
+              {canEditUser && selectedUserId !== currentUser.id && (
+                <button
+                  type="button"
+                  onClick={handleToggleActive}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  <Power className="w-3.5 h-3.5" />{" "}
+                  {users.find((x) => x.id === selectedUserId)?.isActive === false ? "Reactivate Selected User" : "Deactivate Selected User"}
+                </button>
+              )}
             </div>
           )}
 
@@ -392,6 +360,7 @@ export default function UsersClient({
                   <th className="px-6 py-4">System Role</th>
                   <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">Governance Group</th>
+                  <th className="px-6 py-4">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -440,11 +409,29 @@ export default function UsersClient({
                         </span>
                       )}
                     </td>
+                    <td className="px-6 py-4.5">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            u.isActive === false
+                              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                          }`}
+                        >
+                          {u.isActive === false ? "Deactivated" : "Active"}
+                        </span>
+                        {u.ssoLinked && (
+                          <span title="Has signed in through Keycloak SSO" className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-muted text-muted-foreground">
+                            SSO
+                          </span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {filteredUsers.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-6 py-10 text-center text-muted-foreground text-xs italic">
+                    <td colSpan={5} className="px-6 py-10 text-center text-muted-foreground text-xs italic">
                       No users found.
                     </td>
                   </tr>
@@ -527,7 +514,6 @@ export default function UsersClient({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {userGroups.map((group) => {
-              const isExpanded = expandedGroupId === group.id;
               return (
                 <div key={group.id} className="bg-card border border-border rounded-lg shadow-sm p-5 space-y-3 h-fit">
                   <div className="flex items-center gap-2 font-bold text-sm text-foreground">
@@ -538,70 +524,14 @@ export default function UsersClient({
                     {users.filter((user) => user.groupId === group.id).length} member(s)
                   </p>
 
-                  {canManageGroupPermissions && (
-                    <button
-                      type="button"
-                      onClick={() => togglePermissionsPanel(group)}
-                      className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                  {canViewGroupPermissions && (
+                    <Link
+                      href={`/access-control?group=${group.id}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                     >
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                      {isExpanded ? "Hide permissions" : "Manage permissions"}
-                    </button>
-                  )}
-
-                  {isExpanded && (
-                    <div className="border-t border-border pt-3 space-y-4 animate-fade-in">
-                      {permissionsLoading ? (
-                        <p className="text-xs text-muted-foreground">Loading current grants...</p>
-                      ) : (
-                        <>
-                          {hasHiddenGrants && (
-                            <p className="text-[10px] text-muted-foreground italic">
-                              This group also holds one or more permissions you don&apos;t have yourself - those aren&apos;t shown here and won&apos;t be affected by your changes.
-                            </p>
-                          )}
-                          {Object.entries(permissionsByDomain).map(([domain, perms]) => (
-                            <div key={domain} className="space-y-1.5">
-                              <h4 className="text-[10px] font-sans uppercase text-muted-foreground font-bold tracking-wide">
-                                {domain.replace(/-/g, " ")}
-                              </h4>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                {perms.map((perm) => (
-                                  <label
-                                    key={perm.key}
-                                    className="flex items-start gap-2 p-1.5 rounded border border-border bg-muted/40 cursor-pointer text-xs"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={groupPermissionKeys.has(perm.key)}
-                                      onChange={() => togglePermission(perm.key)}
-                                      className="mt-0.5 cursor-pointer"
-                                    />
-                                    <span className="text-foreground">{perm.description}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                          <div className="flex justify-end gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedGroupId(null)}
-                              className="px-3 py-1.5 border border-border bg-card hover:bg-muted text-foreground text-xs font-bold rounded cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSavePermissions(group)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-bold rounded cursor-pointer hover:opacity-90"
-                            >
-                              <Save className="w-3.5 h-3.5" /> Save Permissions
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      {canManageGroupPermissions ? "Manage permissions" : "View permissions"}
+                    </Link>
                   )}
                 </div>
               );
@@ -678,7 +608,7 @@ export default function UsersClient({
                     <option value="">No Department</option>
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.name}
+                        {d.businessUnitName ? `${d.businessUnitName} - ${d.name}` : d.name}
                       </option>
                     ))}
                   </select>

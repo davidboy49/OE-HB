@@ -5,23 +5,29 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  ACCESS_SCOPES,
+  AccessScope,
   DEFAULT_PERMISSIONS_BY_ROLE,
   PERMISSIONS,
   PERMISSION_KEYS,
+  scopesFor,
 } from './permissions';
-import type { UserRole } from '@oeportal/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import type { UserRole } from '@oeportal/shared';
+
+/** permission key -> how far that grant reaches. A key that is absent is not granted. */
+export type Grants = Record<string, AccessScope>;
 
 /**
- * Single place that resolves a user's effective permission-key set. Used by
- * PermissionsGuard (backend enforcement) and AuthService (so the frontend can
- * mirror the same grants when deciding what to show, via GET /auth/me).
+ * Resolves what a user may do. Deliberately re-reads role + group from the DB on every call
+ * instead of trusting the caller's `role` (e.g. from the JWT, which is signed once at login
+ * and can go stale for up to the token's lifetime): a role change, an ADMIN promotion or
+ * demotion, or a group reassignment must take effect on this user's very next request, not
+ * just after they log back in.
  *
- * Deliberately re-reads role + group from the DB on every call instead of
- * trusting the caller's `role` (e.g. from the JWT, which is signed once at
- * login and can go stale for up to the token's lifetime): a role change,
- * an ADMIN promotion/demotion, or a group reassignment must take effect on
- * this user's very next request, not just after they log back in.
+ * This is the single place that answers "what is this user allowed to do?", so it is also
+ * the one seam to change if grants ever come from somewhere else (an external IAM, Keycloak
+ * roles, ...). Everything else - the guard, the scope filters, the menu - asks this service.
  */
 @Injectable()
 export class PermissionsResolverService implements OnApplicationBootstrap {
@@ -31,7 +37,7 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
    * `Permission` rows are otherwise only populated by the destructive
    * backend/prisma/seed.ts (wipes users/groups - unsafe to rerun against a live
    * DB). Runs on every boot so new keys added to PERMISSIONS in code always have
-   * a matching row before a group tries to `connect` to it - createMany with
+   * a matching row before a group tries to be granted them - createMany with
    * skipDuplicates is a no-op once a key already exists.
    */
   async onApplicationBootstrap() {
@@ -41,25 +47,38 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
     });
   }
 
-  async getEffectivePermissions(userId: string): Promise<string[]> {
+  async getGrants(userId: string): Promise<Grants> {
     const dbUser = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { role: true, groupId: true },
     });
-    if (!dbUser) return [];
+    if (!dbUser) return {};
 
     const role = dbUser.role as UserRole;
-    if (role === 'ADMIN') return PERMISSION_KEYS;
+    const all = (keys: string[]): Grants =>
+      Object.fromEntries(keys.map((k) => [k, 'ALL']));
 
-    if (!dbUser.groupId) {
-      return DEFAULT_PERMISSIONS_BY_ROLE[role] ?? [];
-    }
+    if (role === 'ADMIN') return all(PERMISSION_KEYS);
+    if (!dbUser.groupId) return all(DEFAULT_PERMISSIONS_BY_ROLE[role] ?? []);
 
-    const group = await this.prisma.userGroup.findUnique({
-      where: { id: dbUser.groupId },
-      select: { permissions: { select: { key: true } } },
+    const rows = await this.prisma.groupPermission.findMany({
+      where: { groupId: dbUser.groupId },
+      select: { permissionKey: true, scope: true },
     });
-    return group?.permissions.map((p) => p.key) ?? [];
+    const grants: Grants = {};
+    for (const r of rows) {
+      // A scope the permission does not support (or a corrupt value) is treated as the
+      // narrowest sensible reading: unscoped keys are always ALL.
+      const scope = ACCESS_SCOPES.find((s) => s === r.scope) ?? 'ALL';
+      grants[r.permissionKey] = scopesFor(r.permissionKey).includes(scope)
+        ? scope
+        : 'ALL';
+    }
+    return grants;
+  }
+
+  async getEffectivePermissions(userId: string): Promise<string[]> {
+    return Object.keys(await this.getGrants(userId));
   }
 
   /** Throws unless the user's current (DB-fresh) effective grants include `key`. */

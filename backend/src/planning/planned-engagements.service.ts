@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { hasPlanItemContent } from '@oeportal/shared';
 import type { PlannedEngagement } from '@oeportal/shared';
+import type { Prisma } from '../generated/prisma/client';
 
 const SCOPE_REQUIRED_MESSAGE =
   'Scope is required: add at least one scope item before saving the Project.';
@@ -33,6 +34,7 @@ export class PlannedEngagementsService {
    */
   private async getEnrichedPlannedEngagements(
     annualPlanIdFilter?: string,
+    visibleTo: Prisma.PlannedEngagementWhereInput = {},
   ): Promise<EnrichedPlannedEngagement[]> {
     const allPlans = await this.prisma.plannedEngagement.findMany({
       include: {
@@ -57,7 +59,7 @@ export class PlannedEngagementsService {
     const approvedDeptCounts: Record<string, number> = {};
     for (const p of allPlans) {
       if (p.annualPlan?.status === 'APPROVED') {
-        const deptKey = (p.topic || '').trim().toLowerCase();
+        const deptKey = p.departmentId ?? (p.topic || '').trim().toLowerCase();
         approvedDeptCounts[deptKey] = (approvedDeptCounts[deptKey] || 0) + 1;
       }
     }
@@ -67,7 +69,7 @@ export class PlannedEngagementsService {
     const runningDraftOccurrence: Record<string, number> = {};
 
     const enriched: EnrichedPlannedEngagement[] = allPlans.map((p) => {
-      const deptKey = (p.topic || '').trim().toLowerCase();
+      const deptKey = p.departmentId ?? (p.topic || '').trim().toLowerCase();
       const isApproved = p.annualPlan?.status === 'APPROVED';
 
       let processedCount = 0;
@@ -120,6 +122,7 @@ export class PlannedEngagementsService {
         annualPlanId: p.annualPlanId,
         no: p.no,
         projectName: p.projectName,
+        departmentId: p.departmentId,
         topic: p.topic,
         bu: p.bu,
         type: p.type,
@@ -146,29 +149,69 @@ export class PlannedEngagementsService {
       };
     });
 
-    const filtered = annualPlanIdFilter
-      ? enriched.filter((p) => p.annualPlanId === annualPlanIdFilter)
-      : enriched;
+    // Version numbers above are counted across EVERY project so they never depend on who is
+    // looking; only the rows returned are narrowed to the viewer's scope.
+    const visibleIds =
+      Object.keys(visibleTo).length > 0
+        ? new Set(
+            (
+              await this.prisma.plannedEngagement.findMany({
+                where: visibleTo,
+                select: { id: true },
+              })
+            ).map((r) => r.id),
+          )
+        : null;
+
+    const filtered = enriched.filter(
+      (p) =>
+        (!annualPlanIdFilter || p.annualPlanId === annualPlanIdFilter) &&
+        (!visibleIds || visibleIds.has(p.id)),
+    );
 
     return filtered.reverse();
   }
 
-  async findAll(): Promise<EnrichedPlannedEngagement[]> {
-    return this.getEnrichedPlannedEngagements();
+  /**
+   * A project belongs to exactly one department, and a department to a Business Unit.
+   * topic/bu are stored as display text, always derived here from the department so
+   * they can never disagree with departmentId.
+   */
+  private async resolveDepartment(
+    departmentId: string,
+  ): Promise<{ topic: string; bu: string }> {
+    const dept = await this.prisma.department.findUnique({
+      where: { id: departmentId },
+      include: { businessUnit: true },
+    });
+    if (!dept) throw new BadRequestException('Department not found');
+    if (!dept.businessUnit) {
+      throw new BadRequestException(
+        'This department has no Business Unit yet. Assign one on the Departments page first.',
+      );
+    }
+    return { topic: dept.name, bu: dept.businessUnit.name };
+  }
+
+  /** `visibleTo` is the caller's view scope (see AccessScopeService). */
+  async findAll(
+    visibleTo: Prisma.PlannedEngagementWhereInput = {},
+  ): Promise<EnrichedPlannedEngagement[]> {
+    return this.getEnrichedPlannedEngagements(undefined, visibleTo);
   }
 
   async findByAnnualPlan(
     annualPlanId: string,
+    visibleTo: Prisma.PlannedEngagementWhereInput = {},
   ): Promise<EnrichedPlannedEngagement[]> {
-    return this.getEnrichedPlannedEngagements(annualPlanId);
+    return this.getEnrichedPlannedEngagements(annualPlanId, visibleTo);
   }
 
   async create(
     annualPlanId: string,
     no: string,
     projectName: string,
-    topic: string,
-    bu: string,
+    departmentId: string,
     type: string = 'OE',
     revieweeIds: string,
     conductDate: Date,
@@ -181,11 +224,13 @@ export class PlannedEngagementsService {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
+    const { topic, bu } = await this.resolveDepartment(departmentId);
     const p = await this.prisma.plannedEngagement.create({
       data: {
         annualPlanId,
         no,
         projectName,
+        departmentId,
         topic,
         bu,
         type,
@@ -210,6 +255,7 @@ export class PlannedEngagementsService {
       annualPlanId: p.annualPlanId,
       no: p.no,
       projectName: p.projectName,
+      departmentId: p.departmentId,
       topic: p.topic,
       bu: p.bu,
       type: p.type,
@@ -233,8 +279,7 @@ export class PlannedEngagementsService {
   async update(
     id: string,
     projectName: string,
-    topic: string,
-    bu: string,
+    departmentId: string,
     type: string,
     revieweeIds: string,
     conductDate: Date,
@@ -247,10 +292,12 @@ export class PlannedEngagementsService {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
+    const { topic, bu } = await this.resolveDepartment(departmentId);
     const p = await this.prisma.plannedEngagement.update({
       where: { id },
       data: {
         projectName,
+        departmentId,
         topic,
         bu,
         type,
@@ -275,6 +322,7 @@ export class PlannedEngagementsService {
       annualPlanId: p.annualPlanId,
       no: p.no,
       projectName: p.projectName,
+      departmentId: p.departmentId,
       topic: p.topic,
       bu: p.bu,
       type: p.type,

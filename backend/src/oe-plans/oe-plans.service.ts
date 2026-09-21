@@ -1,3 +1,4 @@
+import type { OePlanReadScope } from '../common/access-scope.service';
 import {
   BadRequestException,
   ConflictException,
@@ -32,13 +33,20 @@ export class OePlansService {
     private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
-  async findAll(): Promise<OePlan[]> {
+  /**
+   * `read` is the caller's view scope (see AccessScopeService.oePlanReadScope): which plans,
+   * and which of each plan's schedules / meetings / findings, they may see.
+   */
+  async findAll(read?: OePlanReadScope): Promise<OePlan[]> {
+    const NOTHING = { id: { in: [] as string[] } };
     const projects = await this.prisma.oePlan.findMany({
+      where: read?.plans,
       include: {
         members: true,
         executionSchedules: {
           include: {
             findings: {
+              where: read ? (read.findings ?? NOTHING) : undefined,
               include: {
                 member: true,
               },
@@ -46,7 +54,10 @@ export class OePlansService {
           },
         },
         openMeetings: {
-          where: { isDeleted: false },
+          where: {
+            isDeleted: false,
+            ...(read ? (read.meetings ?? NOTHING) : {}),
+          },
         },
         plannedEngagement: true,
       },
@@ -57,6 +68,23 @@ export class OePlansService {
       // payload cost is negligible next to the round-trip savings.
       relationLoadStrategy: 'join',
     });
+    // Schedules carry the findings above, so they are loaded unfiltered and narrowed here.
+    let visibleScheduleIds: Set<string> | null = null;
+    if (
+      read &&
+      (read.schedules === null || Object.keys(read.schedules).length)
+    ) {
+      visibleScheduleIds = new Set(
+        read.schedules === null
+          ? []
+          : (
+              await this.prisma.executionSchedule.findMany({
+                where: read.schedules,
+                select: { id: true },
+              })
+            ).map((r) => r.id),
+      );
+    }
     return projects.map((p) => ({
       id: p.id,
       name: p.name,
@@ -100,17 +128,19 @@ export class OePlansService {
             })),
           )
         : [],
-      executionSchedules: p.executionSchedules.map((e) => ({
-        id: e.id,
-        visitNumber: e.visitNumber,
-        language: e.language,
-        status: e.status,
-        departments: e.departments,
-        ownerName: e.ownerName,
-        lastModifiedBy: e.lastModifiedBy,
-        scheduleRows: e.scheduleRows,
-        attendeeConfirmations: e.attendeeConfirmations,
-      })),
+      executionSchedules: p.executionSchedules
+        .filter((e) => !visibleScheduleIds || visibleScheduleIds.has(e.id))
+        .map((e) => ({
+          id: e.id,
+          visitNumber: e.visitNumber,
+          language: e.language,
+          status: e.status,
+          departments: e.departments,
+          ownerName: e.ownerName,
+          lastModifiedBy: e.lastModifiedBy,
+          scheduleRows: e.scheduleRows,
+          attendeeConfirmations: e.attendeeConfirmations,
+        })),
       openMeetings: p.openMeetings.map((m) => ({
         id: m.id,
         projectId: m.projectId,
@@ -130,8 +160,6 @@ export class OePlansService {
         scheduleRows: m.scheduleRows,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,
-        qrToken: m.qrToken,
-        departmentConsents: m.departmentConsents,
       })),
     }));
   }
@@ -490,8 +518,6 @@ export class OePlansService {
         scheduleRows: m.scheduleRows,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,
-        qrToken: m.qrToken,
-        departmentConsents: m.departmentConsents,
       })),
     };
   }
