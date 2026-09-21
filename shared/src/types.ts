@@ -47,6 +47,7 @@ export interface AuditProject {
   code: string;
   status: "PLANNING" | "SUBMITTED_FOR_APPROVAL" | "RELEASED" | "CLOSED";
   workflowStage: "DRAFTING" | "REVIEW" | "PENDING_PIC" | "APPROVED";
+  createdBy?: string; // Name of the user who created this plan
   deptPicIds: string; // Comma-separated list of User IDs representing department PICs
   departments: string; // Comma-separated list of Department names
   scope: string;
@@ -187,6 +188,7 @@ export interface AnnualPlan {
   period: string;
   comment: string;
   status: string; // "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
+  createdBy?: string; // Name of the user who created this plan
   createdAt?: string;
   updatedAt?: string;
 }
@@ -211,6 +213,7 @@ export interface AuditPlan {
   isProcessed?: boolean;
   isApproved?: boolean;
   isUsed?: boolean; // true once an Individual OE Plan (AuditProject) has been created from this engagement
+  individualPlanStatus?: AuditProject["status"]; // status of the (latest) Individual OE Plan created from this engagement
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;

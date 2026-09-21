@@ -54,11 +54,15 @@ export class AnnualPlansController {
     action: 'CREATE_ANNUAL_PLAN',
     details: `Created annual plan "${req.body.planName}"`,
   }))
-  create(@Body() dto: CreateAnnualPlanDto) {
+  create(
+    @Body() dto: CreateAnnualPlanDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.annualPlansService.create(
       dto.planName,
       dto.period,
       dto.comment ?? '',
+      user.name,
     );
   }
 

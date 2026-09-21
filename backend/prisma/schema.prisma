@@ -101,6 +101,8 @@ model AuditProject {
   annualPlanId        String?
   auditPlanId         String?
   auditPlan           AuditPlan? @relation(fields: [auditPlanId], references: [id])
+
+  createdBy           String   @default("") // Name of the user who created this plan
 }
 
 model Attachment {
@@ -176,8 +178,8 @@ model ExecutionSchedule {
   departmentConcern     String       @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
   attachments           String       @default("[]") // JSON serialized array of attachments
-  ownerName             String       @default("Sarah Jenkins")
-  lastModifiedBy        String       @default("Sarah Jenkins")
+  ownerName             String       @default("")
+  lastModifiedBy        String       @default("")
   qrToken               String       @default(uuid())
   departmentConsents    String       @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
   createdAt             DateTime     @default(now())
@@ -204,8 +206,8 @@ model OpenMeeting {
   departmentConcern     String             @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
   attachments           String             @default("[]") // JSON serialized array of attachments
-  ownerName             String             @default("Sarah Jenkins")
-  lastModifiedBy        String             @default("Sarah Jenkins")
+  ownerName             String             @default("")
+  lastModifiedBy        String             @default("")
   qrToken               String             @default(uuid())
   departmentConsents    String             @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
   isDeleted             Boolean            @default(false)
@@ -253,6 +255,7 @@ model AnnualPlan {
   period    String      @default("")
   comment   String      @default("")
   status    String      @default("DRAFT")
+  createdBy String      @default("") // Name of the user who created this plan
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   auditPlans AuditPlan[]

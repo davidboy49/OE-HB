@@ -64,6 +64,7 @@ export class AuditProjectsService {
       code: p.code,
       status: p.status as any,
       workflowStage: p.workflowStage as any,
+      createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
       departments: p.auditPlan?.topic || p.departments,
       annualPlanId: p.annualPlanId || undefined,
@@ -176,6 +177,7 @@ export class AuditProjectsService {
     departments: string = '',
     annualPlanId: string | null = null,
     auditPlanId: string | null = null,
+    createdBy: string = '',
   ): Promise<AuditProject> {
     let normalizedCode = (code || '').trim().toUpperCase();
 
@@ -225,6 +227,7 @@ export class AuditProjectsService {
         leadAuditorId,
         auditorNames: '',
         workflowStage: 'DRAFTING',
+        createdBy,
         deptPicIds: '',
         departments,
         annualPlanId,
@@ -263,6 +266,7 @@ export class AuditProjectsService {
       code: p.code,
       status: p.status as any,
       workflowStage: p.workflowStage as any,
+      createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
@@ -438,6 +442,7 @@ export class AuditProjectsService {
       code: p.code,
       status: p.status as any,
       workflowStage: p.workflowStage as any,
+      createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,

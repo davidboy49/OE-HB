@@ -64,8 +64,11 @@ export class MeetingsController {
     action: 'CREATE_OPEN_MEETING',
     details: `Created open meeting for project ID: ${req.body.projectId}`,
   }))
-  create(@Body() dto: CreateOpenMeetingDto) {
-    return this.meetingsService.create(dto);
+  create(
+    @Body() dto: CreateOpenMeetingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.meetingsService.create(dto, user.name);
   }
 
   @Patch(':id')
@@ -75,8 +78,12 @@ export class MeetingsController {
     action: 'UPDATE_OPEN_MEETING',
     details: `Updated open meeting ID: ${req.params.id}`,
   }))
-  update(@Param('id') id: string, @Body() dto: UpdateOpenMeetingDto) {
-    return this.meetingsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateOpenMeetingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.meetingsService.update(id, dto, user.name);
   }
 
   @Patch(':id/status')

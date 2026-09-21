@@ -104,7 +104,10 @@ export class MeetingsService {
    * on a project that doesn't already have one. Public - AuditProjectsModule injects
    * MeetingsService and calls this from its own update()/release flow.
    */
-  async ensureOpenMeetingsForProject(projectId: string): Promise<any[]> {
+  async ensureOpenMeetingsForProject(
+    projectId: string,
+    actorName: string = '',
+  ): Promise<any[]> {
     const project = await this.prisma.auditProject.findUnique({
       where: { id: projectId },
     });
@@ -204,8 +207,8 @@ export class MeetingsService {
               `Full scope audit covering departmental procedures and key controls for ${dept}.`,
             scheduleRows: JSON.stringify(defaultAgendaRows),
             attachments: '[]',
-            ownerName: 'Sarah Jenkins',
-            lastModifiedBy: 'Sarah Jenkins',
+            ownerName: actorName,
+            lastModifiedBy: actorName,
             qrToken: project.id,
             departmentConsents: '{}',
           },
@@ -245,7 +248,8 @@ export class MeetingsService {
     return this.toDto(m);
   }
 
-  async create(data: CreateOpenMeetingInput): Promise<any> {
+  /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
+  async create(data: CreateOpenMeetingInput, actorName: string): Promise<any> {
     await assertProjectReleased(this.prisma, data.projectId);
     const m = await this.prisma.openMeeting.create({
       data: {
@@ -266,8 +270,8 @@ export class MeetingsService {
         departmentConcern: data.departmentConcern || '',
         scheduleRows: data.scheduleRows,
         attachments: data.attachments || '[]',
-        ownerName: data.ownerName || 'Sarah Jenkins',
-        lastModifiedBy: data.lastModifiedBy || 'Sarah Jenkins',
+        ownerName: actorName,
+        lastModifiedBy: actorName,
         qrToken: data.qrToken || data.projectId,
         departmentConsents: data.departmentConsents || '{}',
       },
@@ -276,7 +280,12 @@ export class MeetingsService {
     return this.findOne(m.id);
   }
 
-  async update(id: string, data: UpdateOpenMeetingInput): Promise<any> {
+  /** ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor. */
+  async update(
+    id: string,
+    data: UpdateOpenMeetingInput,
+    actorName: string,
+  ): Promise<any> {
     const updateData: Prisma.OpenMeetingUpdateInput = {
       departments: data.departments,
       address: data.address,
@@ -294,8 +303,7 @@ export class MeetingsService {
       departmentConcern: data.departmentConcern,
       scheduleRows: data.scheduleRows,
       attachments: data.attachments,
-      ownerName: data.ownerName,
-      lastModifiedBy: data.lastModifiedBy,
+      lastModifiedBy: actorName,
     };
 
     const m = await this.prisma.openMeeting.update({

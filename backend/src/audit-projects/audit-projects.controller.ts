@@ -36,7 +36,10 @@ export class AuditProjectsController {
     action: 'CREATE_PROJECT',
     details: `Created project "${req.body.name}" (Code: ${result.code})`,
   }))
-  create(@Body() dto: CreateAuditProjectDto) {
+  create(
+    @Body() dto: CreateAuditProjectDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.auditProjectsService.create(
       dto.name,
       dto.code ?? 'AUTO',
@@ -49,6 +52,7 @@ export class AuditProjectsController {
       dto.departments ?? '',
       dto.annualPlanId ?? null,
       dto.auditPlanId ?? null,
+      user.name,
     );
   }
 

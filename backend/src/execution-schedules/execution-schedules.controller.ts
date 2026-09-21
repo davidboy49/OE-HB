@@ -42,8 +42,11 @@ export class ExecutionSchedulesController {
     action: 'CREATE_SCHEDULE',
     details: `Created execution schedule for project ID: ${req.body.projectId}`,
   }))
-  create(@Body() dto: CreateExecutionScheduleDto) {
-    return this.executionSchedulesService.create(dto);
+  create(
+    @Body() dto: CreateExecutionScheduleDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.executionSchedulesService.create(dto, user.name);
   }
 
   @Get(':id')
@@ -75,9 +78,14 @@ export class ExecutionSchedulesController {
     @Param('id') id: string,
     @Body() dto: UpdateExecutionScheduleDto,
     @Req() req: Request,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     const oldSchedule = await this.executionSchedulesService.findOne(id);
-    const result = await this.executionSchedulesService.update(id, dto);
+    const result = await this.executionSchedulesService.update(
+      id,
+      dto,
+      user.name,
+    );
 
     let action = 'UPDATE_SCHEDULE';
     let details = `Updated execution schedule ID: ${id}`;

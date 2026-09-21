@@ -1290,7 +1290,7 @@ export default function FindingsClient({
                                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                     <div className="flex items-center gap-3">
                                       <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
-                                        Corrective Final Date:
+                                        Completed Date:
                                       </span>
                                       <input 
                                         type="date"
@@ -1321,9 +1321,9 @@ export default function FindingsClient({
                                     </div>
                                   </div>
                                 <div className="space-y-1.5">
-                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Remarks</label>
-                                  <RichEditor 
-                                    value={draftRow.correctiveFinalRemarks || ""} 
+                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Corrective Action</label>
+                                  <RichEditor
+                                    value={draftRow.correctiveFinalRemarks || ""}
                                     onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })} 
                                   />
                                 </div>

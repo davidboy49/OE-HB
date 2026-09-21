@@ -16,6 +16,7 @@ export class AnnualPlansService {
       period: p.period,
       comment: p.comment,
       status: p.status,
+      createdBy: p.createdBy,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     }));
@@ -25,9 +26,10 @@ export class AnnualPlansService {
     planName: string,
     period: string,
     comment: string,
+    createdBy: string,
   ): Promise<AnnualPlan> {
     const p = await this.prisma.annualPlan.create({
-      data: { planName, period, comment },
+      data: { planName, period, comment, createdBy },
     });
     return {
       id: p.id,
@@ -35,6 +37,7 @@ export class AnnualPlansService {
       period: p.period,
       comment: p.comment,
       status: p.status,
+      createdBy: p.createdBy,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };
@@ -56,6 +59,7 @@ export class AnnualPlansService {
       period: p.period,
       comment: p.comment,
       status: p.status,
+      createdBy: p.createdBy,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };
@@ -72,6 +76,7 @@ export class AnnualPlansService {
       period: p.period,
       comment: p.comment,
       status: p.status,
+      createdBy: p.createdBy,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };

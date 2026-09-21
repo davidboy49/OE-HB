@@ -35,6 +35,27 @@ export function parsePlanItems(raw?: string, defaultPrefix: string = "IAP-OBJ"):
 }
 
 /**
+ * True when the raw plan-item field (JSON item list, or legacy HTML/plain text) holds
+ * at least one item with non-blank text. Used to require Scope/Objectives before a
+ * Planned Engagement is saved, so downstream modules never inherit an empty value.
+ */
+export function hasPlanItemContent(raw?: string): boolean {
+  if (!raw || !raw.trim()) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.some((item) => {
+        const text = typeof item === "string" ? item : item?.text || item?.description || "";
+        return String(text).replace(/<[^>]*>/g, "").trim().length > 0;
+      });
+    }
+  } catch {
+    // not JSON - fall through to plain/HTML text
+  }
+  return raw.replace(/<[^>]*>/g, "").trim().length > 0;
+}
+
+/**
  * Serializes AuditPlanItem array to JSON string for DB storage.
  */
 export function serializePlanItems(items: AuditPlanItem[]): string {

@@ -142,12 +142,17 @@ export class ExecutionSchedulesService {
     return schedules.map((s) => this.toDto(s, confirmationMap[s.id]));
   }
 
-  async create(data: CreateExecutionScheduleInput): Promise<any> {
+  /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
+  async create(
+    data: CreateExecutionScheduleInput,
+    actorName: string,
+  ): Promise<any> {
     await assertProjectReleased(this.prisma, data.projectId);
 
     const { attendeeConfirmations, ...createData } = data;
     const s = await this.prisma.executionSchedule.create({
-      data: createData,
+      // Spread first so a client-supplied ownerName/lastModifiedBy is overridden.
+      data: { ...createData, ownerName: actorName, lastModifiedBy: actorName },
       include: { project: true },
     });
     await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
@@ -288,11 +293,17 @@ export class ExecutionSchedulesService {
    * departmentConsents (unlike findAll/create/findOne) - preserved as-is for parity
    * rather than "fixed", since other code may already depend on this exact shape.
    */
-  async update(id: string, data: UpdateExecutionScheduleInput): Promise<any> {
+  async update(
+    id: string,
+    data: UpdateExecutionScheduleInput,
+    actorName: string,
+  ): Promise<any> {
+    // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
     const { attendeeConfirmations, ...updateData } = data;
+    delete updateData.ownerName;
     const s = await this.prisma.executionSchedule.update({
       where: { id },
-      data: updateData,
+      data: { ...updateData, lastModifiedBy: actorName },
       include: { project: true },
     });
     await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);

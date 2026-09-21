@@ -1,6 +1,14 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { hasPlanItemContent } from '@auditdesk/shared';
 import type { AuditPlan } from '@auditdesk/shared';
+
+const SCOPE_REQUIRED_MESSAGE =
+  'Scope is required: add at least one scope item before saving the Planned Engagement.';
 
 /**
  * Shape returned by getEnrichedAuditPlans in the original dbService (typed `any[]` there).
@@ -128,6 +136,9 @@ export class AuditPlansService {
         isProcessed,
         isApproved,
         isUsed: (p.auditProjects || []).length > 0,
+        individualPlanStatus: [...(p.auditProjects || [])].sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+        )[0]?.status as AuditPlan['individualPlanStatus'],
         annualPlanStatus: p.annualPlan?.status || 'DRAFT',
         totalSchedules,
         createdAt: p.createdAt.toISOString(),
@@ -165,6 +176,9 @@ export class AuditPlansService {
     objectives: string = '',
     scope: string = '',
   ): Promise<EnrichedAuditPlan> {
+    if (!hasPlanItemContent(scope)) {
+      throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
+    }
     const p = await this.prisma.auditPlan.create({
       data: {
         annualPlanId,
@@ -228,6 +242,9 @@ export class AuditPlansService {
     objectives: string = '',
     scope: string = '',
   ): Promise<EnrichedAuditPlan> {
+    if (!hasPlanItemContent(scope)) {
+      throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
+    }
     const p = await this.prisma.auditPlan.update({
       where: { id },
       data: {

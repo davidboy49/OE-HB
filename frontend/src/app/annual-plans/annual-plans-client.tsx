@@ -27,6 +27,14 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 
+// Same labels the Individual OE Plan page shows for AuditProject.status.
+const INDIVIDUAL_PLAN_STATUS_LABELS: Record<string, string> = {
+  PLANNING: "Planning",
+  SUBMITTED_FOR_APPROVAL: "Submitted for Approval",
+  RELEASED: "Released",
+  CLOSED: "Closed",
+};
+
 interface AnnualPlansClientProps {
   initialAnnualPlans: AnnualPlan[];
   initialUsers?: User[];
@@ -317,6 +325,10 @@ export default function AnnualPlansClient({
       showFeedback("Error: Project Name, Department, BU, Conduct Date, and End Date are required.");
       return;
     }
+    if (!apScopeItems.some((item) => item.text.trim())) {
+      showFeedback("Error: Scope is required. Add at least one scope item before saving.");
+      return;
+    }
 
     const durationDay = calculateDuration(apConductDate, apEndDate);
     const revieweeString = apRevieweeIds.join(",");
@@ -599,7 +611,7 @@ export default function AnnualPlansClient({
                       <CalendarDays className="w-3.5 h-3.5 font-roboto" /> Period: {periodInput[0] || "N/A"}
                     </span>
                     <span className="flex items-center gap-1 font-roboto">
-                      <Activity className="w-3.5 h-3.5" /> Owner: {currentUser?.name}
+                      <Activity className="w-3.5 h-3.5" /> Owner: {annualPlans.find(p => p.id === selectedPlanId)?.createdBy || "—"}
                     </span>
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-semibold uppercase rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 text-slate-700 dark:text-slate-300">
                       {statusInput === "APPROVED" && <CheckCircle className="w-3 h-3 text-slate-600 dark:text-slate-400" />}
@@ -820,8 +832,14 @@ export default function AnnualPlansClient({
                           <td className="px-4 py-3 text-slate-500">{ap.durationDay}</td>
                           <td className="px-4 py-3">
                             {ap.isUsed ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                                In Use
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider border ${
+                                ap.individualPlanStatus === "RELEASED"
+                                  ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                                  : ap.individualPlanStatus === "SUBMITTED_FOR_APPROVAL"
+                                    ? "bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                              }`}>
+                                {INDIVIDUAL_PLAN_STATUS_LABELS[ap.individualPlanStatus as string] || ap.individualPlanStatus || "In Use"}
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
@@ -1045,7 +1063,7 @@ export default function AnnualPlansClient({
                 />
 
                 <PlanItemEditor
-                  sectionTitle="Scope"
+                  sectionTitle="Scope *"
                   items={apScopeItems}
                   onChange={setApScopeItems}
                   prefix="AP-ISCP"

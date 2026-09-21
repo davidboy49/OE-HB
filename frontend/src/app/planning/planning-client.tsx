@@ -47,6 +47,26 @@ import PlanItemEditor from "@/components/ui/plan-item-editor";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
 
+// "Which part need to focus on" used to be a list of coded items (JSON array of
+// { id, text }); it is now free text edited in a RichEditor (HTML). Converts a
+// legacy JSON value to an HTML bullet list so previously saved plans still load;
+// anything that isn't a JSON array is already free text and passes through.
+function focusAreaToHtml(raw?: string): string {
+  if (!raw || !raw.trim()) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return raw;
+    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const lines = parsed
+      .map((item) => (typeof item === "string" ? item : item?.text || item?.description || ""))
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    return lines.length ? `<ul>${lines.map((l) => `<li><p>${escape(l)}</p></li>`).join("")}</ul>` : "";
+  } catch {
+    return raw;
+  }
+}
+
 interface PlanningClientProps {
   initialProjects: AuditProject[];
   users: User[];
@@ -178,7 +198,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [editFieldwork, setEditFieldwork] = useState("");
   const [editOutcome, setEditOutcome] = useState("");
   const [editDataRequestItems, setEditDataRequestItems] = useState<AuditPlanItem[]>([]);
-  const [editFocusAreaItems, setEditFocusAreaItems] = useState<AuditPlanItem[]>([]);
+  const [editFocusArea, setEditFocusArea] = useState("");
   
   // Timeline states
   const [editTimelinePresDate, setEditTimelinePresDate] = useState("");
@@ -395,7 +415,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (editOutcome !== dbOutcome) return true;
 
     if (serializePlanItems(editDataRequestItems) !== (selectedProject.dataRequestType || "")) return true;
-    if (serializePlanItems(editFocusAreaItems) !== (selectedProject.focusArea || "")) return true;
+    if (editFocusArea !== focusAreaToHtml(selectedProject.focusArea)) return true;
     
     const currentTimelineJson = JSON.stringify({
       presentationDate: editTimelinePresDate,
@@ -498,7 +518,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditFieldwork(proj.fieldwork || "");
     setEditOutcome(proj.outcome || "");
     setEditDataRequestItems(parsePlanItems(proj.dataRequestType, "AP-DRQ"));
-    setEditFocusAreaItems(parsePlanItems(proj.focusArea, "AP-FCA"));
+    setEditFocusArea(focusAreaToHtml(proj.focusArea));
     
     let timelineObj = {
       presentationDate: "",
@@ -582,7 +602,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -642,7 +662,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -719,7 +739,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -1488,7 +1508,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <UserIcon className="w-3.5 h-3.5" /> Assigned to {users.find(u => u.id === editLead || u.name === editLead)?.name || "Unassigned"}
                   </span>
                   <span className="flex items-center gap-1 font-roboto">
-                    <Activity className="w-3.5 h-3.5" /> Owner: Sarah Jenkins
+                    <Activity className="w-3.5 h-3.5" /> Owner: {selectedProject.createdBy || "—"}
                   </span>
                   <span className="flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" /> End Date: {editEnd}
@@ -2236,16 +2256,9 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       placeholder="Enter data request item..."
                       addBtnText="Add Data Request Item"
                     />
-                    <div className="border-t border-slate-150 dark:border-slate-800 pt-4">
-                      <PlanItemEditor
-                        sectionTitle="Which part need to focus on"
-                        items={editFocusAreaItems}
-                        onChange={setEditFocusAreaItems}
-                        prefix="AP-FCA"
-                        editable={!isReadOnly}
-                        placeholder="Enter focus area item..."
-                        addBtnText="Add Focus Area Item"
-                      />
+                    <div className="border-t border-slate-150 dark:border-slate-800 pt-4 space-y-1.5">
+                      <label className="text-[15px] font-sans font-bold text-slate-800 uppercase">Which part need to focus on</label>
+                      <RichEditor value={editFocusArea} onChange={setEditFocusArea} editable={!isReadOnly} placeholder="Enter the areas to focus on..." />
                     </div>
                   </div>
                 </div>

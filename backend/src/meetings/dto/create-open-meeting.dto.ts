@@ -97,12 +97,16 @@ export class CreateOpenMeetingDto {
   @IsString()
   attachments?: string;
 
-  @ApiPropertyOptional({ description: 'Defaults to "Sarah Jenkins".' })
+  @ApiPropertyOptional({
+    description: 'Ignored - set server-side from the authenticated user.',
+  })
   @IsOptional()
   @IsString()
   ownerName?: string;
 
-  @ApiPropertyOptional({ description: 'Defaults to "Sarah Jenkins".' })
+  @ApiPropertyOptional({
+    description: 'Ignored - set server-side from the authenticated user.',
+  })
   @IsOptional()
   @IsString()
   lastModifiedBy?: string;
