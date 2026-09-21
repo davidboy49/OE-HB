@@ -20,7 +20,9 @@ import { RequirePermission } from '../common/decorators/require-permission.decor
 @ApiBearerAuth()
 @Controller('planned-engagements')
 export class PlannedEngagementsController {
-  constructor(private readonly plannedEngagementsService: PlannedEngagementsService) {}
+  constructor(
+    private readonly plannedEngagementsService: PlannedEngagementsService,
+  ) {}
 
   @Get()
   findAll() {

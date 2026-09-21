@@ -22,7 +22,9 @@ export class AuthService {
    */
   private async findUserByLogin(identifier: string) {
     const login = identifier.trim();
-    const exact = await this.prisma.user.findUnique({ where: { email: login } });
+    const exact = await this.prisma.user.findUnique({
+      where: { email: login },
+    });
     if (exact || login.includes('@')) return exact;
 
     const matches = await this.prisma.user.findMany({

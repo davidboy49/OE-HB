@@ -8,7 +8,7 @@ import { hasPlanItemContent } from '@oeportal/shared';
 import type { PlannedEngagement } from '@oeportal/shared';
 
 const SCOPE_REQUIRED_MESSAGE =
-  'Scope is required: add at least one scope item before saving the Planned Engagement.';
+  'Scope is required: add at least one scope item before saving the Project.';
 
 /**
  * Shape returned by getEnrichedPlannedEngagements in the original dbService (typed `any[]` there).
@@ -157,7 +157,9 @@ export class PlannedEngagementsService {
     return this.getEnrichedPlannedEngagements();
   }
 
-  async findByAnnualPlan(annualPlanId: string): Promise<EnrichedPlannedEngagement[]> {
+  async findByAnnualPlan(
+    annualPlanId: string,
+  ): Promise<EnrichedPlannedEngagement[]> {
     return this.getEnrichedPlannedEngagements(annualPlanId);
   }
 
@@ -299,7 +301,7 @@ export class PlannedEngagementsService {
     });
     if (inUse) {
       throw new ConflictException(
-        'This Planned Engagement is already in use by an Individual OE Plan and cannot be deleted.',
+        'This Project is already in use by an Individual OE Plan and cannot be deleted.',
       );
     }
     await this.prisma.plannedEngagement.delete({ where: { id } });

@@ -36,10 +36,7 @@ export class OePlansController {
     action: 'CREATE_PROJECT',
     details: `Created project "${req.body.name}" (Code: ${result.code})`,
   }))
-  create(
-    @Body() dto: CreateOePlanDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  create(@Body() dto: CreateOePlanDto, @CurrentUser() user: AuthenticatedUser) {
     return this.oePlansService.create(
       dto.name,
       dto.code ?? 'AUTO',

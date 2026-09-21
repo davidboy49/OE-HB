@@ -168,7 +168,6 @@ export default function MeetingsClient({
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
   const [departmentConcern, setDepartmentConcern] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<ScheduleRow[]>([]);
   const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED">("DRAFT");
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
@@ -401,7 +400,6 @@ export default function MeetingsClient({
     setScope("");
     setDepartmentConcern("");
     setRows([]);
-    setAttachments([]);
     setMeetingStatus("DRAFT");
     setAttendeeConfirmations({});
     setIsModalOpen(true);
@@ -424,7 +422,6 @@ export default function MeetingsClient({
     setObjectives(sched.objectives);
     setScope(sched.scope);
     setDepartmentConcern((sched as any).departmentConcern || "");
-    setAttachments(sched.attachments ? JSON.parse(sched.attachments) : []);
     
     try {
       setRows(JSON.parse(sched.scheduleRows));
@@ -484,7 +481,6 @@ export default function MeetingsClient({
       scope,
       departmentConcern,
       scheduleRows: JSON.stringify(rows),
-      attachments: JSON.stringify(attachments),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name
     };
@@ -1239,70 +1235,6 @@ export default function MeetingsClient({
 
                     </tbody>
                   </table>
-                </div>
-              </div>
-
-              {/* Attachments Section */}
-              <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-sm font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  Attachments
-                </h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    disabled={isLocked}
-                    className="block w-full text-xs text-slate-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-xs file:font-semibold
-                      file:bg-[#0066cc]/10 file:text-[#0066cc]
-                      hover:file:bg-[#0066cc]/20
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                    "
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const base64 = event.target?.result;
-                        if (typeof base64 === 'string') {
-                          setAttachments([...attachments, {
-                            id: Date.now().toString(),
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            data: base64
-                          }]);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = ''; // reset input
-                    }}
-                  />
-                  {attachments.length > 0 && (
-                    <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                      {attachments.map((att) => (
-                        <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <div className="flex items-center gap-3">
-                            <FileDown className="w-4 h-4 text-slate-400" />
-                            <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
-                              {att.name}
-                            </a>
-                            <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                          </div>
-                          {!isLocked && canManage && (
-                            <button
-                              type="button"
-                              onClick={() => setAttachments(attachments.filter(a => a.id !== att.id))}
-                              className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               </div>
 

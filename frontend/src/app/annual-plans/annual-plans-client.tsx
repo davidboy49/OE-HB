@@ -356,7 +356,7 @@ export default function AnnualPlansClient({
           };
           setPlannedEngagements([...plannedEngagements, newAp]);
           setIsChildModalOpen(false);
-          showFeedback("Planned Engagement added to draft.");
+          showFeedback("Project added to draft.");
         } else {
           if (!selectedPlannedEngagementId) return;
           setPlannedEngagements(plannedEngagements.map(ap => ap.id === selectedPlannedEngagementId ? {
@@ -375,7 +375,7 @@ export default function AnnualPlansClient({
             scope: serializePlanItems(apScopeItems)
           } : ap));
           setIsChildModalOpen(false);
-          showFeedback("Planned Engagement updated in draft.");
+          showFeedback("Project updated in draft.");
         }
       } else {
         if (!selectedPlanId) return;
@@ -403,7 +403,7 @@ export default function AnnualPlansClient({
             const updated = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
             setPlannedEngagements(updated);
             setIsChildModalOpen(false);
-            showFeedback("Planned Engagement added successfully.");
+            showFeedback("Project added successfully.");
           }
         } else {
           if (!selectedPlannedEngagementId) return;
@@ -427,7 +427,7 @@ export default function AnnualPlansClient({
             const updated = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
             setPlannedEngagements(updated);
             setIsChildModalOpen(false);
-            showFeedback("Planned Engagement updated successfully.");
+            showFeedback("Project updated successfully.");
           }
         }
       }
@@ -438,7 +438,7 @@ export default function AnnualPlansClient({
   };
 
   const handleDeleteChildPlan = async (id: string) => {
-    const confirmDel = window.confirm("Are you sure you want to delete this planned engagement?");
+    const confirmDel = window.confirm("Are you sure you want to delete this project?");
     if (!confirmDel) return;
 
     if (modalMode === "create" || id.startsWith("draft-")) {
@@ -451,7 +451,7 @@ export default function AnnualPlansClient({
         return { ...ap, version: `V${count}` };
       });
       setPlannedEngagements(remapped);
-      showFeedback("Planned Engagement removed from draft.");
+      showFeedback("Project removed from draft.");
       return;
     }
 
@@ -464,7 +464,7 @@ export default function AnnualPlansClient({
         } else {
           setPlannedEngagements(plannedEngagements.filter(ap => ap.id !== id));
         }
-        showFeedback("Planned Engagement deleted successfully.");
+        showFeedback("Project deleted successfully.");
       }
     } catch (err: any) {
       console.error(err);
@@ -781,7 +781,7 @@ export default function AnnualPlansClient({
                       onClick={openChildCreateModal}
                       className="flex items-center gap-1 text-xs font-medium text-[#0066cc] hover:underline"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Add Planned Engagement
+                      <Plus className="w-3.5 h-3.5" /> Add Project
                     </button>
                   )}
                 </div>
@@ -855,7 +855,7 @@ export default function AnnualPlansClient({
                                     type="button"
                                     onClick={() => openChildEditModal(ap)}
                                     className="text-slate-400 hover:text-[#0066cc]"
-                                    title={statusInput === "APPROVED" ? "View Planned Engagement" : "Edit Planned Engagement"}
+                                    title={statusInput === "APPROVED" ? "View Project" : "Edit Project"}
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
@@ -865,7 +865,7 @@ export default function AnnualPlansClient({
                                     type="button"
                                     onClick={() => handleDeleteChildPlan(ap.id)}
                                     className="text-slate-400 hover:text-red-600"
-                                    title="Delete Planned Engagement"
+                                    title="Delete Project"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -878,7 +878,7 @@ export default function AnnualPlansClient({
                       {plannedEngagements.length === 0 && (
                         <tr>
                           <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 11 : 10} className="px-4 py-6 text-center text-slate-400 text-xs italic">
-                            No Planned Engagements added yet.
+                            No Projects added yet.
                           </td>
                         </tr>
                       )}
@@ -898,7 +898,7 @@ export default function AnnualPlansClient({
           <div className="bg-white dark:bg-slate-950 w-full max-w-3xl rounded-lg shadow-xl overflow-hidden border border-slate-200 dark:border-slate-800">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
-                {statusInput === "APPROVED" ? "View Planned Engagement" : (childModalMode === "create" ? "Add Planned Engagement" : "Edit Planned Engagement")}
+                {statusInput === "APPROVED" ? "View Project" : (childModalMode === "create" ? "Add Project" : "Edit Project")}
               </h2>
               <button onClick={() => setIsChildModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -940,7 +940,7 @@ export default function AnnualPlansClient({
 
               <div className="grid grid-cols-[2fr_1fr_1fr] gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department / Engagement Topic</label>
+                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department / Project Topic</label>
                   <div className="border border-slate-200 dark:border-slate-800 rounded-md">
                     <MultiSelect
                       selectedValues={apTopic ? [apTopic] : []}

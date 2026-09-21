@@ -20,7 +20,6 @@ export interface CreateExecutionScheduleInput {
   objectives: string;
   scope: string;
   scheduleRows: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
 }
@@ -41,7 +40,6 @@ export interface UpdateExecutionScheduleInput {
   objectives?: string;
   scope?: string;
   scheduleRows?: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
 }
@@ -119,7 +117,6 @@ export class ExecutionSchedulesService {
       objectives: s.objectives,
       scope: s.scope,
       scheduleRows: s.scheduleRows,
-      attachments: s.attachments,
       ownerName: s.ownerName,
       lastModifiedBy: s.lastModifiedBy,
       qrToken: s.qrToken ?? s.id,
@@ -289,7 +286,7 @@ export class ExecutionSchedulesService {
 
   /**
    * dbService.updateExecutionSchedule (dbService.ts:1464-1518).
-   * NOTE: the source's return shape here deliberately omits attachments/qrToken/
+   * NOTE: the source's return shape here deliberately omits qrToken/
    * departmentConsents (unlike findAll/create/findOne) - preserved as-is for parity
    * rather than "fixed", since other code may already depend on this exact shape.
    */

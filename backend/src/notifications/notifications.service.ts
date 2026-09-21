@@ -267,8 +267,7 @@ export class NotificationsService {
 
       if (project.leaderId) {
         const lead = allUsers.find(
-          (u) =>
-            u.id === project.leaderId || u.name === project.leaderId,
+          (u) => u.id === project.leaderId || u.name === project.leaderId,
         );
         if (lead) recipientsMap.set(lead.email, lead);
       }
@@ -393,9 +392,7 @@ export class NotificationsService {
         if (project) {
           if (project.leaderId) {
             const lead = allUsers.find(
-              (u) =>
-                u.id === project.leaderId ||
-                u.name === project.leaderId,
+              (u) => u.id === project.leaderId || u.name === project.leaderId,
             );
             if (lead) recipientsMap.set(lead.email, lead);
           }

@@ -37,7 +37,7 @@ import {
   Unlock,
   Link
 } from "lucide-react";
-import type { OePlan, User, Attachment, ScheduleRow, Department, AnnualPlan, PlannedEngagement, PlanItem } from "@oeportal/shared";
+import type { OePlan, User, ScheduleRow, Department, AnnualPlan, PlannedEngagement, PlanItem } from "@oeportal/shared";
 import { parsePlanItems, serializePlanItems } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
@@ -77,10 +77,10 @@ interface PlanningClientProps {
 }
 
 // Per-plan adjustments layered on top of the Scope inherited from the linked
-// Planned Engagement: which inherited/extra item ids are marked inactive for
+// Project: which inherited/extra item ids are marked inactive for
 // this Individual OE Plan only, plus any extra items added locally. Stored as
 // JSON in OePlan.scope (unused for free text since Scope moved up to
-// the Planned Engagement level).
+// the Project level).
 interface ScopeOverride {
   inactiveIds: string[];
   extraItems: PlanItem[];
@@ -184,7 +184,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [editDepartments, setEditDepartments] = useState<string[]>([]);
   const [editAnnualPlanId, setEditAnnualPlanId] = useState("");
   const [editPlannedEngagementId, setEditPlannedEngagementId] = useState("");
-  const [editAttachments, setEditAttachments] = useState<Attachment[]>([]);
 
   // Selection Dropdown states
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
@@ -487,7 +486,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   // Open popup and load project for editing
   const openProjectEditor = (proj: OePlan) => {
     setSelectedProjectId(proj.id);
-    // Project Name mirrors the linked Planned Engagement's Project Name; fall
+    // Project Name mirrors the linked Project's Project Name; fall
     // back to whatever name is already stored for legacy/unlinked plans.
     const linkedAp = proj.plannedEngagementId ? plannedEngagements?.find(ap => ap.id === proj.plannedEngagementId) : null;
     setEditName(linkedAp?.projectName?.trim() || proj.name);
@@ -510,7 +509,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }) : []);
     setEditAnnualPlanId(proj.annualPlanId || "");
     setEditPlannedEngagementId(proj.plannedEngagementId || "");
-    setEditAttachments(proj.attachments || []);
 
     // Load scoping values from database fields, with default fallback templates if null/empty
     setEditRiskClass(proj.riskClass || "");
@@ -782,7 +780,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const getMissingMandatoryFields = (): string[] => {
     const missing: string[] = [];
-    if (!editPlannedEngagementId) missing.push("Planned Engagement");
+    if (!editPlannedEngagementId) missing.push("Project Name");
     if (editDepartments.length === 0) missing.push("Department");
     if (!editLead) missing.push("OE Leader");
     if (!editStart) missing.push("Start Date");
@@ -914,7 +912,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlannedEngagementId || !newStart || !newEnd) {
-      showFeedback("Error: Planned Engagement, Start Date, and End Date are required.");
+      showFeedback("Error: Project Name, Start Date, and End Date are required.");
       return;
     }
 
@@ -923,7 +921,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     const selectedAp = plannedEngagements?.find(ap => ap.id === newPlannedEngagementId) || null;
     const deptVal = selectedAp?.topic || (newDepartments.length > 0 ? newDepartments.join(",") : "");
     // Project Name is no longer typed manually - it's derived from the linked
-    // Planned Engagement so the two stay in sync.
+    // Project so the two stay in sync.
     const derivedName = selectedAp?.projectName?.trim() || `${selectedAp?.topic || "OE"} - ${selectedAp?.version || "V1"}`;
 
     const newProj = await clientApi<OePlan>("/oe-plans", {
@@ -1069,55 +1067,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditDeptPicIds(editDeptPicIds.filter(id => id !== userId));
   };
 
-  // Attachments handlers
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedProject || !e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    
-    // Read file data as base64
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64Data = reader.result as string;
-      const newAttachment = await clientApi<Attachment>("/attachments", {
-        method: "POST",
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-          fileData: base64Data
-        })
-      });
-
-      if (newAttachment) {
-        const freshAttachments = [...editAttachments, newAttachment];
-        setEditAttachments(freshAttachments);
-        
-        // Update project state locally
-        setProjects(projects.map(p => (p.id === selectedProject.id ? { ...p, attachments: freshAttachments } : p)));
-      }
-    };
-    reader.readAsDataURL(file);
-    
-    // Reset uploader
-    e.target.value = "";
-  };
-
-  const handleDeleteFile = async (attachmentId: string) => {
-    if (!selectedProject) return;
-    
-    const success = await clientApi<boolean>(`/attachments/${attachmentId}`, { method: "DELETE" });
-    if (success) {
-      const freshAttachments = editAttachments.filter(a => a.id !== attachmentId);
-      setEditAttachments(freshAttachments);
-      
-      // Update project state locally
-      setProjects(projects.map(p => (p.id === selectedProject.id ? { ...p, attachments: freshAttachments } : p)));
-    }
-  };
-
   const handleDeleteProject = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this OE Plan? This action cannot be undone and will delete all related findings, reports, schedules, and attachments.")) {
+    if (!window.confirm("Are you sure you want to delete this OE Plan? This action cannot be undone and will delete all related findings, reports, and schedules.")) {
       return;
     }
     const success = await clientApi<boolean>(`/oe-plans/${id}`, { method: "DELETE" });
@@ -1129,16 +1080,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     } else {
       showFeedback("Failed to delete the OE Plan.");
     }
-  };
-
-  const handleDownloadFile = (attachment: Attachment) => {
-    // Reconstruct file data download using Base64 URI anchor tag
-    const link = document.createElement("a");
-    link.href = attachment.fileData;
-    link.download = attachment.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   // Filter project logic
@@ -1313,7 +1254,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     {/* Row 7: OE Plan */}
                     <tr className="border-b border-slate-300 dark:border-slate-800/80">
                       <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Planned Engagement*:
+                        Project Name*:
                       </td>
                       <td colSpan={3} className="px-4 py-2">
                         <div className="border border-slate-300 dark:border-slate-700 rounded-md">
@@ -1335,7 +1276,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                                 label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                               }));
                             })()}
-                            placeholder={newAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
+                            placeholder={newAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
                           />
                         </div>
                       </td>
@@ -1487,7 +1428,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 </div>
                 <h1
                   className="text-lg md:text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 w-full pb-0.5"
-                  title="Derived from the linked Planned Engagement's Project Name"
+                  title="Derived from the linked project's name"
                 >
                   {editName}
                 </h1>
@@ -1694,7 +1635,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     </div>
 
                     <div>
-                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Planned Engagement</label>
+                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Project Name</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
                           selectedValues={editPlannedEngagementId ? [editPlannedEngagementId] : []}
@@ -1719,7 +1660,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                               label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                             }));
                           })()}
-                          placeholder={editAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
+                          placeholder={editAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
                         />
                       </div>
                     </div>
@@ -2056,7 +1997,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   </h3>
                   {linkedPlannedEngagement && (
                     <span className="text-[10px] font-sans font-medium text-slate-400 uppercase tracking-wider">
-                      Inherited from Planned Engagement &middot; {linkedPlannedEngagement.topic} ({linkedPlannedEngagement.version || "V1"})
+                      Inherited from Project &middot; {linkedPlannedEngagement.topic} ({linkedPlannedEngagement.version || "V1"})
                     </span>
                   )}
                 </div>
@@ -2071,11 +2012,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   />
                 ) : (
                   <div className="text-slate-400 italic text-xs font-sans">
-                    This Individual OE Plan isn&apos;t linked to a Planned Engagement, so no Objectives are available. Link one under &quot;Planned Engagement&quot; above to inherit its Objectives.
+                    This Individual OE Plan isn&apos;t linked to a Project, so no Objectives are available. Link one under &quot;Project Name&quot; above to inherit its Objectives.
                   </div>
                 )}
 
-                {/* 1.2 OE Scope - inherited items from the Planned Engagement (text locked,
+                {/* 1.2 OE Scope - inherited items from the Project (text locked,
                     but can be toggled inactive per plan), plus extra items owned by this plan */}
                 <div className="border-t border-slate-150 dark:border-slate-800 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
@@ -2424,81 +2365,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   </div>
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-2">
-                  <h3 className="flex items-center gap-1.5 text-xs font-sans font-bold uppercase tracking-wider text-slate-400">
-                    <FileText className="w-4 h-4" /> Plan Attachments & Files
-                  </h3>
-                  {!isReadOnly && RBAC.can(currentUser, "attachments:create") && (
-                    <div>
-                      <input
-                        type="file"
-                        id="plan-file-input"
-                        className="hidden"
-                        onChange={handleUploadFile}
-                      />
-                      <label
-                        htmlFor="plan-file-input"
-                        className="flex items-center gap-1 px-2.5 py-1 border border-slate-200 dark:border-slate-850 text-[10px] font-bold rounded text-slate-600 dark:text-slate-300 bg-slate-50 hover:bg-slate-100 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Attach File
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {/* Attachment List */}
-                <div className="space-y-2">
-                  {editAttachments.length === 0 ? (
-                    <div className="text-[11px] text-slate-400 py-2 italic text-center">
-                      No documents attached to this plan yet. Use the button above to upload files.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {editAttachments.map((file) => (
-                        <div 
-                          key={file.id} 
-                          className="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 rounded-md"
-                        >
-                          <div className="flex items-center gap-2.5 overflow-hidden">
-                            <FileText className="w-4.5 h-4.5 text-slate-400 shrink-0" />
-                            <div className="truncate text-left">
-                              <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate" title={file.fileName}>
-                                {file.fileName}
-                              </div>
-                              <div className="text-[9px] font-sans text-slate-400">
-                                {(file.fileSize / 1024).toFixed(1)} KB | {file.fileType.split("/")[1] || "doc"}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0 ml-4">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadFile(file)}
-                              className="p-1 text-slate-500 hover:text-[#0066cc] cursor-pointer"
-                              title="Download Attachment"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            {!isReadOnly && RBAC.can(currentUser, "attachments:delete") && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteFile(file.id)}
-                                className="p-1 text-slate-500 hover:text-red-500 cursor-pointer"
-                                title="Remove Attachment"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
             </div>
 
             {/* Modal Page Footer */}

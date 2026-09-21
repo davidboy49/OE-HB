@@ -31,16 +31,6 @@ export interface User {
   permissions?: string[];
 }
 
-export interface Attachment {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  fileType: string;
-  fileData: string; // Base64
-  projectId: string;
-  createdAt: string;
-}
-
 export interface OePlan {
   id: string;
   name: string;
@@ -71,7 +61,6 @@ export interface OePlan {
 
   memberIds?: string[]; // Array of selected member user IDs
   memberNames?: string;
-  attachments?: Attachment[];
   findings?: {
     id: string;
     title: string;
@@ -144,7 +133,6 @@ export interface ExecutionSchedule {
   objectives: string;
   scope: string;
   scheduleRows: string; // JSON
-  attachments?: string; // JSON
   ownerName?: string;
   lastModifiedBy?: string;
   qrToken?: string;
@@ -172,7 +160,6 @@ export interface OpenMeeting {
   objectives: string;
   scope: string;
   scheduleRows: string; // JSON
-  attachments?: string; // JSON
   ownerName?: string;
   lastModifiedBy?: string;
   qrToken?: string;

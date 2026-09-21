@@ -18,7 +18,6 @@ The backend (NestJS) is the single source of truth for the REST API. Every contr
 | Execution Schedules | `/execution-schedules` (`/execution-schedules/qr/:qrToken` is public) |
 | Meetings | `/meetings` (`/meetings/qr/:qrToken` and its consent endpoint are public - the QR-code consent flow) |
 | Findings | `/findings` |
-| Attachments | `/attachments` |
 | Annual Plans | `/annual-plans` |
 | OE Plans | `/planned-engagements` |
 | Notifications | `/notifications` (SMTP config, email templates, and the email-sending endpoints) |

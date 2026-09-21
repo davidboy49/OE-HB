@@ -92,7 +92,6 @@ model OePlan {
   updatedAt          DateTime            @updatedAt
   documents          Document[]
   reports            Report[]
-  attachments        Attachment[]
   members            User[]              @relation("PlanMembers")
   executionSchedules ExecutionSchedule[]
   openMeetings       OpenMeeting[]
@@ -102,17 +101,6 @@ model OePlan {
   plannedEngagement   PlannedEngagement? @relation(fields: [plannedEngagementId], references: [id])
 
   createdBy String @default("") // Name of the user who created this plan
-}
-
-model Attachment {
-  id        String   @id @default(uuid())
-  fileName  String
-  fileSize  Int
-  fileType  String
-  fileData  String // Base64-encoded file data
-  projectId String
-  project   OePlan   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
 }
 
 model Document {
@@ -176,7 +164,6 @@ model ExecutionSchedule {
   scope                 String    @default("")
   departmentConcern     String    @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
-  attachments           String    @default("[]") // JSON serialized array of attachments
   ownerName             String    @default("")
   lastModifiedBy        String    @default("")
   qrToken               String    @default(uuid())
@@ -204,7 +191,6 @@ model OpenMeeting {
   scope                 String   @default("")
   departmentConcern     String   @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
-  attachments           String   @default("[]") // JSON serialized array of attachments
   ownerName             String   @default("")
   lastModifiedBy        String   @default("")
   qrToken               String   @default(uuid())

@@ -91,13 +91,6 @@ export class CreateOpenMeetingDto {
   scheduleRows!: string;
 
   @ApiPropertyOptional({
-    description: 'JSON-serialized array of attachments. Defaults to "[]".',
-  })
-  @IsOptional()
-  @IsString()
-  attachments?: string;
-
-  @ApiPropertyOptional({
     description: 'Ignored - set server-side from the authenticated user.',
   })
   @IsOptional()

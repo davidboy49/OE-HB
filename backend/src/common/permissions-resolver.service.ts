@@ -1,6 +1,14 @@
-import { ForbiddenException, Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { DEFAULT_PERMISSIONS_BY_ROLE, PERMISSIONS, PERMISSION_KEYS } from './permissions';
+import {
+  DEFAULT_PERMISSIONS_BY_ROLE,
+  PERMISSIONS,
+  PERMISSION_KEYS,
+} from './permissions';
 import type { UserRole } from '@oeportal/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
@@ -55,10 +63,7 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
   }
 
   /** Throws unless the user's current (DB-fresh) effective grants include `key`. */
-  async requirePermission(
-    user: AuthenticatedUser,
-    key: string,
-  ): Promise<void> {
+  async requirePermission(user: AuthenticatedUser, key: string): Promise<void> {
     const granted = await this.getEffectivePermissions(user.sub);
     if (!granted.includes(key)) {
       throw new ForbiddenException('Access Denied');

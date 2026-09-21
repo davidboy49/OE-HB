@@ -14,7 +14,6 @@ import { UserGroupsModule } from './user-groups/user-groups.module';
 import { CodeGeneratorModule } from './code-generator/code-generator.module';
 import { OePlansModule } from './oe-plans/oe-plans.module';
 import { FindingsModule } from './findings/findings.module';
-import { AttachmentsModule } from './attachments/attachments.module';
 import { PlanningModule } from './planning/planning.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ExecutionSchedulesModule } from './execution-schedules/execution-schedules.module';
@@ -36,7 +35,6 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
     CodeGeneratorModule,
     OePlansModule,
     FindingsModule,
-    AttachmentsModule,
     PlanningModule,
     NotificationsModule,
     ExecutionSchedulesModule,

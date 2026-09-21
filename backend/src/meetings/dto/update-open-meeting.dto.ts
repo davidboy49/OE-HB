@@ -86,11 +86,6 @@ export class UpdateOpenMeetingDto {
   @IsString()
   scheduleRows?: string;
 
-  @ApiPropertyOptional({ description: 'JSON-serialized array of attachments' })
-  @IsOptional()
-  @IsString()
-  attachments?: string;
-
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

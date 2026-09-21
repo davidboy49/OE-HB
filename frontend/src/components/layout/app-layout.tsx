@@ -170,7 +170,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
 
   // Dynamic breadcrumb matching screenshot structure
   const getBreadcrumb = () => {
-    if (pathname.startsWith("/planning")) return "Engagement / Individual OE Plan (IAP)";
+    if (pathname.startsWith("/planning")) return "Project / Individual OE Plan";
     if (pathname.startsWith("/schedule")) return "Execution / Execution Schedule & Document Request";
     if (pathname.startsWith("/meetings")) return "Collaboration / Open Meetings & Minutes";
     if (pathname.startsWith("/findings-alerts")) return "Mitigation / Findings Alerts";

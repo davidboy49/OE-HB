@@ -56,7 +56,7 @@
       "col": 0,
       "type": "frontend",
       "label": "Draft plan",
-      "sublabel": "engagements + scope",
+      "sublabel": "projects + scope",
       "tag": "scope required",
       "width": 150
     },

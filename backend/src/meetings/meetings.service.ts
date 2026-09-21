@@ -29,7 +29,6 @@ export interface CreateOpenMeetingInput {
   scope: string;
   departmentConcern?: string;
   scheduleRows: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
   qrToken?: string;
@@ -52,7 +51,6 @@ export interface UpdateOpenMeetingInput {
   scope?: string;
   departmentConcern?: string;
   scheduleRows?: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
 }
@@ -100,7 +98,6 @@ export class MeetingsService {
       scope: m.scope,
       departmentConcern: m.departmentConcern,
       scheduleRows: m.scheduleRows,
-      attachments: m.attachments,
       ownerName: m.ownerName,
       lastModifiedBy: m.lastModifiedBy,
       qrToken: m.qrToken,
@@ -224,7 +221,6 @@ export class MeetingsService {
               inherited.scope ||
               `Full OE scope covering departmental procedures and key controls for ${dept}.`,
             scheduleRows: JSON.stringify(defaultAgendaRows),
-            attachments: '[]',
             ownerName: actorName,
             lastModifiedBy: actorName,
             qrToken: project.id,
@@ -288,7 +284,6 @@ export class MeetingsService {
         scope: data.scope,
         departmentConcern: data.departmentConcern || '',
         scheduleRows: data.scheduleRows,
-        attachments: data.attachments || '[]',
         ownerName: actorName,
         lastModifiedBy: actorName,
         qrToken: data.qrToken || data.projectId,
@@ -323,7 +318,6 @@ export class MeetingsService {
       scope: data.scope,
       departmentConcern: data.departmentConcern,
       scheduleRows: data.scheduleRows,
-      attachments: data.attachments,
       lastModifiedBy: actorName,
     };
 
@@ -454,7 +448,6 @@ export class MeetingsService {
       objectives: m.objectives,
       scope: m.scope,
       scheduleRows: m.scheduleRows,
-      attachments: m.attachments,
       ownerName: m.ownerName,
       lastModifiedBy: m.lastModifiedBy,
       qrToken: m.qrToken ?? m.id,

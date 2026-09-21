@@ -36,7 +36,6 @@ export class OePlansService {
     const projects = await this.prisma.oePlan.findMany({
       include: {
         members: true,
-        attachments: true,
         executionSchedules: {
           include: {
             findings: {
@@ -129,20 +128,10 @@ export class OePlansService {
         objectives: m.objectives,
         scope: m.scope,
         scheduleRows: m.scheduleRows,
-        attachments: m.attachments,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,
         qrToken: m.qrToken,
         departmentConsents: m.departmentConsents,
-      })),
-      attachments: p.attachments.map((a) => ({
-        id: a.id,
-        fileName: a.fileName,
-        fileSize: a.fileSize,
-        fileType: a.fileType,
-        fileData: a.fileData,
-        projectId: a.projectId,
-        createdAt: a.createdAt.toISOString(),
       })),
     }));
   }
@@ -160,7 +149,7 @@ export class OePlansService {
     });
     if (existing) {
       throw new ConflictException(
-        'This Planned Engagement has already been selected for another Individual OE Plan.',
+        'This Project has already been selected for another Individual OE Plan.',
       );
     }
   }
@@ -197,10 +186,11 @@ export class OePlansService {
     let inheritedObjectives = '';
 
     if (plannedEngagementId) {
-      const parentPlannedEngagement = await this.prisma.plannedEngagement.findUnique({
-        where: { id: plannedEngagementId },
-        include: { annualPlan: true },
-      });
+      const parentPlannedEngagement =
+        await this.prisma.plannedEngagement.findUnique({
+          where: { id: plannedEngagementId },
+          include: { annualPlan: true },
+        });
       if (parentPlannedEngagement?.annualPlan?.status !== 'APPROVED') {
         throw new BadRequestException(
           'The parent Annual Plan must be APPROVED before an Individual OE Plan can be created under it.',
@@ -247,7 +237,6 @@ export class OePlansService {
       },
       include: {
         members: true,
-        attachments: true,
         executionSchedules: {
           include: {
             findings: {
@@ -316,7 +305,6 @@ export class OePlansService {
             attendeeConfirmations: e.attendeeConfirmations,
           }))
         : [],
-      attachments: [],
     };
   }
 
@@ -342,31 +330,22 @@ export class OePlansService {
       updates.status !== current.status;
 
     if (!isStatusChange) {
-      await this.permissionsResolver.requirePermission(
-        user,
-        'oe-plans:update',
-      );
+      await this.permissionsResolver.requirePermission(user, 'oe-plans:update');
       return;
     }
 
     const requiredKey =
-      STATUS_TRANSITION_PERMISSIONS[`${current!.status}->${updates.status}`];
+      STATUS_TRANSITION_PERMISSIONS[`${current.status}->${updates.status}`];
     if (!requiredKey) {
       // Unmapped transition (shouldn't happen via the UI) - fall back to the
       // generic edit permission rather than hard-blocking an unknown case.
-      await this.permissionsResolver.requirePermission(
-        user,
-        'oe-plans:update',
-      );
+      await this.permissionsResolver.requirePermission(user, 'oe-plans:update');
       return;
     }
     await this.permissionsResolver.requirePermission(user, requiredKey);
   }
 
-  async update(
-    id: string,
-    updates: UpdateOePlanDto,
-  ): Promise<OePlan | null> {
+  async update(id: string, updates: UpdateOePlanDto): Promise<OePlan | null> {
     let memberConnections: { set: { id: string }[] } | undefined = undefined;
     if (updates.memberIds) {
       const validUsers = await this.prisma.user.findMany({
@@ -383,7 +362,10 @@ export class OePlansService {
     }
 
     if (updates.plannedEngagementId) {
-      await this.ensurePlannedEngagementAvailable(updates.plannedEngagementId, id);
+      await this.ensurePlannedEngagementAvailable(
+        updates.plannedEngagementId,
+        id,
+      );
     }
 
     const p = await this.prisma.oePlan.update({
@@ -416,7 +398,6 @@ export class OePlansService {
       },
       include: {
         members: true,
-        attachments: true,
         executionSchedules: {
           include: {
             findings: {
@@ -507,20 +488,10 @@ export class OePlansService {
         objectives: m.objectives,
         scope: m.scope,
         scheduleRows: m.scheduleRows,
-        attachments: m.attachments,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,
         qrToken: m.qrToken,
         departmentConsents: m.departmentConsents,
-      })),
-      attachments: p.attachments.map((a) => ({
-        id: a.id,
-        fileName: a.fileName,
-        fileSize: a.fileSize,
-        fileType: a.fileType,
-        fileData: a.fileData,
-        projectId: a.projectId,
-        createdAt: a.createdAt.toISOString(),
       })),
     };
   }
@@ -536,5 +507,4 @@ export class OePlansService {
       return false;
     }
   }
-
 }

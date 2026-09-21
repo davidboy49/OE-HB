@@ -172,7 +172,6 @@ export default function FindingsClient({
   const [language, setLanguage] = useState("finding"); // Hidden type flag
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<FindingRow[]>([]);
   const [findingStatus, setFindingStatus] = useState<"DRAFT" | "RELEASED">("DRAFT");
   // Active row index for card editing
@@ -349,7 +348,6 @@ export default function FindingsClient({
     setObjectives("");
     setScope("");
     setRows([]);
-    setAttachments([]);
     setFindingStatus("DRAFT");
     setIsModalOpen(true);
   };
@@ -374,7 +372,6 @@ export default function FindingsClient({
     setLanguage(sched.language || "finding");
     setObjectives(sched.objectives);
     setScope(sched.scope);
-    setAttachments(sched.attachments ? JSON.parse(sched.attachments) : []);
     
     try {
       setRows(JSON.parse(sched.scheduleRows));
@@ -433,7 +430,6 @@ export default function FindingsClient({
       objectives,
       scope,
       scheduleRows: JSON.stringify(options.customRows || rows),
-      attachments: JSON.stringify(attachments),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name,
     };
@@ -1531,67 +1527,6 @@ export default function FindingsClient({
                   </table>
               </div>
 
-              {/* Attachments Section */}
-              <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-sm font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  Attachments
-                </h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    className="block w-full text-xs text-slate-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-xs file:font-semibold
-                      file:bg-[#0066cc]/10 file:text-[#0066cc]
-                      hover:file:bg-[#0066cc]/20
-                    "
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const base64 = event.target?.result;
-                        if (typeof base64 === 'string') {
-                          setAttachments([...attachments, {
-                            id: Date.now().toString(),
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            data: base64
-                          }]);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = ''; // reset input
-                    }}
-                  />
-                  {attachments.length > 0 && (
-                    <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                      {attachments.map((att) => (
-                        <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <div className="flex items-center gap-3">
-                            <FileDown className="w-4 h-4 text-slate-400" />
-                            <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
-                              {att.name}
-                            </a>
-                            <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                          </div>
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={() => setAttachments(attachments.filter(a => a.id !== att.id))}
-                              className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
               </div>
 
             </form>

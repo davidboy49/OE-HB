@@ -91,24 +91,23 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'findings:create', description: 'Log OE findings' },
   { key: 'findings:update', description: 'Edit OE findings' },
 
-  // Attachments
-  { key: 'attachments:create', description: 'Upload attachments' },
-  { key: 'attachments:delete', description: 'Delete attachments' },
-
   // Annual Plans
   { key: 'annual-plans:create', description: 'Create annual plans' },
   { key: 'annual-plans:update', description: 'Edit annual plans' },
   { key: 'annual-plans:delete', description: 'Delete annual plans' },
-  { key: 'annual-plans:submit', description: 'Submit an annual plan for approval' },
+  {
+    key: 'annual-plans:submit',
+    description: 'Submit an annual plan for approval',
+  },
   {
     key: 'annual-plans:approve',
     description: 'Approve or reject a submitted annual plan',
   },
 
   // OE Plans
-  { key: 'planned-engagements:create', description: 'Create Planned Engagements' },
-  { key: 'planned-engagements:update', description: 'Edit Planned Engagements' },
-  { key: 'planned-engagements:delete', description: 'Delete Planned Engagements' },
+  { key: 'planned-engagements:create', description: 'Create Projects' },
+  { key: 'planned-engagements:update', description: 'Edit Projects' },
+  { key: 'planned-engagements:delete', description: 'Delete Projects' },
 
   // Notifications
   {
@@ -151,8 +150,6 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'meetings:submit',
     'findings:create',
     'findings:update',
-    'attachments:create',
-    'attachments:delete',
     'annual-plans:create',
     'annual-plans:update',
     'annual-plans:submit',
@@ -161,5 +158,5 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'notifications:send-test',
     'notifications:send',
   ],
-  DEPT_PIC: ['attachments:create', 'notifications:send'],
+  DEPT_PIC: ['notifications:send'],
 };

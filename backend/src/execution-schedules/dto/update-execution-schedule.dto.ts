@@ -90,11 +90,6 @@ export class UpdateExecutionScheduleDto {
   @IsString()
   scheduleRows?: string;
 
-  @ApiPropertyOptional({ description: 'JSON-serialized array of attachments' })
-  @IsOptional()
-  @IsString()
-  attachments?: string;
-
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
