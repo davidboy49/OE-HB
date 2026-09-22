@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,6 +10,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { DATE_RANGE_MESSAGE, isValidDateRange } from '@oeportal/shared';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -67,6 +69,9 @@ export class ProjectsController {
       user.sub,
     );
     await this.accessScope.assertDepartmentInScope(dto.departmentId, user.sub);
+    if (!isValidDateRange(dto.conductDate, dto.endDate)) {
+      throw new BadRequestException(DATE_RANGE_MESSAGE);
+    }
     return this.projectsService.create(
       dto.annualPlanId,
       dto.no,
@@ -97,6 +102,9 @@ export class ProjectsController {
   ) {
     await this.accessScope.assertVisible('project', id, user.sub);
     await this.accessScope.assertDepartmentInScope(dto.departmentId, user.sub);
+    if (!isValidDateRange(dto.conductDate, dto.endDate)) {
+      throw new BadRequestException(DATE_RANGE_MESSAGE);
+    }
     return this.projectsService.update(
       id,
       dto.projectName,

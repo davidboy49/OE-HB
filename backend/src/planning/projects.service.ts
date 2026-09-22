@@ -4,12 +4,9 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasPlanItemContent } from '@oeportal/shared';
+import { validateScope } from '@oeportal/shared';
 import type { Project as ProjectShape } from '@oeportal/shared';
 import type { Prisma } from '../generated/prisma/client';
-
-const SCOPE_REQUIRED_MESSAGE =
-  'Scope is required: add at least one scope item before saving the Project.';
 
 /**
  * Shape returned by getEnrichedProjects in the original dbService (typed `any[]` there).
@@ -221,8 +218,9 @@ export class ProjectsService {
     objectives: string = '',
     scope: string = '',
   ): Promise<EnrichedProject> {
-    if (!hasPlanItemContent(scope)) {
-      throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
+    const scopeError = validateScope(scope);
+    if (scopeError) {
+      throw new BadRequestException(scopeError);
     }
     const { topic, bu } = await this.resolveDepartment(departmentId);
     const p = await this.prisma.project.create({
@@ -289,8 +287,9 @@ export class ProjectsService {
     objectives: string = '',
     scope: string = '',
   ): Promise<EnrichedProject> {
-    if (!hasPlanItemContent(scope)) {
-      throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
+    const scopeError = validateScope(scope);
+    if (scopeError) {
+      throw new BadRequestException(scopeError);
     }
     const { topic, bu } = await this.resolveDepartment(departmentId);
     const p = await this.prisma.project.update({

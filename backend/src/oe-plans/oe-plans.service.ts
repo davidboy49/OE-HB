@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { validateDateRange } from '@oeportal/shared';
 import { CodeGeneratorService } from '../code-generator/code-generator.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { OePlan } from '@oeportal/shared';
@@ -196,6 +197,9 @@ export class OePlansService {
     projectId: string | null = null,
     createdBy: string = '',
   ): Promise<OePlan> {
+    const dateError = validateDateRange(startDate, endDate);
+    if (dateError) throw new BadRequestException(dateError);
+
     let normalizedCode = (code || '').trim().toUpperCase();
 
     if (!normalizedCode || normalizedCode === 'AUTO') {
@@ -372,6 +376,23 @@ export class OePlansService {
   }
 
   async update(id: string, updates: UpdateOePlanDto): Promise<OePlan | null> {
+    if (updates.startDate !== undefined || updates.endDate !== undefined) {
+      // Only one side of the range may be changing; resolve the other from the current
+      // record so a partial edit can never leave the plan in an inverted date range.
+      const current = await this.prisma.oePlan.findUnique({
+        where: { id },
+        select: { startDate: true, endDate: true },
+      });
+      const effectiveStart =
+        updates.startDate ?? current?.startDate.toISOString();
+      const effectiveEnd = updates.endDate ?? current?.endDate.toISOString();
+      const dateError =
+        effectiveStart && effectiveEnd
+          ? validateDateRange(effectiveStart, effectiveEnd)
+          : null;
+      if (dateError) throw new BadRequestException(dateError);
+    }
+
     let memberConnections: { set: { id: string }[] } | undefined = undefined;
     if (updates.memberIds) {
       const validUsers = await this.prisma.user.findMany({

@@ -38,7 +38,7 @@ import {
   Link
 } from "lucide-react";
 import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanItem } from "@oeportal/shared";
-import { parsePlanItems, serializePlanItems } from "@oeportal/shared";
+import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -582,6 +582,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleSaveEdit = async () => {
     if (!selectedProject) return;
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
+      return;
+    }
     showFeedback("Submitting scoping details...");
 
     try {
@@ -642,6 +647,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleSaveOnly = async () => {
     if (!selectedProject) return;
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
+      return;
+    }
     showFeedback("Saving draft...");
 
     try {
@@ -801,6 +811,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
       showFeedback(`Cannot submit for approval - missing required info: ${missing.join(", ")}.`);
       return;
     }
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Cannot submit for approval - ${dateError.charAt(0).toLowerCase()}${dateError.slice(1)}`);
+      return;
+    }
     await saveStatusChange("SUBMITTED_FOR_APPROVAL");
     const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
       method: "POST",
@@ -919,6 +934,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
     e.preventDefault();
     if (!newPlannedEngagementId || !newStart || !newEnd) {
       showFeedback("Error: Project Name, Start Date, and End Date are required.");
+      return;
+    }
+    const dateError = validateDateRange(newStart, newEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
       return;
     }
 

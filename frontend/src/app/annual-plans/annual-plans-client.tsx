@@ -21,7 +21,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import type { User, AnnualPlan, Project, Department, BusinessUnit, PlanItem } from "@oeportal/shared";
-import { parsePlanItems, serializePlanItems } from "@oeportal/shared";
+import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import QRCodeModal from "@/components/ui/qr-code-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
@@ -348,6 +348,11 @@ export default function AnnualPlansClient({
     }
     if (!apScopeItems.some((item) => item.text.trim())) {
       showFeedback("Error: Scope is required. Add at least one scope item before saving.");
+      return;
+    }
+    const dateError = validateDateRange(apConductDate, apEndDate);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
       return;
     }
 
