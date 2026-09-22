@@ -22,6 +22,111 @@ const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
 };
 
 /**
+ * opExTimeline/approvals are real, flat columns in the database (see the
+ * flatten_oe_plan_timeline_and_approvals migration), but the API still accepts and returns
+ * each group as a single JSON string, so no existing client needs to change. These helpers are
+ * the only place that translates between the two.
+ */
+/** Only trusts a genuine string from the parsed JSON; anything else (missing, wrong type) is blank. */
+const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+export const BLANK_OPEX_TIMELINE_FIELDS = {
+  opExPresentationDate: '',
+  opExNotificationDate: '',
+  opExFieldWorkStart: '',
+  opExFieldWorkEnd: '',
+  opExFindingReportOffset: 0,
+  opExFinalReportOffset: 0,
+};
+
+export const BLANK_APPROVALS_FIELDS = {
+  preparedByName: '',
+  preparedByTitle: '',
+  preparedDate: '',
+  approvedByName: '',
+  approvedByTitle: '',
+  approvedDate: '',
+};
+
+export function serializeOpExTimeline(p: {
+  opExPresentationDate: string;
+  opExNotificationDate: string;
+  opExFieldWorkStart: string;
+  opExFieldWorkEnd: string;
+  opExFindingReportOffset: number;
+  opExFinalReportOffset: number;
+}): string {
+  return JSON.stringify({
+    presentationDate: p.opExPresentationDate,
+    notificationDate: p.opExNotificationDate,
+    fieldWorkStart: p.opExFieldWorkStart,
+    fieldWorkEnd: p.opExFieldWorkEnd,
+    findingReportOffset: p.opExFindingReportOffset,
+    finalReportOffset: p.opExFinalReportOffset,
+  });
+}
+
+export function serializeApprovals(p: {
+  preparedByName: string;
+  preparedByTitle: string;
+  preparedDate: string;
+  approvedByName: string;
+  approvedByTitle: string;
+  approvedDate: string;
+}): string {
+  return JSON.stringify({
+    preparedByName: p.preparedByName,
+    preparedByTitle: p.preparedByTitle,
+    preparedDate: p.preparedDate,
+    approvedByName: p.approvedByName,
+    approvedByTitle: p.approvedByTitle,
+    approvedDate: p.approvedDate,
+  });
+}
+
+/** `undefined` in -> `undefined` out, so a partial update that omits this field leaves the
+ * existing columns untouched instead of blanking them. */
+export function parseOpExTimeline(
+  raw: string | undefined,
+): typeof BLANK_OPEX_TIMELINE_FIELDS | undefined {
+  if (raw === undefined) return undefined;
+  let obj: Record<string, unknown> = {};
+  try {
+    obj = raw ? JSON.parse(raw) : {};
+  } catch {
+    obj = {};
+  }
+  return {
+    opExPresentationDate: asString(obj.presentationDate),
+    opExNotificationDate: asString(obj.notificationDate),
+    opExFieldWorkStart: asString(obj.fieldWorkStart),
+    opExFieldWorkEnd: asString(obj.fieldWorkEnd),
+    opExFindingReportOffset: Number(obj.findingReportOffset) || 0,
+    opExFinalReportOffset: Number(obj.finalReportOffset) || 0,
+  };
+}
+
+export function parseApprovals(
+  raw: string | undefined,
+): typeof BLANK_APPROVALS_FIELDS | undefined {
+  if (raw === undefined) return undefined;
+  let obj: Record<string, unknown> = {};
+  try {
+    obj = raw ? JSON.parse(raw) : {};
+  } catch {
+    obj = {};
+  }
+  return {
+    preparedByName: asString(obj.preparedByName),
+    preparedByTitle: asString(obj.preparedByTitle),
+    preparedDate: asString(obj.preparedDate),
+    approvedByName: asString(obj.approvedByName),
+    approvedByTitle: asString(obj.approvedByTitle),
+    approvedDate: asString(obj.approvedDate),
+  };
+}
+
+/**
  * Ported from src/lib/dbService.ts (getProjects, createProject, updateProject,
  * deleteProject). The include/mapping shape logic below is copied as-is so the
  * returned object shape matches exactly what the frontend already expects.
@@ -111,8 +216,8 @@ export class OePlansService {
       outcome: p.outcome,
       dataRequestType: p.dataRequestType,
       focusArea: p.focusArea,
-      opExTimeline: p.opExTimeline,
-      approvals: p.approvals,
+      opExTimeline: serializeOpExTimeline(p),
+      approvals: serializeApprovals(p),
       memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>
@@ -260,10 +365,8 @@ export class OePlansService {
         outcome: '',
         dataRequestType: '',
         focusArea: '',
-        opExTimeline:
-          '{"presentationDate":"","notificationDate":"","fieldWorkStart":"","fieldWorkEnd":"","findingReportOffset":0,"finalReportOffset":0}',
-        approvals:
-          '{"preparedByName":"","preparedByTitle":"","preparedDate":"","approvedByName":"","approvedByTitle":"","approvedDate":""}',
+        ...BLANK_OPEX_TIMELINE_FIELDS,
+        ...BLANK_APPROVALS_FIELDS,
       },
       include: {
         members: true,
@@ -304,8 +407,8 @@ export class OePlansService {
       outcome: p.outcome,
       dataRequestType: p.dataRequestType,
       focusArea: p.focusArea,
-      opExTimeline: p.opExTimeline,
-      approvals: p.approvals,
+      opExTimeline: serializeOpExTimeline(p),
+      approvals: serializeApprovals(p),
       memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>
@@ -434,8 +537,8 @@ export class OePlansService {
         outcome: updates.outcome,
         dataRequestType: updates.dataRequestType,
         focusArea: updates.focusArea,
-        opExTimeline: updates.opExTimeline,
-        approvals: updates.approvals,
+        ...parseOpExTimeline(updates.opExTimeline),
+        ...parseApprovals(updates.approvals),
         annualPlanId: updates.annualPlanId,
         projectId: updates.projectId,
         members: memberConnections,
@@ -486,8 +589,8 @@ export class OePlansService {
       outcome: p.outcome,
       dataRequestType: p.dataRequestType,
       focusArea: p.focusArea,
-      opExTimeline: p.opExTimeline,
-      approvals: p.approvals,
+      opExTimeline: serializeOpExTimeline(p),
+      approvals: serializeApprovals(p),
       memberIds: p.members.map((a) => a.id),
       findings: p.executionSchedules
         ? p.executionSchedules.flatMap((es) =>

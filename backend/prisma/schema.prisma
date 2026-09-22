@@ -97,8 +97,22 @@ model OePlan {
   outcome         String @default("")
   dataRequestType String @default("")
   focusArea       String @default("")
-  opExTimeline    String @default("")
-  approvals       String @default("")
+  // Timeline & Approvals - previously JSON-encoded strings (opExTimeline/approvals), flattened
+  // to real columns for type safety and DB-level queryability. The API still accepts/returns
+  // them as a single JSON string per group (see OePlansService) so existing clients are
+  // unaffected - only the storage underneath changed.
+  opExPresentationDate    String @default("")
+  opExNotificationDate    String @default("")
+  opExFieldWorkStart      String @default("")
+  opExFieldWorkEnd        String @default("")
+  opExFindingReportOffset Int    @default(0)
+  opExFinalReportOffset   Int    @default(0)
+  preparedByName          String @default("")
+  preparedByTitle         String @default("")
+  preparedDate            String @default("")
+  approvedByName          String @default("")
+  approvedByTitle         String @default("")
+  approvedDate            String @default("")
 
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
