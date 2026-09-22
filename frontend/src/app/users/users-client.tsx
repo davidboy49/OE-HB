@@ -447,7 +447,7 @@ export default function UsersClient({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              Each group grants its members a set of API permissions. Members with no group fall back to a default set for their role.
+              Each group grants its members a set of API permissions. Members with no group have no permissions at all (except Admins, who always have full access).
             </p>
             {canCreateGroup && (
               <button

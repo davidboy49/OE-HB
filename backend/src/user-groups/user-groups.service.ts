@@ -127,7 +127,7 @@ export class UserGroupsService {
     }
   }
 
-  /** Members of the group are left with no group (they fall back to their role defaults). */
+  /** Members of the group are left with no group - and so no permissions at all - until reassigned. */
   async remove(id: string): Promise<boolean> {
     await this.getSummary(id);
     await this.prisma.userGroup.delete({ where: { id } });

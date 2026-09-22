@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { PermissionsResolverService } from './permissions-resolver.service';
-import { DEFAULT_PERMISSIONS_BY_ROLE, PERMISSION_KEYS } from './permissions';
+import { PERMISSION_KEYS } from './permissions';
 import type { PrismaService } from '../prisma/prisma.service';
 
 function makeResolver(opts: {
@@ -35,13 +35,11 @@ describe('PermissionsResolverService.getEffectivePermissions', () => {
     );
   });
 
-  it('falls back to the role defaults when the user has no group', async () => {
+  it('gives a non-admin with no group nothing at all - role is not a fallback', async () => {
     const { resolver } = makeResolver({
       user: { role: 'OE_MEMBER', groupId: null },
     });
-    await expect(resolver.getEffectivePermissions('u')).resolves.toEqual(
-      DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER,
-    );
+    await expect(resolver.getEffectivePermissions('u')).resolves.toEqual([]);
   });
 
   it("uses ONLY the group's grants when the user is in a group (role defaults no longer apply)", async () => {
@@ -115,21 +113,11 @@ describe('PermissionsResolverService.getGrants (scopes)', () => {
     });
   });
 
-  it('gives an ungrouped user the role defaults at ALL', async () => {
-    const { resolver } = makeResolver({
-      user: { role: 'OE_MEMBER', groupId: null },
-    });
-    const grants = await resolver.getGrants('u');
-    expect(Object.keys(grants)).toEqual(DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER);
-    expect(new Set(Object.values(grants))).toEqual(new Set(['ALL']));
-  });
-
-  it('never grants view access to a department user by default', async () => {
-    const { resolver } = makeResolver({
-      user: { role: 'DEPT_PIC', groupId: null },
-    });
-    const keys = Object.keys(await resolver.getGrants('u'));
-    expect(keys.filter((k) => k.endsWith(':view'))).toEqual([]);
+  it('gives an ungrouped non-admin no grants at all, regardless of role', async () => {
+    for (const role of ['OE_LEADER', 'OE_MEMBER', 'DEPT_PIC']) {
+      const { resolver } = makeResolver({ user: { role, groupId: null } });
+      await expect(resolver.getGrants('u')).resolves.toEqual({});
+    }
   });
 });
 
@@ -144,7 +132,8 @@ describe('PermissionsResolverService.requirePermission', () => {
 
   it('passes when the permission is granted', async () => {
     const { resolver } = makeResolver({
-      user: { role: 'OE_MEMBER', groupId: null },
+      user: { role: 'OE_MEMBER', groupId: 'g1' },
+      grants: [{ permissionKey: 'oe-plans:create', scope: 'ALL' }],
     });
     await expect(
       resolver.requirePermission(user, 'oe-plans:create'),
@@ -153,10 +142,20 @@ describe('PermissionsResolverService.requirePermission', () => {
 
   it('throws Access Denied when it is not', async () => {
     const { resolver } = makeResolver({
-      user: { role: 'OE_MEMBER', groupId: null },
+      user: { role: 'OE_MEMBER', groupId: 'g1' },
+      grants: [{ permissionKey: 'oe-plans:create', scope: 'ALL' }],
     });
     await expect(
       resolver.requirePermission(user, 'oe-plans:approve'),
+    ).rejects.toThrow('Access Denied');
+  });
+
+  it('throws Access Denied for a non-admin with no group, for any key', async () => {
+    const { resolver } = makeResolver({
+      user: { role: 'OE_MEMBER', groupId: null },
+    });
+    await expect(
+      resolver.requirePermission(user, 'oe-plans:create'),
     ).rejects.toThrow('Access Denied');
   });
 });

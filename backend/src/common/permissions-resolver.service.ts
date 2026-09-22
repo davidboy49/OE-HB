@@ -7,7 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   ACCESS_SCOPES,
   AccessScope,
-  DEFAULT_PERMISSIONS_BY_ROLE,
   PERMISSIONS,
   PERMISSION_KEYS,
   scopesFor,
@@ -24,6 +23,11 @@ export type Grants = Record<string, AccessScope>;
  * and can go stale for up to the token's lifetime): a role change, an ADMIN promotion or
  * demotion, or a group reassignment must take effect on this user's very next request, not
  * just after they log back in.
+ *
+ * `role` only ever does one thing here: ADMIN gets every permission. Everyone else's access
+ * comes entirely from their UserGroup's grants - a user with no group has none, full stop.
+ * There is deliberately no role-based fallback: an ungrouped non-admin is locked out rather
+ * than silently getting some default set of access an admin never actually chose for them.
  *
  * This is the single place that answers "what is this user allowed to do?", so it is also
  * the one seam to change if grants ever come from somewhere else (an external IAM, Keycloak
@@ -59,7 +63,9 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
       Object.fromEntries(keys.map((k) => [k, 'ALL']));
 
     if (role === 'ADMIN') return all(PERMISSION_KEYS);
-    if (!dbUser.groupId) return all(DEFAULT_PERMISSIONS_BY_ROLE[role] ?? []);
+    // No group = no grants. `role` otherwise plays no part in what a user may do -
+    // access is entirely a function of the group an admin has assigned them to.
+    if (!dbUser.groupId) return {};
 
     const rows = await this.prisma.groupPermission.findMany({
       where: { groupId: dbUser.groupId },
