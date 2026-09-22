@@ -44,6 +44,7 @@ import RichEditor from "@/components/ui/rich-editor";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
+import CreateOePlanModal from "./create-oe-plan-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
 
@@ -1166,170 +1167,24 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
       {/* New Project Creator Modal */}
       {isCreating && (
-        <div 
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm transition-opacity duration-300 animate-in fade-in"
-          onClick={closeNewProjectModal}
-        >
-          <div 
-            className="bg-white dark:bg-slate-950 w-full max-w-2xl rounded-lg shadow-2xl flex flex-col overflow-visible h-fit border border-slate-200 dark:border-slate-855 scoping-modal-container transform scale-100 animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="text-[10px] font-roboto text-slate-400 font-bold uppercase tracking-wider">
-                  Document 1. Individual OE Plan
-                </div>
-                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                  {isCopying ? "Copy Individual OE Plan" : "Create Individual OE Plan"}
-                </h2>
-              </div>
-              
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={closeNewProjectModal}
-                  className="p-2 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-500 rounded cursor-pointer transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Form with Word Document table styling */}
-            <form onSubmit={handleCreateProject} className="p-8 space-y-6">
-              <div className="overflow-visible border border-slate-300 dark:border-slate-800 rounded-md">
-                <table className="w-full border-collapse text-xs">
-                  <tbody>
-                    {/* Row 3: Start Date + End Date */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Start Date*:
-                      </td>
-                      <td className="w-1/4 px-4 py-2 border-r border-slate-300 dark:border-slate-800/80">
-                        <input
-                          type="date"
-                          required
-                          value={newStart}
-                          onChange={(e) => setNewStart(e.target.value)}
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 cursor-pointer"
-                        />
-                      </td>
-                      <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        End Date*:
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          type="date"
-                          required
-                          value={newEnd}
-                          onChange={(e) => setNewEnd(e.target.value)}
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 cursor-pointer"
-                        />
-                      </td>
-                    </tr>
-
-                    {/* Row 4: OE Leader */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        OE Leader:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newLeads}
-                            onChange={setNewLeads}
-                            options={users.map((u) => ({
-                              value: u.name,
-                              label: u.name,
-                              subLabel: `${u.role.replace('_', ' ')}${u.departmentName ? ` • ${u.departmentName}` : ''}`
-                            }))}
-                            placeholder="Select OE Leaders..."
-                          />
-                        </div>
-                      </td>
-                    </tr>
-
-
-                    {/* Row 6: Annual Plan Master */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Annual OE Plan:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newAnnualPlanId ? [newAnnualPlanId] : []}
-                            onChange={(values) => {
-                              const chosenVal = values.length > 0 ? values[0] : "";
-                              const match = annualPlans?.find(p => p.id === chosenVal || p.planName === chosenVal);
-                              setNewAnnualPlanId(match ? match.id : chosenVal);
-                              setNewPlannedEngagementId(""); // Reset OE plan when annual plan changes
-                            }}
-                            singleSelect={true}
-                            options={annualPlans?.filter(plan => plan.status === "APPROVED").map(plan => ({
-                              value: plan.id,
-                              label: `${plan.planName} (${plan.period})`
-                            })) || []}
-                            placeholder="Select Annual OE Plan..."
-                          />
-                        </div>
-                      </td>
-                    </tr>
-
-                    {/* Row 7: OE Plan */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Project Name*:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newPlannedEngagementId ? [newPlannedEngagementId] : []}
-                            onChange={(values) => {
-                              setNewPlannedEngagementId(values.length > 0 ? values[0] : "");
-                            }}
-                            singleSelect={true}
-                            disabled={!newAnnualPlanId}
-                            options={(() => {
-                              const filtered = plannedEngagements?.filter(ap => ap.annualPlanId === newAnnualPlanId && !ap.isUsed) || [];
-                              if (newPlannedEngagementId && !filtered.some(ap => ap.id === newPlannedEngagementId)) {
-                                const target = plannedEngagements?.find(ap => ap.id === newPlannedEngagementId);
-                                if (target) filtered.push(target);
-                              }
-                              return filtered.map(ap => ({
-                                value: ap.id,
-                                label: ap.projectName || ap.topic,
-                                subLabel: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
-                              }));
-                            })()}
-                            placeholder={newAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex gap-3 justify-end pt-4 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={closeNewProjectModal}
-                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold rounded cursor-pointer text-slate-700 dark:text-slate-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded cursor-pointer transition-colors flex items-center gap-1.5"
-                >
-                  <Save className="w-3.5 h-3.5" /> {isCopying ? "Create Copy" : "Create Individual OE Plan"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateOePlanModal
+          isCopying={isCopying}
+          users={users}
+          annualPlans={annualPlans}
+          projects={plannedEngagements}
+          newStart={newStart}
+          setNewStart={setNewStart}
+          newEnd={newEnd}
+          setNewEnd={setNewEnd}
+          newLeads={newLeads}
+          setNewLeads={setNewLeads}
+          newAnnualPlanId={newAnnualPlanId}
+          setNewAnnualPlanId={setNewAnnualPlanId}
+          newProjectId={newPlannedEngagementId}
+          setNewProjectId={setNewPlannedEngagementId}
+          onClose={closeNewProjectModal}
+          onSubmit={handleCreateProject}
+        />
       )}
 
       {/* Main projects grid layout */}
