@@ -1018,7 +1018,7 @@ export default function ScheduleClient({
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={true}
                           />
                         </td>
@@ -1034,7 +1034,7 @@ export default function ScheduleClient({
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1050,7 +1050,7 @@ export default function ScheduleClient({
                             selectedValues={additionalAttendeesArray}
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1418,7 +1418,7 @@ export default function ScheduleClient({
                                       selectedValues={conductByArray}
                                       onChange={(values) => updateDraftField("conductBy", values.join(", "))}
                                       options={memberOptions}
-                                      placeholder="Select OE members or type custom name..."
+                                      placeholder="Select OE members..."
                                     />
                                   </div>
 
@@ -1429,7 +1429,7 @@ export default function ScheduleClient({
                                       selectedValues={pInchargeArray}
                                       onChange={(values) => updateDraftField("pIncharge", values.join(", "))}
                                       options={picOptions}
-                                      placeholder="Select PICs or type custom name..."
+                                      placeholder="Select PICs..."
                                     />
                                   </div>
                                 </div>

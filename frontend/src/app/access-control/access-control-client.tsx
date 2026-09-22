@@ -92,8 +92,7 @@ function Pick({ value, onChange, options, disabled, className = "min-w-[150px]" 
         disabled={disabled}
         onChange={(values) => {
           const next = values[0];
-          // The component also lets a typed-in value through; only accept real options.
-          if (next && options.some((o) => o.value === next)) onChange(next);
+          if (next) onChange(next);
         }}
       />
     </div>
