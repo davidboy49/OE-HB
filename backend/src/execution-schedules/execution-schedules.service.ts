@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+
+const CONFLICT_MESSAGE =
+  'Someone else changed this Execution Schedule after you loaded it. Reload and try again.';
 
 export interface CreateExecutionScheduleInput {
   /** The Individual OE Plan this schedule belongs to. Called `projectId` in the API for
@@ -45,6 +52,9 @@ export interface UpdateExecutionScheduleInput {
   scheduleRows?: string;
   ownerName?: string;
   lastModifiedBy?: string;
+  /** See UpdateExecutionScheduleDto - when given, rejects the write if the schedule has been
+   * changed since this timestamp instead of silently overwriting the other change. */
+  expectedUpdatedAt?: string;
 }
 
 export interface DepartmentConsentInput {
@@ -184,8 +194,44 @@ export class ExecutionSchedulesService {
   }
 
   /**
-   * dbService.updateDepartmentConsent (dbService.ts:1422-1463). Records a single
-   * department's consent decision and fans it out to sibling schedules on the same OE Plan.
+   * Atomically merges one key into a JSON-map column, entirely inside a single UPDATE
+   * statement (Postgres's `jsonb_set` does the read-modify-write under the row's own lock).
+   * This is what makes it safe against two people writing two different keys of the same
+   * column at once - unlike the read-in-application-code/JSON.parse/mutate/JSON.stringify/
+   * write-back pattern this replaces, where the second writer's save silently discards
+   * whatever the first writer just added, because it never saw it.
+   */
+  private async mergeJsonColumn(
+    column: 'departmentConsents' | 'attendeeConfirmations',
+    id: string,
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    const json = JSON.stringify(value);
+    if (column === 'departmentConsents') {
+      await this.prisma.$executeRaw`
+        UPDATE "ExecutionSchedule"
+        SET "departmentConsents" = jsonb_set(
+          COALESCE("departmentConsents", '{}')::jsonb, ARRAY[${key}]::text[], ${json}::jsonb, true
+        )::text
+        WHERE id = ${id}
+      `;
+    } else {
+      await this.prisma.$executeRaw`
+        UPDATE "ExecutionSchedule"
+        SET "attendeeConfirmations" = jsonb_set(
+          COALESCE("attendeeConfirmations", '{}')::jsonb, ARRAY[${key}]::text[], ${json}::jsonb, true
+        )::text
+        WHERE id = ${id}
+      `;
+    }
+  }
+
+  /**
+   * Records a single department's consent decision and fans it out to sibling schedules on
+   * the same OE Plan. Each write is a single atomic jsonb_set (see mergeJsonColumn) rather
+   * than a parse/mutate/stringify round trip, so two departments consenting at the same
+   * moment can never make one of them disappear.
    */
   async updateDepartmentConsent(
     scheduleId: string,
@@ -197,44 +243,54 @@ export class ExecutionSchedulesService {
     });
     if (!s) throw new NotFoundException('Execution Schedule not found');
 
-    let consents: Record<string, any> = {};
-    try {
-      consents = JSON.parse(s.departmentConsents || '{}');
-    } catch {
-      consents = {};
-    }
-    consents[departmentId] = consentObj;
-
-    const updated = await this.prisma.executionSchedule.update({
-      where: { id: scheduleId },
-      data: { departmentConsents: JSON.stringify(consents) },
-      include: { oePlan: true },
-    });
+    await this.mergeJsonColumn(
+      'departmentConsents',
+      scheduleId,
+      departmentId,
+      consentObj,
+    );
 
     if (s.oePlanId) {
-      const siblingSchedules = await this.prisma.executionSchedule.findMany({
+      const siblings = await this.prisma.executionSchedule.findMany({
         where: { oePlanId: s.oePlanId, NOT: { id: scheduleId } },
+        select: { id: true },
       });
-      for (const sib of siblingSchedules) {
-        let sibConsents: Record<string, any> = {};
-        try {
-          sibConsents = JSON.parse(sib.departmentConsents || '{}');
-        } catch {
-          sibConsents = {};
-        }
-        sibConsents[departmentId] = consentObj;
-        await this.prisma.executionSchedule.update({
-          where: { id: sib.id },
-          data: { departmentConsents: JSON.stringify(sibConsents) },
-        });
+      for (const sib of siblings) {
+        await this.mergeJsonColumn(
+          'departmentConsents',
+          sib.id,
+          departmentId,
+          consentObj,
+        );
       }
     }
 
-    return {
-      ...updated,
-      projectName: updated.oePlan?.name,
-      projectCode: updated.oePlan?.code,
-    };
+    return this.findOne(scheduleId);
+  }
+
+  /**
+   * Records that one attendee confirmed their attendance, without touching any other field -
+   * in particular it never re-triggers the "an edit sends the record back to DRAFT" rule that
+   * the generic `update()` below applies, since confirming attendance is not editing content.
+   */
+  async confirmAttendee(
+    scheduleId: string,
+    attendeeName: string,
+    confirmedBy: string,
+  ): Promise<any> {
+    const s = await this.findOne(scheduleId);
+    if (!s) throw new NotFoundException('Execution Schedule not found');
+
+    await this.mergeJsonColumn(
+      'attendeeConfirmations',
+      scheduleId,
+      attendeeName,
+      {
+        confirmedAt: new Date().toISOString(),
+        confirmedBy,
+      },
+    );
+    return this.findOne(scheduleId);
   }
 
   /**
@@ -242,6 +298,13 @@ export class ExecutionSchedulesService {
    * NOTE: the source's return shape here deliberately omits qrToken/
    * departmentConsents (unlike findAll/create/findOne) - preserved as-is for parity
    * rather than "fixed", since other code may already depend on this exact shape.
+   *
+   * When `expectedUpdatedAt` is given, the write is a compare-and-swap: it only lands if
+   * nobody has touched the schedule since that timestamp. This is what protects scheduleRows -
+   * an ordered list, not a keyed map, so there's no per-field atomic merge to reach for the
+   * way there is above - from two people's edits silently overwriting one another; the second
+   * save is refused instead of quietly winning, so the loser can reload and re-apply their
+   * change to the current version rather than lose it without ever knowing.
    */
   async update(
     id: string,
@@ -249,13 +312,35 @@ export class ExecutionSchedulesService {
     actorName: string,
   ): Promise<any> {
     // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
-    const { attendeeConfirmations, ...updateData } = data;
+    const { attendeeConfirmations, expectedUpdatedAt, ...updateData } = data;
     delete updateData.ownerName;
-    const s = await this.prisma.executionSchedule.update({
-      where: { id },
-      data: { ...updateData, lastModifiedBy: actorName },
-      include: { oePlan: true },
-    });
+
+    if (expectedUpdatedAt !== undefined) {
+      const { count } = await this.prisma.executionSchedule.updateMany({
+        where: { id, updatedAt: new Date(expectedUpdatedAt) },
+        data: { ...updateData, lastModifiedBy: actorName },
+      });
+      if (count === 0) {
+        const exists = await this.prisma.executionSchedule.findUnique({
+          where: { id },
+          select: { id: true },
+        });
+        if (!exists)
+          throw new NotFoundException('Execution Schedule not found');
+        throw new ConflictException(CONFLICT_MESSAGE);
+      }
+    }
+
+    const s = await (expectedUpdatedAt !== undefined
+      ? this.prisma.executionSchedule.findUniqueOrThrow({
+          where: { id },
+          include: { oePlan: true },
+        })
+      : this.prisma.executionSchedule.update({
+          where: { id },
+          data: { ...updateData, lastModifiedBy: actorName },
+          include: { oePlan: true },
+        }));
     await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
     return {
       id: s.id,

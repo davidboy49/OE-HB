@@ -1,11 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+
+const CONFLICT_MESSAGE =
+  'Someone else changed this Open Meeting after you loaded it. Reload and try again.';
 
 export interface CreateOpenMeetingInput {
   /** The Individual OE Plan this meeting belongs to. Called `projectId` in the API for
@@ -47,6 +51,9 @@ export interface UpdateOpenMeetingInput {
   scheduleRows?: string;
   ownerName?: string;
   lastModifiedBy?: string;
+  /** See UpdateOpenMeetingDto - when given, rejects the write if the meeting has been changed
+   * since this timestamp instead of silently overwriting the other change. */
+  expectedUpdatedAt?: string;
 }
 
 /**
@@ -172,7 +179,14 @@ export class MeetingsService {
     return this.findOne(m.id);
   }
 
-  /** ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor. */
+  /**
+   * ownerName is set once at creation and never changes; lastModifiedBy is the authenticated
+   * editor. When `expectedUpdatedAt` is given, the write is a compare-and-swap: it only lands
+   * if nobody has changed the meeting since that timestamp - protects scheduleRows (an ordered
+   * list, with no per-field atomic merge to reach for the way a keyed map has) from two
+   * people's edits silently overwriting one another. The second save is refused instead of
+   * quietly winning, so the loser can reload and re-apply their change to the current version.
+   */
   async update(
     id: string,
     data: UpdateOpenMeetingInput,
@@ -197,12 +211,59 @@ export class MeetingsService {
       lastModifiedBy: actorName,
     };
 
+    if (data.expectedUpdatedAt !== undefined) {
+      const { count } = await this.prisma.openMeeting.updateMany({
+        where: { id, updatedAt: new Date(data.expectedUpdatedAt) },
+        data: updateData,
+      });
+      if (count === 0) {
+        const current = await this.prisma.openMeeting.findUnique({
+          where: { id },
+          select: { id: true, isDeleted: true },
+        });
+        if (!current || current.isDeleted) {
+          throw new NotFoundException('Open Meeting not found');
+        }
+        throw new ConflictException(CONFLICT_MESSAGE);
+      }
+      return this.findOne(id);
+    }
+
     const m = await this.prisma.openMeeting.update({
       where: { id },
       data: updateData,
       include: { oePlan: true },
     });
     return this.findOne(m.id);
+  }
+
+  /**
+   * Records that one attendee confirmed their attendance, without touching any other field -
+   * in particular it never re-triggers the "an edit sends the meeting back to DRAFT" rule
+   * that `update()` applies, since confirming attendance is not editing content. A single
+   * atomic jsonb_set, so two attendees confirming at the same moment can never make one of
+   * them disappear the way the old read/merge/write-the-whole-blob-back pattern could.
+   */
+  async confirmAttendee(
+    meetingId: string,
+    attendeeName: string,
+    confirmedBy: string,
+  ): Promise<any> {
+    const m = await this.findOne(meetingId);
+    if (!m) throw new NotFoundException('Open Meeting not found');
+
+    const confirmation = JSON.stringify({
+      confirmedAt: new Date().toISOString(),
+      confirmedBy,
+    });
+    await this.prisma.$executeRaw`
+      UPDATE "OpenMeeting"
+      SET "attendeeConfirmations" = jsonb_set(
+        COALESCE("attendeeConfirmations", '{}')::jsonb, ARRAY[${attendeeName}]::text[], ${confirmation}::jsonb, true
+      )::text
+      WHERE id = ${meetingId}
+    `;
+    return this.findOne(meetingId);
   }
 
   /** DRAFT -> SUBMITTED_FOR_APPROVAL -> RELEASED, with reject/reopen looping back to DRAFT. */

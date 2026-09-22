@@ -30,7 +30,7 @@ import type {
   Department,
   ScheduleRow
 } from "@oeportal/shared";
-import { clientApi } from "@/lib/apiClient";
+import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
@@ -124,6 +124,10 @@ export default function ScheduleClient({
 
   // Selection & Modal
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  // The updatedAt of the schedule as last loaded/saved; sent back as expectedUpdatedAt so the
+  // server can refuse a save if someone else changed the schedule in the meantime, instead of
+  // silently overwriting their edit (see ExecutionSchedulesService.update).
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   
@@ -396,6 +400,7 @@ export default function ScheduleClient({
     }
 
     setScheduleStatus((sched.status as any) || "DRAFT");
+    setLoadedUpdatedAt(sched.updatedAt || null);
     setIsModalOpen(true);
   };
 
@@ -470,10 +475,11 @@ export default function ScheduleClient({
         if (!selectedScheduleId) return false;
         const result = await clientApi<ExecutionSchedule>(`/execution-schedules/${selectedScheduleId}`, {
           method: "PATCH",
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: loadedUpdatedAt || undefined })
         });
         if (!result) return false;
         setScheduleStatus(targetStatus);
+        setLoadedUpdatedAt(result.updatedAt || null);
       }
 
       const fresh = await clientApi<ExecutionSchedule[]>("/execution-schedules");
@@ -514,7 +520,11 @@ export default function ScheduleClient({
       return true;
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Save failed: ${err.message || err.toString()}`);
+      if (err instanceof ApiError && err.status === 409) {
+        showFeedback("Someone else saved changes to this schedule first. Reload it and re-apply your edit.");
+      } else {
+        showFeedback(`Save failed: ${err.message || err.toString()}`);
+      }
       return false;
     }
   };

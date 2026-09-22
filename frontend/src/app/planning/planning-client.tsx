@@ -238,13 +238,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
   };
 
-  const pruneConfirmations = (attendeeNames: string[], confirmations: Record<string, AttendeeConfirmation>) => {
-    return attendeeNames.reduce<Record<string, AttendeeConfirmation>>((next, name) => {
-      if (confirmations[name]) next[name] = confirmations[name];
-      return next;
-    }, {});
-  };
-
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
 
   const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
@@ -255,6 +248,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
     // Find linked meeting schedule if any
     const linkedMeeting = selectedProject.executionSchedules?.find(e => e.language === "meeting");
+    if (!linkedMeeting) return;
 
     if (!canConfirmAttendee(attendeeName)) {
       showFeedback("Only the attendee or an Admin can confirm this attendance.");
@@ -266,37 +260,20 @@ export default function PlanningClient({ initialProjects, users, departments, an
       return;
     }
 
-    const deptPicArray = editDeptPicIds;
-    const nextConfirmations = pruneConfirmations(deptPicArray, {
-      ...attendeeConfirmations,
-      [attendeeName]: {
-        confirmedAt: new Date().toISOString(),
-        confirmedBy: currentUser.name
-      }
-    });
-
     try {
-      if (linkedMeeting) {
-        await clientApi(`/execution-schedules/${linkedMeeting.id}`, {
+      // A single atomic write to just this attendee's key (server-enforced: only the
+      // attendee themself or an Admin may confirm) - never a full read/merge/write of the
+      // whole confirmations blob, which could silently drop someone else's concurrent
+      // confirmation.
+      const updated = await clientApi<{ attendeeConfirmations?: string }>(
+        `/execution-schedules/${linkedMeeting.id}/attendee-confirmation`,
+        {
           method: "PATCH",
-          body: JSON.stringify({
-            attendeeConfirmations: JSON.stringify(nextConfirmations),
-            lastModifiedBy: currentUser.name
-          })
-        });
-      }
-
-      const updatedProj = await clientApi<OePlan>(`/oe-plans/${selectedProject.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          deptPicConfirmations: JSON.stringify(nextConfirmations)
-        })
-      });
-
-      if (updatedProj) {
-        setAttendeeConfirmations(nextConfirmations);
-        setProjects(projects.map(p => (p.id === selectedProject.id ? updatedProj : p)));
-      }
+          body: JSON.stringify({ attendeeName }),
+        }
+      );
+      setAttendeeConfirmations(parseAttendeeConfirmations(updated.attendeeConfirmations));
+      showFeedback(`${attendeeName} confirmed attendance.`);
     } catch (err: any) {
       console.error(err);
       showFeedback(`Confirmation failed: ${err.message || err.toString()}`);

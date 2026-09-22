@@ -32,7 +32,7 @@ import type {
   Department,
   Project
 } from "@oeportal/shared";
-import { clientApi } from "@/lib/apiClient";
+import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
@@ -149,6 +149,10 @@ export default function MeetingsClient({
 
   // Selection & Modal
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  // The updatedAt of the meeting as last loaded/saved; sent back as expectedUpdatedAt so the
+  // server can refuse a save if someone else changed the meeting in the meantime, instead of
+  // silently overwriting their edit (see MeetingsService.update).
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   
@@ -390,6 +394,7 @@ export default function MeetingsClient({
       setRows([]);
     }
     setSelectedScheduleId(sched.id);
+    setLoadedUpdatedAt(sched.updatedAt || null);
     setIsModalOpen(true);
   };
 
@@ -462,11 +467,12 @@ export default function MeetingsClient({
         if (!selectedScheduleId) return null;
         const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: loadedUpdatedAt || undefined }),
         });
         if (!result) return null;
         savedId = result.id || savedId;
         setMeetingStatus("DRAFT");
+        setLoadedUpdatedAt(result.updatedAt || null);
       }
 
       const fresh = await clientApi<OpenMeeting[]>("/meetings");
@@ -481,7 +487,11 @@ export default function MeetingsClient({
       return savedId ?? null;
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Save failed: ${err.message || err.toString()}`);
+      if (err instanceof ApiError && err.status === 409) {
+        showFeedback("Someone else saved changes to this meeting first. Reload it and re-apply your edit.");
+      } else {
+        showFeedback(`Save failed: ${err.message || err.toString()}`);
+      }
       return null;
     }
   };
@@ -569,25 +579,23 @@ export default function MeetingsClient({
       return;
     }
 
-    const nextConfirmations = pruneConfirmations(additionalAttendeesArray, {
-      ...attendeeConfirmations,
-      [attendeeName]: {
-        confirmedAt: new Date().toISOString(),
-        confirmedBy: currentUser.name
-      }
-    });
-
     try {
-      const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          attendeeConfirmations: JSON.stringify(nextConfirmations),
-          lastModifiedBy: currentUser.name
-        }),
-      });
+      // A single atomic write to just this attendee's key (server-enforced: only the
+      // attendee themself or an Admin may confirm), through a dedicated endpoint that never
+      // touches status - unlike the generic PATCH this used to go through, which would have
+      // silently sent the RELEASED meeting back to DRAFT on every confirmation, and could
+      // silently drop someone else's concurrent confirmation via a full read/merge/write of
+      // the whole confirmations blob.
+      const result = await clientApi<OpenMeeting>(
+        `/meetings/${selectedScheduleId}/attendee-confirmation`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ attendeeName }),
+        }
+      );
 
       if (result) {
-        setAttendeeConfirmations(nextConfirmations);
+        setAttendeeConfirmations(pruneConfirmations(additionalAttendeesArray, parseAttendeeConfirmations(result.attendeeConfirmations)));
         const fresh = await clientApi<OpenMeeting[]>("/meetings");
         setSchedules(fresh);
         showFeedback(`${attendeeName} confirmed attendance.`);

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -15,6 +16,7 @@ import { ExecutionSchedulesService } from './execution-schedules.service';
 import { CreateExecutionScheduleDto } from './dto/create-execution-schedule.dto';
 import { UpdateExecutionScheduleDto } from './dto/update-execution-schedule.dto';
 import { RecordConsentDto } from './dto/record-consent.dto';
+import { ConfirmAttendeeDto } from './dto/confirm-attendee.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -165,6 +167,41 @@ export class ExecutionSchedulesController {
         timestamp: new Date().toISOString(),
         comments: dto.comments || '',
       },
+    );
+  }
+
+  /**
+   * Records that one attendee confirmed attendance - a single atomic write to just that key
+   * (see ExecutionSchedulesService.confirmAttendee), unlike the generic PATCH above which
+   * replaces the whole record and would silently drop a concurrent confirmation from someone
+   * else. Same permission as the generic edit route, plus: you may only confirm your own
+   * attendance unless you're an ADMIN (previously only enforced in the UI).
+   */
+  @Patch(':id/attendee-confirmation')
+  @RequirePermission('execution-schedules:update')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'CONFIRM_ATTENDEE',
+    details: `${req.body.attendeeName} confirmed attendance on schedule ID: ${req.params.id}`,
+  }))
+  async confirmAttendee(
+    @Param('id') id: string,
+    @Body() dto: ConfirmAttendeeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
+    if (
+      user.role !== 'ADMIN' &&
+      dto.attendeeName.trim().toLowerCase() !== user.name.trim().toLowerCase()
+    ) {
+      throw new ForbiddenException(
+        'Only the attendee or an Admin can confirm this attendance.',
+      );
+    }
+    return this.executionSchedulesService.confirmAttendee(
+      id,
+      dto.attendeeName,
+      user.name,
     );
   }
 }

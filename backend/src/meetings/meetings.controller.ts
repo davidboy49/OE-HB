@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -14,6 +15,7 @@ import { MeetingsService } from './meetings.service';
 import { CreateOpenMeetingDto } from './dto/create-open-meeting.dto';
 import { UpdateOpenMeetingDto } from './dto/update-open-meeting.dto';
 import { UpdateOpenMeetingStatusDto } from './dto/update-open-meeting-status.dto';
+import { ConfirmAttendeeDto } from './dto/confirm-attendee.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -135,5 +137,40 @@ export class MeetingsController {
   ) {
     await this.accessScope.assertVisible('meeting', id, user.sub);
     return this.meetingsService.remove(id);
+  }
+
+  /**
+   * Records that one attendee confirmed attendance - a single atomic write to just that key
+   * (see MeetingsService.confirmAttendee), unlike the generic PATCH above which replaces the
+   * whole record (and would also incorrectly send a RELEASED meeting back to DRAFT). Same
+   * permission as the generic edit route, plus: you may only confirm your own attendance
+   * unless you're an ADMIN (previously only enforced in the UI).
+   */
+  @Patch(':id/attendee-confirmation')
+  @RequirePermission('meetings:update')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'CONFIRM_ATTENDEE',
+    details: `${req.body.attendeeName} confirmed attendance on open meeting ID: ${req.params.id}`,
+  }))
+  async confirmAttendee(
+    @Param('id') id: string,
+    @Body() dto: ConfirmAttendeeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('meeting', id, user.sub);
+    if (
+      user.role !== 'ADMIN' &&
+      dto.attendeeName.trim().toLowerCase() !== user.name.trim().toLowerCase()
+    ) {
+      throw new ForbiddenException(
+        'Only the attendee or an Admin can confirm this attendance.',
+      );
+    }
+    return this.meetingsService.confirmAttendee(
+      id,
+      dto.attendeeName,
+      user.name,
+    );
   }
 }

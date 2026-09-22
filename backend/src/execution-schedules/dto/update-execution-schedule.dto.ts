@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 /**
  * Broad partial matching dbService.updateExecutionSchedule's accepted fields
@@ -99,4 +99,14 @@ export class UpdateExecutionScheduleDto {
   @IsOptional()
   @IsString()
   lastModifiedBy?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'The updatedAt this edit was based on. When given, the save is rejected (409) if ' +
+      'someone else has changed the schedule since - protects scheduleRows and other fields ' +
+      'from a silent last-write-wins overwrite when two people edit the same schedule at once.',
+  })
+  @IsOptional()
+  @IsDateString()
+  expectedUpdatedAt?: string;
 }
