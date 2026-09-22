@@ -6,6 +6,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
 
 const CONFLICT_MESSAGE =
   'Someone else changed this Execution Schedule after you loaded it. Reload and try again.';
@@ -74,7 +78,10 @@ export interface DepartmentConsentInput {
  */
 @Injectable()
 export class ExecutionSchedulesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planItems: PlanItemsService,
+  ) {}
 
   /**
    * Postgres-portable rewrite of dbService's module-level `getScheduleAttendeeConfirmations`
@@ -113,7 +120,12 @@ export class ExecutionSchedulesService {
    * backward compatibility, even though they describe the parent Individual OE Plan
    * (`oePlanId` in the database), not a Project.
    */
-  private toDto(s: any, attendeeConfirmationsOverride?: string): any {
+  private toDto(
+    s: any,
+    attendeeConfirmationsOverride?: string,
+    objectivesOverride?: string,
+    scopeOverride?: string,
+  ): any {
     return {
       id: s.id,
       projectId: s.oePlanId,
@@ -132,8 +144,8 @@ export class ExecutionSchedulesService {
       standards: s.standards,
       language: s.language,
       status: s.status,
-      objectives: s.objectives,
-      scope: s.scope,
+      objectives: objectivesOverride ?? '[]',
+      scope: scopeOverride ?? '[]',
       scheduleRows: s.scheduleRows,
       ownerName: s.ownerName,
       lastModifiedBy: s.lastModifiedBy,
@@ -155,10 +167,20 @@ export class ExecutionSchedulesService {
       include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
-    const confirmationMap = await this.getScheduleAttendeeConfirmations(
-      schedules.map((s) => s.id),
+    const ids = schedules.map((s) => s.id);
+    const [confirmationMap, objectivesById, scopeById] = await Promise.all([
+      this.getScheduleAttendeeConfirmations(ids),
+      this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, ids),
+      this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, ids),
+    ]);
+    return schedules.map((s) =>
+      this.toDto(
+        s,
+        confirmationMap[s.id],
+        objectivesById.get(s.id),
+        scopeById.get(s.id),
+      ),
     );
-    return schedules.map((s) => this.toDto(s, confirmationMap[s.id]));
   }
 
   /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
@@ -168,7 +190,13 @@ export class ExecutionSchedulesService {
   ): Promise<any> {
     await assertOePlanReleased(this.prisma, data.projectId);
 
-    const { attendeeConfirmations, projectId, ...createData } = data;
+    const {
+      attendeeConfirmations,
+      projectId,
+      objectives,
+      scope,
+      ...createData
+    } = data;
     const s = await this.prisma.executionSchedule.create({
       // Spread first so a client-supplied ownerName/lastModifiedBy is overridden.
       data: {
@@ -179,8 +207,22 @@ export class ExecutionSchedulesService {
       },
       include: { oePlan: true },
     });
-    await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
-    return this.toDto(s, attendeeConfirmations);
+    await Promise.all([
+      this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type,
+        s.id,
+        objectives,
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type,
+        s.id,
+        scope,
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.prefix,
+      ),
+    ]);
+    return this.toDto(s, attendeeConfirmations, objectives, scope);
   }
 
   async findOne(id: string): Promise<any | null> {
@@ -189,8 +231,12 @@ export class ExecutionSchedulesService {
       include: { oePlan: true },
     });
     if (!s) return null;
-    const confirmationMap = await this.getScheduleAttendeeConfirmations([id]);
-    return this.toDto(s, confirmationMap[s.id]);
+    const [confirmationMap, objectives, scope] = await Promise.all([
+      this.getScheduleAttendeeConfirmations([id]),
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
+    ]);
+    return this.toDto(s, confirmationMap[s.id], objectives, scope);
   }
 
   /**
@@ -312,7 +358,13 @@ export class ExecutionSchedulesService {
     actorName: string,
   ): Promise<any> {
     // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
-    const { attendeeConfirmations, expectedUpdatedAt, ...updateData } = data;
+    const {
+      attendeeConfirmations,
+      expectedUpdatedAt,
+      objectives,
+      scope,
+      ...updateData
+    } = data;
     delete updateData.ownerName;
 
     if (expectedUpdatedAt !== undefined) {
@@ -341,7 +393,27 @@ export class ExecutionSchedulesService {
           data: { ...updateData, lastModifiedBy: actorName },
           include: { oePlan: true },
         }));
-    await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
+    await Promise.all([
+      this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type,
+        id,
+        objectives,
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type,
+        id,
+        scope,
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.prefix,
+      ),
+    ]);
+    // Re-read rather than trust `objectives`/`scope` directly: this may be a partial update
+    // that didn't touch them, and they must still reflect their current, unchanged value.
+    const [finalObjectives, finalScope] = await Promise.all([
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
+    ]);
     return {
       id: s.id,
       projectId: s.oePlanId,
@@ -360,8 +432,8 @@ export class ExecutionSchedulesService {
       standards: s.standards,
       language: s.language,
       status: s.status,
-      objectives: s.objectives,
-      scope: s.scope,
+      objectives: finalObjectives,
+      scope: finalScope,
       scheduleRows: s.scheduleRows,
       ownerName: s.ownerName,
       lastModifiedBy: s.lastModifiedBy,

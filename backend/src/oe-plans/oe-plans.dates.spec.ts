@@ -4,8 +4,25 @@ import { OePlansService } from './oe-plans.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { CodeGeneratorService } from '../code-generator/code-generator.service';
 import type { PermissionsResolverService } from '../common/permissions-resolver.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 
 function makeService(existing?: { startDate: Date; endDate: Date }) {
+  // Stubbed to complete without error - these tests are about date-range validation, not
+  // about the objectives/scope/dataRequestType content itself.
+  const planItems = {
+    parseScopeOverrideInput: jest.fn().mockReturnValue({
+      inactiveScopeItemIds: undefined,
+      extraItemsRaw: undefined,
+    }),
+    writeList: jest.fn().mockResolvedValue(undefined),
+    writeScopeExtraItems: jest.fn().mockResolvedValue(undefined),
+    readOne: jest.fn().mockResolvedValue('[]'),
+    readScopeOverride: jest
+      .fn()
+      .mockResolvedValue('{"inactiveIds":[],"extraItems":[]}'),
+    readMany: jest.fn().mockResolvedValue(new Map()),
+  } as unknown as PlanItemsService;
+
   const prisma = {
     oePlan: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -28,6 +45,7 @@ function makeService(existing?: { startDate: Date; endDate: Date }) {
     prisma,
     {} as CodeGeneratorService,
     {} as PermissionsResolverService,
+    planItems,
   );
   return { service, prisma };
 }

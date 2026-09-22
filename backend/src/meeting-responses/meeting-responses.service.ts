@@ -17,6 +17,10 @@ import {
 } from './meeting-responses.rules';
 import { sanitizeConcern } from './sanitize-concern';
 import type { UpsertMeetingResponseDto } from './dto/upsert-response.dto';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
 
 const VIEW_ALL = 'meeting-responses:view-all';
 
@@ -63,6 +67,7 @@ export class MeetingResponsesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissions: PermissionsResolverService,
+    private readonly planItems: PlanItemsService,
   ) {}
 
   /** Always read fresh from the DB: a moved or renamed user is seen as they are now. */
@@ -216,19 +221,21 @@ export class MeetingResponsesService {
     const m = await this.loadReleasedMeeting(meetingId);
     this.assertCanView(viewer, m);
 
-    const memberCount = m.departmentId
-      ? await this.prisma.user.count({
-          where: { departmentId: m.departmentId },
-        })
-      : 0;
+    const [memberCount, objectives, scope] = await Promise.all([
+      m.departmentId
+        ? this.prisma.user.count({ where: { departmentId: m.departmentId } })
+        : Promise.resolve(0),
+      this.planItems.readOne(PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type, m.id),
+      this.planItems.readOne(PLAN_ITEM_OWNER.MEETING_SCOPE.type, m.id),
+    ]);
 
     return {
       ...this.card(m, viewer.id),
       standards: m.standards,
       leadExecution: m.leadExecution,
       teamMembers: m.teamMembers,
-      objectives: m.objectives,
-      scope: m.scope,
+      objectives,
+      scope,
       scheduleRows: m.scheduleRows,
       memberCount,
       // Concerns are visible to the meeting's own department and to leaders/admins.

@@ -8,6 +8,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { validateDateRange } from '@oeportal/shared';
 import { CodeGeneratorService } from '../code-generator/code-generator.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
 import type { OePlan } from '@oeportal/shared';
 import type { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -137,6 +141,7 @@ export class OePlansService {
     private readonly prisma: PrismaService,
     private readonly codeGenerator: CodeGeneratorService,
     private readonly permissionsResolver: PermissionsResolverService,
+    private readonly planItems: PlanItemsService,
   ) {}
 
   /**
@@ -191,6 +196,34 @@ export class OePlansService {
             ).map((r) => r.id),
       );
     }
+
+    // One batched query per field across every fetched plan/meeting, instead of one per
+    // record - this DB is remote, so avoiding per-record round trips matters at any real scale.
+    const planIds = projects.map((p) => p.id);
+    const meetingIds = projects.flatMap((p) => p.openMeetings.map((m) => m.id));
+    const inactiveByOwnerId = new Map(
+      projects.map((p) => [p.id, p.inactiveScopeItemIds]),
+    );
+    const [
+      objectivesById,
+      dataRequestById,
+      scopeById,
+      meetingObjectivesById,
+      meetingScopeById,
+    ] = await Promise.all([
+      this.planItems.readMany(PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.type, planIds),
+      this.planItems.readMany(
+        PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+        planIds,
+      ),
+      this.planItems.readScopeOverrideMany(planIds, inactiveByOwnerId),
+      this.planItems.readMany(
+        PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type,
+        meetingIds,
+      ),
+      this.planItems.readMany(PLAN_ITEM_OWNER.MEETING_SCOPE.type, meetingIds),
+    ]);
+
     return projects.map((p) => ({
       id: p.id,
       name: p.name,
@@ -202,19 +235,19 @@ export class OePlansService {
       departments: p.project?.topic || p.departments,
       annualPlanId: p.annualPlanId || undefined,
       projectId: p.projectId || undefined,
-      scope: p.scope,
+      scope: scopeById.get(p.id) ?? '{"inactiveIds":[],"extraItems":[]}',
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
-      objectives: p.objectives,
+      objectives: objectivesById.get(p.id) ?? '[]',
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
       opEx: p.opEx,
       fieldwork: p.fieldwork,
       outcome: p.outcome,
-      dataRequestType: p.dataRequestType,
+      dataRequestType: dataRequestById.get(p.id) ?? '[]',
       focusArea: p.focusArea,
       opExTimeline: serializeOpExTimeline(p),
       approvals: serializeApprovals(p),
@@ -261,8 +294,8 @@ export class OePlansService {
         attendeeConfirmations: m.attendeeConfirmations,
         standards: m.standards,
         status: m.status as any,
-        objectives: m.objectives,
-        scope: m.scope,
+        objectives: meetingObjectivesById.get(m.id) ?? '[]',
+        scope: meetingScopeById.get(m.id) ?? '[]',
         scheduleRows: m.scheduleRows,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,
@@ -320,7 +353,7 @@ export class OePlansService {
       );
     }
 
-    let inheritedObjectives = '';
+    let inheritedObjectives = '[]';
 
     if (projectId) {
       const parentProject = await this.prisma.project.findUnique({
@@ -337,15 +370,21 @@ export class OePlansService {
       // read-only, never entered independently). Scope is NOT copied here: OePlan.scope
       // holds a { inactiveIds, extraItems } JSON override on top of the Project's scope,
       // not the scope text itself - see ScopeOverride in planning-client.tsx.
-      inheritedObjectives = parentProject.objectives || '';
+      inheritedObjectives = await this.planItems.readOne(
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.type,
+        projectId,
+      );
     }
+
+    const { inactiveScopeItemIds, extraItemsRaw } =
+      this.planItems.parseScopeOverrideInput(scope);
 
     const p = await this.prisma.oePlan.create({
       data: {
         name,
         code: normalizedCode,
         status,
-        scope,
+        inactiveScopeItemIds: inactiveScopeItemIds ?? [],
         planningDetails,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
@@ -357,13 +396,11 @@ export class OePlansService {
         departments,
         annualPlanId,
         projectId,
-        objectives: inheritedObjectives,
         riskProcess: '',
         riskClass: '',
         opEx: '',
         fieldwork: '',
         outcome: '',
-        dataRequestType: '',
         focusArea: '',
         ...BLANK_OPEX_TIMELINE_FIELDS,
         ...BLANK_APPROVALS_FIELDS,
@@ -382,6 +419,15 @@ export class OePlansService {
       },
       relationLoadStrategy: 'join',
     });
+    await Promise.all([
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.type,
+        p.id,
+        inheritedObjectives,
+        PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeScopeExtraItems(p.id, extraItemsRaw),
+    ]);
     return {
       id: p.id,
       name: p.name,
@@ -393,19 +439,24 @@ export class OePlansService {
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
       projectId: p.projectId || undefined,
-      scope: p.scope,
+      // Built from what we just wrote, not a re-read - avoids extra queries for a brand-new
+      // record nothing else could have changed concurrently.
+      scope: JSON.stringify({
+        inactiveIds: inactiveScopeItemIds ?? [],
+        extraItems: JSON.parse(extraItemsRaw ?? '[]') as unknown,
+      }),
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
-      objectives: p.objectives,
+      objectives: inheritedObjectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
       opEx: p.opEx,
       fieldwork: p.fieldwork,
       outcome: p.outcome,
-      dataRequestType: p.dataRequestType,
+      dataRequestType: '[]',
       focusArea: p.focusArea,
       opExTimeline: serializeOpExTimeline(p),
       approvals: serializeApprovals(p),
@@ -515,6 +566,9 @@ export class OePlansService {
       await this.ensureProjectAvailable(updates.projectId, id);
     }
 
+    const { inactiveScopeItemIds, extraItemsRaw } =
+      this.planItems.parseScopeOverrideInput(updates.scope);
+
     const p = await this.prisma.oePlan.update({
       where: { id },
       data: {
@@ -523,19 +577,17 @@ export class OePlansService {
         workflowStage: updates.workflowStage,
         deptPicIds: updates.deptPicIds,
         departments: updates.departments,
-        scope: updates.scope,
+        inactiveScopeItemIds,
         planningDetails: updates.planningDetails,
         startDate: updates.startDate ? new Date(updates.startDate) : undefined,
         endDate: updates.endDate ? new Date(updates.endDate) : undefined,
         leaderId: updates.leaderId,
         memberNames: updates.memberNames,
-        objectives: updates.objectives,
         riskProcess: updates.riskProcess,
         riskClass: updates.riskClass,
         opEx: updates.opEx,
         fieldwork: updates.fieldwork,
         outcome: updates.outcome,
-        dataRequestType: updates.dataRequestType,
         focusArea: updates.focusArea,
         ...parseOpExTimeline(updates.opExTimeline),
         ...parseApprovals(updates.approvals),
@@ -564,6 +616,42 @@ export class OePlansService {
     const finalSchedules = p.executionSchedules;
     const finalOpenMeetings = p.openMeetings;
 
+    await Promise.all([
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.type,
+        id,
+        updates.objectives,
+        PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+        id,
+        updates.dataRequestType,
+        PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.prefix,
+      ),
+      this.planItems.writeScopeExtraItems(id, extraItemsRaw),
+    ]);
+
+    // Re-read rather than trust `updates.*` directly: this is a partial update, so a field this
+    // call didn't touch must still reflect its current, unchanged value.
+    const meetingIds = finalOpenMeetings.map((m) => m.id);
+    const [
+      objectives,
+      scope,
+      dataRequestType,
+      meetingObjectivesById,
+      meetingScopeById,
+    ] = await Promise.all([
+      this.planItems.readOne(PLAN_ITEM_OWNER.OEPLAN_OBJECTIVE.type, id),
+      this.planItems.readScopeOverride(id, p.inactiveScopeItemIds),
+      this.planItems.readOne(PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type, id),
+      this.planItems.readMany(
+        PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type,
+        meetingIds,
+      ),
+      this.planItems.readMany(PLAN_ITEM_OWNER.MEETING_SCOPE.type, meetingIds),
+    ]);
+
     return {
       id: p.id,
       name: p.name,
@@ -575,19 +663,19 @@ export class OePlansService {
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
       projectId: p.projectId || undefined,
-      scope: p.scope,
+      scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
-      objectives: p.objectives,
+      objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
       opEx: p.opEx,
       fieldwork: p.fieldwork,
       outcome: p.outcome,
-      dataRequestType: p.dataRequestType,
+      dataRequestType,
       focusArea: p.focusArea,
       opExTimeline: serializeOpExTimeline(p),
       approvals: serializeApprovals(p),
@@ -632,8 +720,8 @@ export class OePlansService {
         attendeeConfirmations: m.attendeeConfirmations,
         standards: m.standards,
         status: m.status as any,
-        objectives: m.objectives,
-        scope: m.scope,
+        objectives: meetingObjectivesById.get(m.id) ?? '[]',
+        scope: meetingScopeById.get(m.id) ?? '[]',
         scheduleRows: m.scheduleRows,
         ownerName: m.ownerName,
         lastModifiedBy: m.lastModifiedBy,

@@ -22,7 +22,7 @@ export default function MultiSelect({
   selectedValues = [],
   onChange,
   options,
-  placeholder = "Select or type...",
+  placeholder = "Select or search...",
   disabled = false,
   singleSelect = false,
 }: MultiSelectProps) {
@@ -59,33 +59,24 @@ export default function MultiSelect({
     inputRef.current?.focus();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const trimmed = inputValue.trim();
-      if (trimmed) {
-        if (singleSelect) {
-          onChange([trimmed]);
-        } else if (!selectedValues.includes(trimmed)) {
-          onChange([...selectedValues, trimmed]);
-        }
-        setInputValue("");
-      }
-    } else if (e.key === "Backspace" && !inputValue && selectedValues.length > 0) {
-      onChange(selectedValues.slice(0, -1));
-    }
-  };
-
   const filteredOptions = options.filter(
     (opt) =>
       opt.label.toLowerCase().includes(inputValue.toLowerCase()) &&
       !selectedValues.some(selected => selected.toLowerCase() === opt.value.toLowerCase())
   );
 
-  const showAddCustom = 
-    inputValue.trim() && 
-    !options.some(opt => opt.value.toLowerCase() === inputValue.trim().toLowerCase()) &&
-    !selectedValues.some(selected => selected.toLowerCase() === inputValue.trim().toLowerCase());
+  // Selection-only: typed text can only narrow the list, never become a value itself. Enter
+  // picks the top match, same as clicking it - it never creates a value that isn't a real option.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (filteredOptions.length > 0) {
+        handleSelect(filteredOptions[0].value);
+      }
+    } else if (e.key === "Backspace" && !inputValue && selectedValues.length > 0) {
+      onChange(selectedValues.slice(0, -1));
+    }
+  };
 
   return (
     <div ref={containerRef} className="relative w-full text-xs">
@@ -143,19 +134,9 @@ export default function MultiSelect({
 
       {isOpen && (
         <div className="absolute left-0 right-0 mt-1.5 z-[100] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md shadow-lg max-h-56 overflow-y-auto p-1.5 space-y-1 no-print">
-          {showAddCustom && (
-            <button
-              type="button"
-              onClick={() => handleSelect(inputValue.trim())}
-              className="w-full text-left px-2.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-[#0066cc] dark:text-sky-400 font-semibold rounded text-xs cursor-pointer"
-            >
-              + Add custom: <span className="font-bold">"{inputValue.trim()}"</span>
-            </button>
-          )}
-          
-          {filteredOptions.length === 0 && !showAddCustom ? (
+          {filteredOptions.length === 0 ? (
             <div className="px-2.5 py-2 text-slate-400 italic text-xs">
-              No users found. Press Enter to add custom.
+              No matches found.
             </div>
           ) : (
             filteredOptions.map((opt) => (

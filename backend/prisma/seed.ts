@@ -1,8 +1,45 @@
-import "dotenv/config";
-import * as bcrypt from "bcrypt";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PERMISSIONS, DEFAULT_PERMISSIONS_BY_ROLE } from "../src/common/permissions";
+import 'dotenv/config';
+import * as bcrypt from 'bcrypt';
+import { PrismaClient } from '../src/generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PERMISSIONS } from '../src/common/permissions';
+
+// Starter grants for the seeded demo groups (member-tier vs lead-tier access) - just seed
+// data to give the demo something to look at. Not a runtime fallback: a user with no group
+// gets zero access (see PermissionsResolverService.getGrants) - admins narrow/widen these per
+// group from here via PATCH /user-groups/:id/permissions.
+const LEAD_TIER_PERMISSIONS = PERMISSIONS.map((p) => p.key).filter(
+  (k) => k !== 'notifications:configure',
+);
+const MEMBER_TIER_PERMISSIONS = [
+  'annual-plans:view',
+  'projects:view',
+  'oe-plans:view',
+  'meetings:view',
+  'execution-schedules:view',
+  'findings:view',
+  'departments:view',
+  'business-units:view',
+  'users:view',
+  'oe-plans:create',
+  'oe-plans:update',
+  'oe-plans:submit',
+  'execution-schedules:create',
+  'execution-schedules:update',
+  'meetings:create',
+  'meetings:update',
+  'meetings:submit',
+  'meeting-responses:create',
+  'findings:create',
+  'findings:update',
+  'annual-plans:create',
+  'annual-plans:update',
+  'annual-plans:submit',
+  'projects:create',
+  'projects:update',
+  'notifications:send-test',
+  'notifications:send',
+];
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -12,12 +49,11 @@ const prisma = new PrismaClient({ adapter });
 // via PATCH /users/:id/password. Never hardcode this; it must come from the env.
 if (!process.env.SEED_ADMIN_PASSWORD) {
   throw new Error(
-    "SEED_ADMIN_PASSWORD is not set. Set it in backend/.env before seeding - " +
-      "it becomes the bootstrap admin's login password (no other seeded user gets one)."
+    'SEED_ADMIN_PASSWORD is not set. Set it in backend/.env before seeding - ' +
+      "it becomes the bootstrap admin's login password (no other seeded user gets one).",
   );
 }
 const seedAdminPassword: string = process.env.SEED_ADMIN_PASSWORD;
-
 
 async function main() {
   // Clear existing records
@@ -33,37 +69,65 @@ async function main() {
   await prisma.smtpConfig.deleteMany();
   await prisma.emailTemplate.deleteMany();
 
-  console.log("Cleared existing database records.");
+  console.log('Cleared existing database records.');
 
   // 1. Seed Departments
   const dept1 = await prisma.department.create({
-    data: { id: "dept-1", name: "Information Technology", description: "Core IT infrastructure and software development" }
+    data: {
+      id: 'dept-1',
+      name: 'Information Technology',
+      description: 'Core IT infrastructure and software development',
+    },
   });
   const dept2 = await prisma.department.create({
-    data: { id: "dept-2", name: "Finance & Accounting", description: "Financial reporting, billing, and ledger management" }
+    data: {
+      id: 'dept-2',
+      name: 'Finance & Accounting',
+      description: 'Financial reporting, billing, and ledger management',
+    },
   });
   const dept3 = await prisma.department.create({
-    data: { id: "dept-3", name: "Information Security", description: "Cybersecurity, risk management, and compliance" }
+    data: {
+      id: 'dept-3',
+      name: 'Information Security',
+      description: 'Cybersecurity, risk management, and compliance',
+    },
   });
   const dept4 = await prisma.department.create({
-    data: { id: "dept-4", name: "Operations & HR", description: "Day-to-day facilities, staffing, and onboarding" }
+    data: {
+      id: 'dept-4',
+      name: 'Operations & HR',
+      description: 'Day-to-day facilities, staffing, and onboarding',
+    },
   });
 
-  console.log("Departments seeded.");
+  console.log('Departments seeded.');
 
   // 2. Seed User Groups (groups are pure permission bundles - see grants below;
   // a group no longer carries or assigns a role to its members)
   const group1 = await prisma.userGroup.create({
-    data: { id: "group-1", name: "OE Team", description: "Certified internal members and leads" }
+    data: {
+      id: 'group-1',
+      name: 'OE Team',
+      description: 'Certified internal members and leads',
+    },
   });
   const group2 = await prisma.userGroup.create({
-    data: { id: "group-2", name: "Risk Management Committee", description: "Executive oversight for enterprise risks" }
+    data: {
+      id: 'group-2',
+      name: 'Risk Management Committee',
+      description: 'Executive oversight for enterprise risks',
+    },
   });
   const group3 = await prisma.userGroup.create({
-    data: { id: "group-3", name: "External OE Partner", description: "Contracted external compliance specialists" }
+    data: {
+      id: 'group-3',
+      name: 'External OE Partner',
+      description: 'Contracted external compliance specialists',
+    },
   });
 
-  console.log("User Groups seeded.");
+  console.log('User Groups seeded.');
 
   // Seed every known permission key, then grant each existing group a starter
   // set matching what its name implies (member-tier vs lead-tier access) -
@@ -72,83 +136,117 @@ async function main() {
   await prisma.permission.createMany({ data: PERMISSIONS });
 
   const grantsFor = (groupId: string, keys: string[]) =>
-    keys.map((permissionKey) => ({ groupId, permissionKey, scope: "ALL" }));
+    keys.map((permissionKey) => ({ groupId, permissionKey, scope: 'ALL' }));
   await prisma.groupPermission.createMany({
     data: [
-      ...grantsFor(group1.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
-      ...grantsFor(group2.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_LEADER),
-      ...grantsFor(group3.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
+      ...grantsFor(group1.id, MEMBER_TIER_PERMISSIONS),
+      ...grantsFor(group2.id, LEAD_TIER_PERMISSIONS),
+      ...grantsFor(group3.id, MEMBER_TIER_PERMISSIONS),
     ],
   });
 
-  console.log("Permissions seeded and granted to existing groups.");
+  console.log('Permissions seeded and granted to existing groups.');
 
   // 3. Seed Users
   const adminPasswordHash = await bcrypt.hash(seedAdminPassword, 10);
   const user1 = await prisma.user.create({
-    data: { id: "user-1", email: "admin@auditdesk.com", name: "Alex Admin", role: "ADMIN", passwordHash: adminPasswordHash }
+    data: {
+      id: 'user-1',
+      email: 'admin@auditdesk.com',
+      name: 'Alex Admin',
+      role: 'ADMIN',
+      passwordHash: adminPasswordHash,
+    },
   });
   const user2 = await prisma.user.create({
-    data: { id: "user-2", email: "sarah.lead@auditdesk.com", name: "Sarah Lead", role: "OE_LEADER", departmentId: dept3.id, groupId: group1.id }
+    data: {
+      id: 'user-2',
+      email: 'sarah.lead@auditdesk.com',
+      name: 'Sarah Lead',
+      role: 'OE_LEADER',
+      departmentId: dept3.id,
+      groupId: group1.id,
+    },
   });
   const user3 = await prisma.user.create({
-    data: { id: "user-3", email: "david.member@auditdesk.com", name: "David OE Member", role: "OE_MEMBER", departmentId: dept3.id, groupId: group1.id }
+    data: {
+      id: 'user-3',
+      email: 'david.member@auditdesk.com',
+      name: 'David OE Member',
+      role: 'OE_MEMBER',
+      departmentId: dept3.id,
+      groupId: group1.id,
+    },
   });
   const user4 = await prisma.user.create({
-    data: { id: "user-4", email: "alice.department PIC@auditdesk.com", name: "Alice Department PIC", role: "DEPT_PIC", departmentId: dept2.id, groupId: group2.id }
+    data: {
+      id: 'user-4',
+      email: 'alice.department PIC@auditdesk.com',
+      name: 'Alice Department PIC',
+      role: 'DEPT_PIC',
+      departmentId: dept2.id,
+      groupId: group2.id,
+    },
   });
+  // Deliberately ungrouped - demonstrates that a user with no group gets zero
+  // permissions (his `role` is not a fallback; see PermissionsResolverService.getGrants).
   const user5 = await prisma.user.create({
-    data: { id: "user-5", email: "bob.developer@auditdesk.com", name: "Bob Developer", role: "DEPT_PIC", departmentId: dept1.id }
+    data: {
+      id: 'user-5',
+      email: 'bob.developer@auditdesk.com',
+      name: 'Bob Developer',
+      role: 'DEPT_PIC',
+      departmentId: dept1.id,
+    },
   });
 
-  console.log("Users seeded.");
-
+  console.log('Users seeded.');
 
   // 6. Seed SMTP Config
   await prisma.smtpConfig.create({
     data: {
-      id: "default",
-      host: "smtp.mailtrap.io",
+      id: 'default',
+      host: 'smtp.mailtrap.io',
       port: 2525,
-      username: "",
-      password: "",
+      username: '',
+      password: '',
       secure: false,
-      fromEmail: "alerts@auditdesk.com"
-    }
+      fromEmail: 'alerts@auditdesk.com',
+    },
   });
 
   // 7. Seed Email Templates
   await prisma.emailTemplate.create({
     data: {
-      id: "planning",
-      subject: "OE Planning Scoping Update - {{projectCode}}",
-      body: "<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>OE Portal</p>"
-    }
+      id: 'planning',
+      subject: 'OE Planning Scoping Update - {{projectCode}}',
+      body: '<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>OE Portal</p>',
+    },
   });
   await prisma.emailTemplate.create({
     data: {
-      id: "meetings",
-      subject: "Open Meeting Schedule Invitation - {{projectName}}",
-      body: "<p>Hello {{recipientName}},</p><p>A new open alignment meeting has been scheduled for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Organization: {{organization}}</p><p>Visit Date: {{visitDate}}</p><p>Owner: {{ownerName}}</p><p>Please review and join the meeting ledger.</p>"
-    }
+      id: 'meetings',
+      subject: 'Open Meeting Schedule Invitation - {{projectName}}',
+      body: '<p>Hello {{recipientName}},</p><p>A new open alignment meeting has been scheduled for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Organization: {{organization}}</p><p>Visit Date: {{visitDate}}</p><p>Owner: {{ownerName}}</p><p>Please review and join the meeting ledger.</p>',
+    },
   });
   await prisma.emailTemplate.create({
     data: {
-      id: "schedule",
-      subject: "Execution Schedule Released - {{projectCode}}",
-      body: "<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>OE Period: {{oePeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>"
-    }
+      id: 'schedule',
+      subject: 'Execution Schedule Released - {{projectCode}}',
+      body: '<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>OE Period: {{oePeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>',
+    },
   });
   await prisma.emailTemplate.create({
     data: {
-      id: "findings",
-      subject: "New OE Finding Registered - {{projectCode}}",
-      body: "<p>Hello {{recipientName}},</p><p>A new compliance nonconformity has been logged under <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Finding: <strong>{{findingTitle}}</strong></p><p>Severity: <strong>{{severity}}</strong></p><p>Recommendation: {{recommendation}}</p>"
-    }
+      id: 'findings',
+      subject: 'New OE Finding Registered - {{projectCode}}',
+      body: '<p>Hello {{recipientName}},</p><p>A new compliance nonconformity has been logged under <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Finding: <strong>{{findingTitle}}</strong></p><p>Severity: <strong>{{severity}}</strong></p><p>Recommendation: {{recommendation}}</p>',
+    },
   });
 
-  console.log("SMTP Config and Email Templates seeded.");
-  console.log("Database seeding completed successfully!");
+  console.log('SMTP Config and Email Templates seeded.');
+  console.log('Database seeding completed successfully!');
 }
 
 main()

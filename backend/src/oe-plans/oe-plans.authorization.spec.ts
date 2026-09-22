@@ -3,6 +3,7 @@ import { OePlansService } from './oe-plans.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { CodeGeneratorService } from '../code-generator/code-generator.service';
 import type { PermissionsResolverService } from '../common/permissions-resolver.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 import type { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
@@ -34,6 +35,7 @@ function makeService(currentStatus: string | null, granted: string[]) {
     prisma,
     {} as CodeGeneratorService,
     { requirePermission } as unknown as PermissionsResolverService,
+    {} as PlanItemsService, // unused - this spec only exercises assertUpdateAllowed
   );
   return { service, requirePermission };
 }

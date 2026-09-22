@@ -2,13 +2,19 @@
 import { BadRequestException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 
 const noDb = {
   department: { findUnique: jest.fn() },
   project: { create: jest.fn(), update: jest.fn() },
 } as unknown as PrismaService;
 
-const service = new ProjectsService(noDb);
+// Every case below throws before create()/update() would ever touch PlanItemsService.
+const noPlanItems = {
+  writeList: jest.fn(),
+} as unknown as PlanItemsService;
+
+const service = new ProjectsService(noDb, noPlanItems);
 
 const create = (scope: string, departmentId = 'dept-1') =>
   service.create(

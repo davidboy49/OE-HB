@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   Users, 
   Building, 
@@ -36,6 +36,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
+import OePlanSelect from "@/components/ui/oe-plan-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 import { parsePlanItems, serializePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 
@@ -245,6 +246,18 @@ export default function ScheduleClient({
     label: u.name,
     subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
   }));
+
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by OePlanSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
 
   const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
   const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "OE-DRQ");
@@ -893,19 +906,17 @@ export default function ScheduleClient({
               <div className="flex flex-col md:flex-row gap-4 items-center no-print">
                 <div className="flex-1 min-w-[200px]">
                   <label className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">OE Plan</label>
-                  <select
-                    disabled={isLocked || modalMode === "edit"}
-                    value={selectedProjectId}
-                    onChange={(e) => handleProjectSelect(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-accent font-sans"
-                  >
-                    <option value="">Select OE Plan...</option>
-                    {projects
-                      .filter(p => p.status === "RELEASED" && !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))
-                      .map(p => (
-                        <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                    ))}
-                  </select>
+                  <div className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-md">
+                    <OePlanSelect
+                      disabled={isLocked || modalMode === "edit"}
+                      projects={projects.filter(p => p.status === "RELEASED" && !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))}
+                      selectedProjectId={selectedProjectId}
+                      onSelect={handleProjectSelect}
+                      placeholder="Select OE Plan..."
+                      linkedProjectsById={linkedProjectsById}
+                      departmentsById={departmentsById}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1007,7 +1018,7 @@ export default function ScheduleClient({
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={true}
                           />
                         </td>
@@ -1023,7 +1034,7 @@ export default function ScheduleClient({
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1039,7 +1050,7 @@ export default function ScheduleClient({
                             selectedValues={additionalAttendeesArray}
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1407,7 +1418,7 @@ export default function ScheduleClient({
                                       selectedValues={conductByArray}
                                       onChange={(values) => updateDraftField("conductBy", values.join(", "))}
                                       options={memberOptions}
-                                      placeholder="Select OE members or type custom name..."
+                                      placeholder="Select OE members..."
                                     />
                                   </div>
 
@@ -1418,7 +1429,7 @@ export default function ScheduleClient({
                                       selectedValues={pInchargeArray}
                                       onChange={(values) => updateDraftField("pIncharge", values.join(", "))}
                                       options={picOptions}
-                                      placeholder="Select PICs or type custom name..."
+                                      placeholder="Select PICs..."
                                     />
                                   </div>
                                 </div>

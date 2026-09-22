@@ -81,21 +81,24 @@ model OePlan {
   workflowStage   String   @default("DRAFTING") // "DRAFTING", "REVIEW", "PENDING_PIC", "APPROVED"
   deptPicIds      String   @default("") // Comma-separated list of User IDs representing department PICs
   departments     String   @default("") // Comma-separated list of Department IDs/Names
-  scope           String
+  // Scope is inherited from the linked Project's scope items, as a diff on top of them: which
+  // inherited item ids this plan deactivated, plus any extra items it added locally (see
+  // PlanItemsService.readScopeOverride/writeScopeOverride). The extra items themselves are
+  // PlanItem rows (ownerType "OEPLAN_SCOPE_EXTRA"); inactiveScopeItemIds is the deactivated half.
+  inactiveScopeItemIds String[] @default([])
   planningDetails String
   startDate       DateTime
   endDate         DateTime
   leaderId        String?
   memberNames     String   @default("")
 
-  // Custom Scoping details fields
-  objectives      String @default("")
+  // Custom Scoping details fields - objectives/dataRequestType live as PlanItem rows
+  // (ownerType "OEPLAN_OBJECTIVE" / "OEPLAN_DATA_REQUEST"), not columns here.
   riskProcess     String @default("")
   riskClass       String @default("")
   opEx            String @default("")
   fieldwork       String @default("")
   outcome         String @default("")
-  dataRequestType String @default("")
   focusArea       String @default("")
   // Timeline & Approvals - previously JSON-encoded strings (opExTimeline/approvals), flattened
   // to real columns for type safety and DB-level queryability. The API still accepts/returns
@@ -186,8 +189,7 @@ model ExecutionSchedule {
   standards             String    @default("Work Procedure, work instruction, and policy")
   language              String    @default("English")
   status                String    @default("DRAFT")
-  objectives            String    @default("")
-  scope                 String    @default("")
+  // objectives/scope live as PlanItem rows (ownerType "SCHEDULE_OBJECTIVE" / "SCHEDULE_SCOPE").
   departmentConcern     String    @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
   ownerName             String    @default("")
@@ -216,8 +218,7 @@ model OpenMeeting {
   attendeeConfirmations String            @default("{}")
   standards             String            @default("Work Procedure, work instruction, and policy")
   status                String            @default("DRAFT")
-  objectives            String            @default("")
-  scope                 String            @default("")
+  // objectives/scope live as PlanItem rows (ownerType "MEETING_OBJECTIVE" / "MEETING_SCOPE").
   departmentConcern     String            @default("")
   scheduleRows          String // JSON serialized rows: [{date, time, activity, conductBy, pIncharge}]
   ownerName             String            @default("")
@@ -292,8 +293,7 @@ model Project {
   endDate      DateTime
   durationDay  Int
   purpose      String
-  objectives   String      @default("")
-  scope        String      @default("")
+  // objectives/scope live as PlanItem rows (ownerType "PROJECT_OBJECTIVE" / "PROJECT_SCOPE").
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   oePlans      OePlan[]
@@ -334,4 +334,24 @@ model GroupPermission {
 
   @@id([groupId, permissionKey])
   @@index([permissionKey])
+}
+
+/// A single objectives/scope/data-request line item. Used to be a JSON-encoded array in a
+/// String column on Project, OePlan, ExecutionSchedule and OpenMeeting (see PlanItemsService for
+/// the full history and the exact `ownerType` tag each field uses). One owning record can have
+/// many items; `ownerId` is that record's id, and `order` preserves the list's display order.
+/// `itemId` is the wire-facing business id (e.g. "IOE-OBJ-01") the frontend already expects,
+/// kept distinct from the row's own uuid `id` so re-ordering or re-numbering never changes
+/// stable references.
+model PlanItem {
+  id        String   @id @default(uuid())
+  ownerType String
+  ownerId   String
+  itemId    String
+  text      String   @default("")
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerType, ownerId])
 }

@@ -5,6 +5,7 @@ import {
   MeetingsService,
 } from './meetings.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 
 function makeService(meeting: { status: string; isDeleted?: boolean } | null) {
   const stored = meeting && {
@@ -20,7 +21,11 @@ function makeService(meeting: { status: string; isDeleted?: boolean } | null) {
       update: jest.fn().mockResolvedValue(stored),
     },
   } as unknown as PrismaService;
-  return { service: new MeetingsService(prisma), prisma };
+  // Not about objectives/scope content - just enough for findOne() to complete.
+  const planItems = {
+    readOne: jest.fn().mockResolvedValue('[]'),
+  } as unknown as PlanItemsService;
+  return { service: new MeetingsService(prisma, planItems), prisma };
 }
 
 describe('Open Meeting approval order', () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   Users, 
   User as UserIcon,
@@ -40,7 +40,7 @@ import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
-import OePlanSelect from "@/components/ui/oe-plan-select";
+import OePlanSelect, { formatOePlanOption } from "@/components/ui/oe-plan-select";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -254,6 +254,18 @@ export default function MeetingsClient({
       return `${dept} - V1`;
     }).join(", ");
   };
+
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by OePlanSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
 
   const confirmedAttendeeCount = additionalAttendeesArray.filter(name => attendeeConfirmations[name]).length;
   const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
@@ -1013,19 +1025,22 @@ export default function MeetingsClient({
                           selectedProjectId={selectedProjectId}
                           onSelect={handleProjectSelect}
                           placeholder="Choose OE Plan..."
+                          linkedProjectsById={linkedProjectsById}
+                          departmentsById={departmentsById}
                         />
                       ) : (
                         <div className="flex items-center gap-2 overflow-hidden">
                           {(() => {
                             const p = projects.find(proj => proj.id === selectedProjectId);
                             if (!p) return <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Unknown OE Plan</span>;
+                            const { pill, text } = formatOePlanOption(p, linkedProjectsById, departmentsById);
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {p.code}
+                                  {pill}
                                 </span>
                                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                                  {p.name}
+                                  {text}
                                 </span>
                               </>
                             );

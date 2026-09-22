@@ -92,8 +92,7 @@ function Pick({ value, onChange, options, disabled, className = "min-w-[150px]" 
         disabled={disabled}
         onChange={(values) => {
           const next = values[0];
-          // The component also lets a typed-in value through; only accept real options.
-          if (next && options.some((o) => o.value === next)) onChange(next);
+          if (next) onChange(next);
         }}
       />
     </div>
@@ -321,7 +320,7 @@ export default function AccessControlClient({
       setGroups(remaining);
       setSelectedId(remaining[0]?.id ?? null);
       setConfirmDelete(false);
-      showFeedback(`Role "${selected.name}" deleted. Its members now use their role defaults.`);
+      showFeedback(`Role "${selected.name}" deleted. Its members now have no group and no permissions until reassigned.`);
     } catch (err) {
       showFeedback(`Error: ${errorMessage(err)}`);
     }
@@ -698,7 +697,7 @@ export default function AccessControlClient({
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-foreground">Delete &quot;{selected.name}&quot;?</h3>
                 <p className="text-xs text-muted-foreground">
-                  {selected.memberCount ?? 0} member(s) will be left without a role and fall back to their role defaults.
+                  {selected.memberCount ?? 0} member(s) will be left with no group - and no permissions at all - until reassigned.
                   This can&apos;t be undone.
                 </p>
               </div>
