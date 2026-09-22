@@ -16,6 +16,8 @@ export interface UserGroup {
   id: string;
   name: string;
   description: string | null;
+  /** Keycloak group name (e.g. "/finance") that syncs members into this role on SSO sign-in; null = not synced. */
+  keycloakGroup: string | null;
   /** Only present on GET /user-groups. */
   memberCount?: number;
   permissionCount?: number;

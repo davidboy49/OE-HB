@@ -17,6 +17,21 @@ department, permissions and their scopes) and whether they may sign in at all.
 
 Set `KEYCLOAK_REQUIRE_VERIFIED_EMAIL=false` only for a realm that never verifies emails.
 
+## Group membership sync (optional)
+
+An admin can link an OE role to a Keycloak group name (the "Keycloak group" field on the Roles
+tab of Access Control, or `UserGroup.keycloakGroup`). On every SSO sign-in:
+
+- if the person's Keycloak groups include a linked role's name, they are moved into it;
+- if several linked roles match, the one with the most permissions wins;
+- if none match, their current role is left exactly as it is - this never clears someone's
+  access, and a role with no `keycloakGroup` set is never touched by it;
+- an unmapped Keycloak group is simply ignored - nothing is auto-created.
+
+Needs a "Group Membership" client scope mapper in Keycloak so the token carries a `groups`
+claim (group names, e.g. `/finance`). Password-login users are unaffected; this only runs on
+`POST /auth/sso`.
+
 ## Keycloak setup
 
 Web sign-in: create a **public** OpenID Connect client (no secret; PKCE is used) with

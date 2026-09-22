@@ -48,7 +48,11 @@ export class UserGroupsController {
     details: `Created user group "${req.body.name}"`,
   }))
   create(@Body() dto: CreateUserGroupDto) {
-    return this.userGroupsService.create(dto.name, dto.description ?? '');
+    return this.userGroupsService.create(
+      dto.name,
+      dto.description ?? '',
+      dto.keycloakGroup,
+    );
   }
 
   @Patch(':id')
@@ -59,7 +63,12 @@ export class UserGroupsController {
     details: `Updated user group ID: ${req.params.id} ("${req.body.name}")`,
   }))
   update(@Param('id') id: string, @Body() dto: UpdateUserGroupDto) {
-    return this.userGroupsService.update(id, dto.name, dto.description ?? '');
+    return this.userGroupsService.update(
+      id,
+      dto.name,
+      dto.description ?? '',
+      dto.keycloakGroup,
+    );
   }
 
   @Delete(':id')

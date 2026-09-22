@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import type { User } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import { KeycloakService } from './keycloak.service';
@@ -141,6 +142,8 @@ export class AuthService {
       throw new UnauthorizedException('This account has been deactivated');
     }
 
+    user = await this.syncGroupFromKeycloak(user, claims.groups);
+
     return {
       sub: user.id,
       email: user.email,
@@ -148,6 +151,41 @@ export class AuthService {
       role: user.role as AuthenticatedUser['role'],
       departmentId: user.departmentId,
     };
+  }
+
+  /**
+   * Membership can follow Keycloak while permissions stay defined here: an admin links an OE
+   * role to a Keycloak group name (`UserGroup.keycloakGroup`), and on every SSO sign-in this
+   * moves the person into whichever linked role matches one of their current Keycloak groups.
+   *
+   *  - No match -> the person's group is left exactly as it is. A role with no
+   *    `keycloakGroup` set is never touched by this, so a purely local role stays admin-only.
+   *  - Several linked roles match -> the one with the most permissions wins (narrowing someone's
+   *    access is an admin's explicit decision, not a coin flip on group order).
+   *  - Nothing here creates a role: an unmapped Keycloak group is simply ignored.
+   */
+  private async syncGroupFromKeycloak(
+    user: User,
+    keycloakGroups: string[],
+  ): Promise<User> {
+    if (keycloakGroups.length === 0) return user;
+
+    const candidates = await this.prisma.userGroup.findMany({
+      where: { keycloakGroup: { in: keycloakGroups } },
+      include: { _count: { select: { grants: true } } },
+    });
+    if (candidates.length === 0) return user;
+
+    const best = candidates.sort(
+      (a, b) =>
+        b._count.grants - a._count.grants || a.name.localeCompare(b.name),
+    )[0];
+    if (best.id === user.groupId) return user;
+
+    return this.prisma.user.update({
+      where: { id: user.id },
+      data: { groupId: best.id },
+    });
   }
 
   async login(

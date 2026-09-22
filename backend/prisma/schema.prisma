@@ -60,6 +60,7 @@ model UserGroup {
   name        String            @unique
   description String?
   role        String            @default("DEPT_PIC") // Unused legacy column, kept to avoid a migration - access is controlled by `permissions` below
+  keycloakGroup String?         @unique // Keycloak group name (e.g. "/finance") that maps to this role on SSO sign-in; null = not synced from Keycloak
   users       User[]
   grants      GroupPermission[] // what members of this group may do, and how far (see scope)
   createdAt   DateTime          @default(now())

@@ -129,6 +129,7 @@ export default function AccessControlClient({
   const [modal, setModal] = useState<ModalMode | null>(null);
   const [modalName, setModalName] = useState("");
   const [modalDesc, setModalDesc] = useState("");
+  const [modalKeycloakGroup, setModalKeycloakGroup] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -275,6 +276,7 @@ export default function AccessControlClient({
     setModal(mode);
     setModalName(mode === "copy" && selected ? `${selected.name} (copy)` : mode === "edit" && selected ? selected.name : "");
     setModalDesc(mode === "create" ? "" : selected?.description ?? "");
+    setModalKeycloakGroup(mode === "edit" ? selected?.keycloakGroup ?? "" : "");
   };
 
   const submitModal = async (e: React.FormEvent) => {
@@ -284,7 +286,7 @@ export default function AccessControlClient({
       if (modal === "create") {
         const g = await clientApi<UserGroup>("/user-groups", {
           method: "POST",
-          body: JSON.stringify({ name: modalName, description: modalDesc }),
+          body: JSON.stringify({ name: modalName, description: modalDesc, keycloakGroup: modalKeycloakGroup || null }),
         });
         setGroups((gs) => [...gs, g].sort((a, b) => a.name.localeCompare(b.name)));
         setSelectedId(g.id);
@@ -292,7 +294,7 @@ export default function AccessControlClient({
       } else if (modal === "edit" && selected) {
         const g = await clientApi<UserGroup>(`/user-groups/${selected.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: modalName, description: modalDesc }),
+          body: JSON.stringify({ name: modalName, description: modalDesc, keycloakGroup: modalKeycloakGroup || null }),
         });
         setGroups((gs) => gs.map((x) => (x.id === g.id ? g : x)).sort((a, b) => a.name.localeCompare(b.name)));
         showFeedback("Role updated.");
@@ -438,6 +440,11 @@ export default function AccessControlClient({
                         <span className="font-bold text-foreground">{draft.size}</span> of {catalog.length} permissions
                         assigned · {selected.memberCount ?? 0} member(s)
                       </p>
+                      {selected.keycloakGroup && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Synced from Keycloak group <span className={`${chipNeutral} font-mono`}>{selected.keycloakGroup}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {canCreate && (
@@ -651,6 +658,20 @@ export default function AccessControlClient({
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Description</label>
                 <input value={modalDesc} onChange={(e) => setModalDesc(e.target.value)} className={`${inputCls} w-full`} />
               </div>
+              {modal !== "copy" && (
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground uppercase font-semibold">Keycloak group (optional)</label>
+                  <input
+                    value={modalKeycloakGroup}
+                    onChange={(e) => setModalKeycloakGroup(e.target.value)}
+                    placeholder="e.g. /finance"
+                    className={`${inputCls} w-full font-mono`}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    On SSO sign-in, a person whose Keycloak groups include this name is moved into this role. Leave blank to manage membership by hand.
+                  </p>
+                </div>
+              )}
               {modal === "copy" && (
                 <p className="text-[11px] text-muted-foreground">
                   The copy gets every permission and scope of &quot;{selected?.name}&quot;, but none of its members.

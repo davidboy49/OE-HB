@@ -13,6 +13,35 @@ import {
   ChevronDown
 } from "lucide-react";
 
+interface ToolbarFilter {
+  label: string;
+  value: string;
+  setValue: (val: string) => void;
+  options: { label: string; value: string }[];
+}
+
+function FilterSelect({ label, value, setValue, options }: ToolbarFilter) {
+  return (
+    <div className="relative inline-block text-left">
+      <select
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs rounded-md pl-3 pr-8 py-2 focus:outline-none focus:ring-1 focus:ring-accent text-slate-700 dark:text-slate-300 font-medium cursor-pointer"
+      >
+        <option value="ALL">{label}</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+        <ChevronDown className="w-3 h-3" />
+      </div>
+    </div>
+  );
+}
+
 interface ActionToolbarProps {
   onCreate?: () => void;
   onView?: () => void;
@@ -32,6 +61,11 @@ interface ActionToolbarProps {
   filterOptions?: { label: string; value: string }[];
   
   activeFilterCountLabel?: string; // e.g. "ALL" or count
+
+  /** Additional dropdown filters rendered after the primary one (same styling). */
+  extraFilters?: ToolbarFilter[];
+  /** Page-specific controls (e.g. a view-mode toggle) rendered before the filter count. */
+  extraControls?: React.ReactNode;
 }
 
 export default function ActionToolbar({
@@ -49,7 +83,9 @@ export default function ActionToolbar({
   filterValue,
   setFilterValue,
   filterOptions = [],
-  activeFilterCountLabel = "ALL"
+  activeFilterCountLabel = "ALL",
+  extraFilters = [],
+  extraControls
 }: ActionToolbarProps) {
   return (
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-lg select-none">
@@ -136,26 +172,21 @@ export default function ActionToolbar({
           <SlidersHorizontal className="w-3.5 h-3.5" />
         </div>
 
+        {extraControls}
+
         {/* Dropdown Select - e.g. "Sub Block" */}
         {setFilterValue && filterOptions.length > 0 && (
-          <div className="relative inline-block text-left">
-            <select
-              value={filterValue}
-              onChange={(e) => setFilterValue(e.target.value)}
-              className="appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs rounded-md pl-3 pr-8 py-2 focus:outline-none focus:ring-1 focus:ring-accent text-slate-700 dark:text-slate-300 font-medium cursor-pointer"
-            >
-              <option value="ALL">{filterLabel}</option>
-              {filterOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-              <ChevronDown className="w-3 h-3" />
-            </div>
-          </div>
+          <FilterSelect
+            label={filterLabel}
+            value={filterValue ?? "ALL"}
+            setValue={setFilterValue}
+            options={filterOptions}
+          />
         )}
+
+        {extraFilters.map((f) => (
+          <FilterSelect key={f.label} {...f} />
+        ))}
 
         {/* Search input with Blue Search button */}
         {setSearchQuery && (

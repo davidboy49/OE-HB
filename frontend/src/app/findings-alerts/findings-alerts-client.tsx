@@ -12,12 +12,9 @@ import {
   ExternalLink,
   Filter,
   Info,
-  Search,
   User as UserIcon,
   X,
   Edit3,
-  Building,
-  Briefcase,
   Layers,
   Sparkles,
   LayoutGrid,
@@ -32,13 +29,12 @@ import {
   Send,
   CalendarClock,
   Settings,
-  AlertCircle,
-  Eye
+  AlertCircle
 } from "lucide-react";
 import type { User, OePlan, Department, ExecutionSchedule } from "@oeportal/shared";
 import { parseFindingAlerts, FindingAlertItem, groupFindingAlerts, GroupedFindingAlert } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
-import MultiSelect from "@/components/ui/multi-select";
+import ActionToolbar from "@/components/ui/action-toolbar";
 
 interface FindingsAlertsClientProps {
   initialSchedules: ExecutionSchedule[];
@@ -60,8 +56,9 @@ export default function FindingsAlertsClient({
   const [activeTab, setActiveTab] = useState<"ACTIVE" | "MISSING_FINAL_DATE" | "PENDING_RESOLUTION" | "ALL">("ACTIVE");
   const [viewMode, setViewMode] = useState<"TABLE" | "CARDS">("TABLE");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string[]>(["ALL"]);
-  const [selectedDeptFilter, setSelectedDeptFilter] = useState<string[]>(["ALL"]);
+  const [projectFilter, setProjectFilter] = useState("ALL");
+  const [deptFilter, setDeptFilter] = useState("ALL");
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -115,6 +112,12 @@ export default function FindingsAlertsClient({
     return { active, missingFinalDate, pendingResolution, resolved, total, complianceRate };
   }, [allAlertItems]);
 
+  const projectCodeById = useMemo(() => {
+    const map: Record<string, string> = {};
+    projects.forEach(p => { map[p.id] = p.code; });
+    return map;
+  }, [projects]);
+
   // Filtered items
   const filteredAlerts = useMemo(() => {
     return allAlertItems.filter(item => {
@@ -124,14 +127,10 @@ export default function FindingsAlertsClient({
       if (activeTab === "PENDING_RESOLUTION" && item.alertType !== "PENDING_RESOLUTION") return false;
 
       // Project Filter
-      if (selectedProjectFilter[0] && selectedProjectFilter[0] !== "ALL") {
-        if (item.projectId !== selectedProjectFilter[0]) return false;
-      }
+      if (projectFilter !== "ALL" && item.projectId !== projectFilter) return false;
 
       // Department Filter
-      if (selectedDeptFilter[0] && selectedDeptFilter[0] !== "ALL") {
-        if (!item.departments?.toLowerCase().includes(selectedDeptFilter[0].toLowerCase())) return false;
-      }
+      if (deptFilter !== "ALL" && !item.departments?.toLowerCase().includes(deptFilter.toLowerCase())) return false;
 
       // Search Query
       if (searchQuery.trim() !== "") {
@@ -141,14 +140,15 @@ export default function FindingsAlertsClient({
         const matchesDoc = item.documentCode?.toLowerCase().includes(q);
         const matchesDept = item.departments?.toLowerCase().includes(q);
         const matchesConduct = item.conductBy?.toLowerCase().includes(q);
-        if (!matchesActivity && !matchesProject && !matchesDoc && !matchesDept && !matchesConduct) {
+        const matchesCode = projectCodeById[item.projectId]?.toLowerCase().includes(q);
+        if (!matchesActivity && !matchesProject && !matchesDoc && !matchesDept && !matchesConduct && !matchesCode) {
           return false;
         }
       }
 
       return true;
     });
-  }, [allAlertItems, activeTab, selectedProjectFilter, selectedDeptFilter, searchQuery]);
+  }, [allAlertItems, activeTab, projectFilter, deptFilter, searchQuery, projectCodeById]);
 
   // Slide-over Drawer state for viewing NCN items
   const [selectedDrawerGroup, setSelectedDrawerGroup] = useState<GroupedFindingAlert | null>(null);
@@ -157,6 +157,8 @@ export default function FindingsAlertsClient({
   const groupedAlerts = useMemo(() => {
     return groupFindingAlerts(filteredAlerts);
   }, [filteredAlerts]);
+
+  const selectedGroup = groupedAlerts.find(g => g.scheduleId === selectedGroupId) || null;
 
   // Line item statistics for header subtitle and pill counts
   const lineStats = useMemo(() => {
@@ -293,278 +295,152 @@ export default function FindingsAlertsClient({
     }
   };
 
-  // Options for MultiSelect dropdowns
-  const projectOptions = [
-    { value: "ALL", label: "All Projects" },
-    ...projects.map(p => ({ value: p.id, label: `${p.code} - ${p.name}` }))
+  // Options for toolbar filters
+  const statusOptions = [
+    { value: "ACTIVE", label: `Active Alerts (${counts.active})` },
+    { value: "MISSING_FINAL_DATE", label: `Missing Final Date (${counts.missingFinalDate})` },
+    { value: "PENDING_RESOLUTION", label: `Pending Resolution (${counts.pendingResolution})` },
   ];
 
-  const deptOptions = [
-    { value: "ALL", label: "All Departments" },
-    ...departments.map(d => ({ value: d.name, label: d.name }))
-  ];
+  const projectOptions = projects.map(p => ({ value: p.id, label: `${p.code} - ${p.name}` }));
+
+  const deptOptions = departments.map(d => ({ value: d.name, label: d.name }));
+
+  const hasActiveFilters =
+    activeTab !== "ALL" || projectFilter !== "ALL" || deptFilter !== "ALL" || searchQuery.trim() !== "";
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setActiveTab("ACTIVE");
+    setProjectFilter("ALL");
+    setDeptFilter("ALL");
+    setSelectedGroupId(null);
+  };
+
+  const viewToggleClass = (active: boolean) =>
+    `p-2 rounded transition-colors cursor-pointer ${
+      active
+        ? "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+        : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+    }`;
 
   return (
     <div className="space-y-6 pb-12">
       {/* Toast Notification */}
       {feedbackMessage && (
-        <div className="fixed top-4 right-4 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-800 flex items-center gap-3 animate-slide-in text-xs font-medium">
-          <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div className="fixed bottom-8 right-8 z-[1100] flex items-center gap-2 bg-[#05375c] text-white px-4 py-3 rounded-md shadow-md text-xs font-sans font-semibold animate-slide-up border border-[#05375c] no-print">
           <span>{feedbackMessage}</span>
         </div>
       )}
 
       {/* Title */}
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-          Findings Alerts
-        </h1>
+      <div className="space-y-0.5">
+        <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">Findings Alerts</h1>
+        <p className="text-xs text-muted-foreground">Track OE findings that still need a confirmed final corrective date or resolution.</p>
       </div>
 
-
-      {/* Control Panel: Filter Tabs, Single-Select Dropdowns, View Switcher */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
-        {/* Top Controls Row */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-          {/* Segmented Tab Controller */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-xl text-xs font-semibold">
-            {/* <button
-              onClick={() => setActiveTab("ACTIVE")}
-              className={`px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
-                activeTab === "ACTIVE"
-                  ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-bold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              Active Alerts ({counts.active})
-            </button>
-            <button
-              onClick={() => setActiveTab("MISSING_FINAL_DATE")}
-              className={`px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
-                activeTab === "MISSING_FINAL_DATE"
-                  ? "bg-red-600 text-white shadow-xs font-bold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-              }`}
-            >
-              Missing Final Date ({counts.missingFinalDate})
-            </button>
-            <button
-              onClick={() => setActiveTab("PENDING_RESOLUTION")}
-              className={`px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
-                activeTab === "PENDING_RESOLUTION"
-                  ? "bg-amber-600 text-white shadow-xs font-bold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
-              }`}
-            >
-              Pending Resolution ({counts.pendingResolution})
-            </button> */}
-            <button
-              onClick={() => setActiveTab("ALL")}
-              className={`px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
-                activeTab === "ALL"
-                  ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-bold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              All Items ({counts.total})
-            </button>
-          </div>
-
-          {/* View Mode Switcher */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl shrink-0 self-end lg:self-auto">
-            <button
-              onClick={() => setViewMode("TABLE")}
-              className={`p-2 rounded-lg transition-all ${
-                viewMode === "TABLE"
-                  ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
-              }`}
-              title="Table View"
-            >
-              <List className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode("CARDS")}
-              className={`p-2 rounded-lg transition-all ${
-                viewMode === "CARDS"
-                  ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
-              }`}
-              title="Card Grid View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Dropdowns & Search Inputs Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* OE Plan Filter - Custom MultiSelect singleSelect */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">
-              Filter by OE Project
-            </label>
-            <MultiSelect
-              options={projectOptions}
-              selectedValues={selectedProjectFilter}
-              onChange={setSelectedProjectFilter}
-              singleSelect={true}
-              placeholder="All Projects"
-            />
-          </div>
-
-          {/* Department Filter - Custom MultiSelect singleSelect */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">
-              Filter by Department
-            </label>
-            <MultiSelect
-              options={deptOptions}
-              selectedValues={selectedDeptFilter}
-              onChange={setSelectedDeptFilter}
-              singleSelect={true}
-              placeholder="All Departments"
-            />
-          </div>
-
-          {/* Search Input */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">
-              Search Alert Items
-            </label>
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search activity, document code, objective..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+      {/* Main list */}
+      <div className="border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm bg-white dark:bg-slate-900 overflow-hidden">
+        <ActionToolbar
+          onView={selectedGroup ? () => setSelectedDrawerGroup(selectedGroup) : undefined}
+          onRefresh={resetFilters}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          searchPlaceholder="Search alerts..."
+          filterLabel="All Items"
+          filterValue={activeTab}
+          setFilterValue={(v) => setActiveTab(v as typeof activeTab)}
+          filterOptions={statusOptions}
+          extraFilters={[
+            { label: "All Projects", value: projectFilter, setValue: setProjectFilter, options: projectOptions },
+            { label: "All Departments", value: deptFilter, setValue: setDeptFilter, options: deptOptions },
+          ]}
+          extraControls={
+            <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-3">
+              <button type="button" onClick={() => setViewMode("TABLE")} className={viewToggleClass(viewMode === "TABLE")} title="Table View">
+                <List className="w-4 h-4" />
+              </button>
+              <button type="button" onClick={() => setViewMode("CARDS")} className={viewToggleClass(viewMode === "CARDS")} title="Card Grid View">
+                <LayoutGrid className="w-4 h-4" />
+              </button>
             </div>
-          </div>
-        </div>
-      </div>
+          }
+          activeFilterCountLabel={hasActiveFilters ? "FILTERED" : "ALL"}
+        />
 
-      {/* Data Render Area: Table View or Cards Grid View */}
-      {viewMode === "TABLE" ? (
-        <div className="overflow-hidden border border-[#0066cc] rounded-lg shadow-sm">
+        {viewMode === "TABLE" ? (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-xs bg-white dark:bg-slate-950">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-900 border-b border-[#0066cc] font-bold text-slate-700 dark:text-slate-200">
-                  <th className="px-4 py-3 w-[5%] text-center border-r border-[#0066cc]/30">No</th>
-                  <th className="px-4 py-3 w-[25%] border-r border-[#0066cc]/30">OE Plan</th>
-                  <th className="px-4 py-3 w-[30%] border-r border-[#0066cc]/30">Department of the OE Plan</th>
-                  <th className="px-4 py-3 w-[18%] border-r border-[#0066cc]/30">Confirmed Final Corrective Date</th>
-                  <th className="px-4 py-3 w-[12%] border-r border-[#0066cc]/30">Resolved</th>
-                  <th className="px-4 py-3 w-[10%] text-center">Alert Settings</th>
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
+                <tr>
+                  <th className="px-6 py-4">OE Plan Code</th>
+                  <th className="px-6 py-4">Project Name</th>
+                  <th className="px-6 py-4">Department</th>
+                  <th className="px-6 py-4">Confirmed Final Corrective Date</th>
+                  <th className="px-6 py-4">Resolved</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {groupedAlerts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400 italic">
-                      <div className="flex flex-col items-center justify-center space-y-2">
-                        <CheckCircle2 className="w-10 h-10 text-emerald-500 opacity-70" />
-                        <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">
-                          No matching OE Findings found
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
-                          All OE findings documents meet the required date and resolution criteria for this filter view.
-                        </p>
-                      </div>
+                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 italic">
+                      No matching OE findings found. All findings meet the required date and resolution criteria for this filter.
                     </td>
                   </tr>
                 ) : (
-                  groupedAlerts.map((group, idx) => (
-                    <tr 
+                  groupedAlerts.map((group) => (
+                    <tr
                       key={group.scheduleId}
-                      className="align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
+                      onClick={() => setSelectedGroupId(group.scheduleId === selectedGroupId ? null : group.scheduleId)}
+                      className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors select-none cursor-pointer ${
+                        group.scheduleId === selectedGroupId ? "bg-slate-100/80 dark:bg-slate-800/50 font-medium" : ""
+                      }`}
                     >
-                      {/* 1. No */}
-                      <td className="px-4 py-3.5 text-center font-sans text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-800">
-                        {idx + 1}
+                      <td className="px-6 py-4.5 font-sans text-slate-700 dark:text-slate-300">
+                        {projectCodeById[group.projectId] || "-"}
                       </td>
-
-                      {/* 2. OE Plan (Code & Project) */}
-                      <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 font-sans text-slate-800 dark:text-slate-200 font-semibold space-y-1">
-                        <div className="flex items-center gap-2">
-                        </div>
-                        
-                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mt-1">
-                          {/* <Briefcase className="w-3.5 h-3.5 shrink-0 text-slate-400" /> */}
-                          <span className="truncate max-w-[200px]">{group.projectName}</span>
-                        </div>
+                      <td
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedGroupId(group.scheduleId);
+                          setSelectedDrawerGroup(group);
+                        }}
+                        className="px-6 py-4.5 text-[#0066cc] font-medium hover:underline cursor-pointer"
+                      >
+                        {group.projectName}
                       </td>
-
-                      {/* 3. Department of the OE Plan */}
-                      <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 space-y-1">
-                        {group.departments ? (
-                          <div className="font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                            {/* <Building className="w-4 h-4 shrink-0 text-slate-400" /> */}
-                            <span>{group.departments}</span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 italic text-xs">No department specified</span>
-                        )}
+                      <td className="px-6 py-4.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {group.departments || <span className="text-slate-400 italic font-normal">No department specified</span>}
                       </td>
-
-                      {/* 4. Confirmed Final Corrective Date */}
-                      <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 whitespace-nowrap">
-                        {group.missingFinalDateCount > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg#F8FAFC text-red-700 dark:text-slate-200 text-[10px] font-bold uppercase tracking-wider border border-red-500/15">
-                            <Clock className="w-3 h-3 text-red-500" />
-                            {group.missingFinalDateCount}/{group.totalRows} Date Pending
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider border border-emerald-500/15">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                            Dates Confirmed
-                          </span>
-                        )}
+                      <td className="px-6 py-4.5">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                          {group.missingFinalDateCount > 0 ? (
+                            <>
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              {group.missingFinalDateCount}/{group.totalRows} Date Pending
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                              Dates Confirmed
+                            </>
+                          )}
+                        </span>
                       </td>
-
-                      {/* 5. Resolved */}
-                      <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 whitespace-nowrap">
-                        {group.isFullyResolved ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider border border-emerald-500/15">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                            Completed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/15">
-                            <Clock className="w-3 h-3 text-amber-500" />
-                            {group.pendingResolutionCount}/{group.totalRows} Not Resolved
-                          </span>
-                        )}
-                      </td>
-
-                      {/* 6. Status & Actions */}
-                      <td className="px-4 py-3.5 text-center whitespace-nowrap space-x-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDrawerGroup(group)}
-                          className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-[#0066cc] text-white hover:bg-[#004499] text-[11px] font-bold rounded cursor-pointer transition-colors shadow-xs"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>View Settings</span>
-                        </button>
-                        {/* <Link
-                          href={`/findings?scheduleId=${group.scheduleId}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded transition-colors"
-                          title="Open full schedule document"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Link> */}
+                      <td className="px-6 py-4.5">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                          {group.isFullyResolved ? (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                              Completed
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              {group.pendingResolutionCount}/{group.totalRows} Not Resolved
+                            </>
+                          )}
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -572,127 +448,116 @@ export default function FindingsAlertsClient({
               </tbody>
             </table>
           </div>
-        </div>
-      ) : (
-        /* Card Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredAlerts.length === 0 ? (
-            <div className="col-span-full py-16 text-center text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
-              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto opacity-70 mb-2" />
-              <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">No alert items found</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">All OE findings rows meet required date and resolution criteria.</p>
-            </div>
-          ) : (
-            filteredAlerts.map((item) => (
-              <div 
-                key={item.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4"
-              >
-                <div className="space-y-3">
-                  {/* Top Header */}
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono font-bold text-xs text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                      {item.documentCode}
-                    </span>
-
-                    {item.alertType === "MISSING_FINAL_DATE" && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-extrabold bg-red-500/15 text-red-700 dark:text-red-300 border border-red-500/30 rounded-full">
-                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
-                        Missing Final Date
+        ) : (
+          /* Card Grid View */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 bg-slate-50/50 dark:bg-slate-950/30">
+            {filteredAlerts.length === 0 ? (
+              <div className="col-span-full py-10 text-center text-slate-400 italic text-xs">
+                No alert items found. All findings rows meet the required date and resolution criteria.
+              </div>
+            ) : (
+              filteredAlerts.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-3">
+                    {/* Top Header */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-bold text-xs text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                        {item.documentCode}
                       </span>
-                    )}
-
-                    {item.alertType === "PENDING_RESOLUTION" && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-extrabold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-full">
-                        <Clock className="w-3 h-3 text-amber-500" />
-                        Pending Resolution
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                        {item.alertType === "RESOLVED" ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                            Resolved
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            {item.alertType === "MISSING_FINAL_DATE" ? "Missing Final Date" : "Pending Resolution"}
+                          </>
+                        )}
                       </span>
-                    )}
-
-                    {item.alertType === "RESOLVED" && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-extrabold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded-full">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                        Resolved
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Project & Dept */}
-                  <div className="space-y-1">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{item.projectName}</span>
                     </div>
-                    {item.departments && (
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                        <Building className="w-3 h-3 text-slate-400" />
-                        <span>{item.departments}</span>
+
+                    {/* Project & Dept */}
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                        {projectCodeById[item.projectId] ? `${projectCodeById[item.projectId]} - ` : ""}{item.projectName}
+                      </div>
+                      {item.departments && (
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.departments}</div>
+                      )}
+                    </div>
+
+                    {/* Activity */}
+                    <p className="text-xs text-slate-700 dark:text-slate-300 line-clamp-3 leading-relaxed">
+                      {item.activity}
+                    </p>
+
+                    {/* Objective Badge */}
+                    {item.objectives && (
+                      <div className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 px-2 py-1 rounded border border-slate-200 dark:border-slate-700">
+                        Objective: {item.objectives}
                       </div>
                     )}
-                  </div>
 
-                  {/* Activity */}
-                  <p className="text-xs text-slate-700 dark:text-slate-300 line-clamp-3 leading-relaxed">
-                    {item.activity}
-                  </p>
-
-                  {/* Objective Badge */}
-                  {item.objectives && (
-                    <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-1 rounded-md border border-amber-200/50 dark:border-amber-800/40">
-                      Objective: {item.objectives}
-                    </div>
-                  )}
-
-                  {/* Dates Metadata Grid */}
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Target Action Date</span>
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">
-                        {item.correctiveActionDate || "Not set"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Corrective Final Date</span>
-                      <span className="font-bold text-slate-900 dark:text-white">
-                        {item.correctiveFinalDate || <span className="text-red-500">Missing</span>}
-                      </span>
+                    {/* Dates Metadata Grid */}
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Target Action Date</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          {item.correctiveActionDate || "Not set"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Corrective Final Date</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-100">
+                          {item.correctiveFinalDate || <span className="text-slate-400 font-normal italic">Missing</span>}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Card Actions */}
-                <div className="flex items-center gap-1.5 pt-3 border-t border-slate-100 dark:border-slate-800">
-                  {!item.isResolved && (
+                  {/* Card Actions */}
+                  <div className="flex items-center gap-1.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    {!item.isResolved && (
+                      <button
+                        type="button"
+                        onClick={() => handleSendSingleReminder(item)}
+                        className="px-2.5 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded border border-slate-200 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
+                        title="Send email reminder to department PIC"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>Remind</span>
+                      </button>
+                    )}
+
                     <button
-                      onClick={() => handleSendSingleReminder(item)}
-                      className="px-2.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-xl border border-blue-200 dark:border-blue-800/60 flex items-center gap-1 cursor-pointer active:scale-95"
-                      title="Send email reminder to department PIC"
+                      type="button"
+                      onClick={() => openEditModal(item)}
+                      className="flex-1 py-2 bg-[#05375c] hover:bg-[#074776] text-white font-bold text-xs rounded transition-colors text-center flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Remind</span>
+                      <Edit3 className="w-3.5 h-3.5" />
+                      Update / Resolve
                     </button>
-                  )}
-                  
-                  <button
-                    onClick={() => openEditModal(item)}
-                    className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    Update / Resolve
-                  </button>
-                  
-                  <Link
-                    href={`/findings?scheduleId=${item.scheduleId}`}
-                    className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-xl transition-all"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
+
+                    <Link
+                      href={`/findings?scheduleId=${item.scheduleId}`}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded border border-slate-200 dark:border-slate-700 transition-colors"
+                      title="Open full findings document"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Batch Email Reminders Dispatcher Modal */}
       {isBatchEmailModalOpen && (

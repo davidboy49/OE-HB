@@ -35,16 +35,45 @@ function setup(opts: {
   bySub?: unknown;
   byEmail?: unknown;
   env?: Record<string, string>;
+  /** Roles whose keycloakGroup is set - candidates for group sync. */
+  linkedGroups?: {
+    id: string;
+    name: string;
+    keycloakGroup: string;
+    grants: number;
+  }[];
 }) {
+  // The one row `user.update` mutates, whichever lookup found it - so a group-sync update
+  // sees the same record an earlier linking update already touched.
+  const record: Record<string, unknown> | null = (opts.bySub ??
+    opts.byEmail ??
+    null) as Record<string, unknown> | null;
   const prisma = {
     user: {
       findUnique: jest.fn().mockResolvedValue(opts.bySub ?? null),
       findFirst: jest.fn().mockResolvedValue(opts.byEmail ?? null),
       update: jest
         .fn()
-        .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
-          Promise.resolve({ ...(opts.byEmail as object), ...data }),
-        ),
+        .mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(record ?? {}, data);
+          return Promise.resolve({ ...record, ...data });
+        }),
+    },
+    userGroup: {
+      // Mirrors the real query: only roles whose keycloakGroup is one of the requested names.
+      findMany: jest.fn(
+        ({ where }: { where: { keycloakGroup: { in: string[] } } }) =>
+          Promise.resolve(
+            (opts.linkedGroups ?? [])
+              .filter((g) => where.keycloakGroup.in.includes(g.keycloakGroup))
+              .map((g) => ({
+                id: g.id,
+                name: g.name,
+                keycloakGroup: g.keycloakGroup,
+                _count: { grants: g.grants },
+              })),
+          ),
+      ),
     },
   } as unknown as PrismaService;
   const keycloak = {
@@ -147,6 +176,99 @@ describe('AuthService.validateSso', () => {
     await expect(byMail.service.validateSso('t')).rejects.toThrow(
       /deactivated/,
     );
+  });
+});
+
+describe('AuthService.validateSso - group sync from Keycloak', () => {
+  it('does nothing when the token carries no groups', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: 'existing' }),
+      claims: claims({ groups: [] }),
+      linkedGroups: [
+        { id: 'g1', name: 'Finance', keycloakGroup: '/finance', grants: 5 },
+      ],
+    });
+    const result = await service.validateSso('t');
+    expect(prisma.userGroup.findMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sub: 'u1' });
+  });
+
+  it('leaves the group untouched when no linked role matches (never clears it)', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: 'existing' }),
+      claims: claims({ groups: ['/marketing'] }),
+      linkedGroups: [
+        { id: 'g1', name: 'Finance', keycloakGroup: '/finance', grants: 5 },
+      ],
+    });
+    await service.validateSso('t');
+    expect(prisma.user.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ groupId: expect.anything() }),
+      }),
+    );
+  });
+
+  it('moves the person into the matching linked role', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: null }),
+      claims: claims({ groups: ['/finance'] }),
+      linkedGroups: [
+        { id: 'g1', name: 'Finance', keycloakGroup: '/finance', grants: 5 },
+      ],
+    });
+    await service.validateSso('t');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { groupId: 'g1' },
+    });
+  });
+
+  it('does not write when already in the matching role', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: 'g1' }),
+      claims: claims({ groups: ['/finance'] }),
+      linkedGroups: [
+        { id: 'g1', name: 'Finance', keycloakGroup: '/finance', grants: 5 },
+      ],
+    });
+    await service.validateSso('t');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('picks the most-privileged role when several linked roles match', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: null }),
+      claims: claims({ groups: ['/finance', '/leads'] }),
+      linkedGroups: [
+        {
+          id: 'g-narrow',
+          name: 'Finance',
+          keycloakGroup: '/finance',
+          grants: 5,
+        },
+        { id: 'g-wide', name: 'Leads', keycloakGroup: '/leads', grants: 20 },
+      ],
+    });
+    await service.validateSso('t');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { groupId: 'g-wide' },
+    });
+  });
+
+  it('never creates a role for an unmapped Keycloak group', async () => {
+    const { service, prisma } = setup({
+      bySub: account({ groupId: null }),
+      claims: claims({ groups: ['/unmapped-group'] }),
+      linkedGroups: [],
+    });
+    await service.validateSso('t');
+    expect(prisma.userGroup.findMany).toHaveBeenCalledWith({
+      where: { keycloakGroup: { in: ['/unmapped-group'] } },
+      include: { _count: { select: { grants: true } } },
+    });
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });
 

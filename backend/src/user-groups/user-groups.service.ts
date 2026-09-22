@@ -18,6 +18,7 @@ export interface GroupSummary {
   id: string;
   name: string;
   description: string | null;
+  keycloakGroup: string | null;
   memberCount: number;
   permissionCount: number;
 }
@@ -44,15 +45,21 @@ export const SCOPE_RANK: Record<AccessScope, number> = {
 
 const COUNTS = { _count: { select: { users: true, grants: true } } } as const;
 
+/** Blank input clears the mapping (stored as null, matching the unique nullable column). */
+const normaliseKeycloakGroup = (v: string | null | undefined): string | null =>
+  v?.trim() ? v.trim() : null;
+
 const toSummary = (g: {
   id: string;
   name: string;
   description: string | null;
+  keycloakGroup: string | null;
   _count: { users: number; grants: number };
 }): GroupSummary => ({
   id: g.id,
   name: g.name,
   description: g.description,
+  keycloakGroup: g.keycloakGroup,
   memberCount: g._count.users,
   permissionCount: g._count.grants,
 });
@@ -78,10 +85,18 @@ export class UserGroupsService {
     return toSummary(g);
   }
 
-  async create(name: string, description: string): Promise<GroupSummary> {
+  async create(
+    name: string,
+    description: string,
+    keycloakGroup?: string | null,
+  ): Promise<GroupSummary> {
     try {
       const g = await this.prisma.userGroup.create({
-        data: { name: name.trim(), description },
+        data: {
+          name: name.trim(),
+          description,
+          keycloakGroup: normaliseKeycloakGroup(keycloakGroup),
+        },
         include: COUNTS,
       });
       return toSummary(g);
@@ -94,11 +109,16 @@ export class UserGroupsService {
     id: string,
     name: string,
     description: string,
+    keycloakGroup?: string | null,
   ): Promise<GroupSummary> {
     try {
       const g = await this.prisma.userGroup.update({
         where: { id },
-        data: { name: name.trim(), description },
+        data: {
+          name: name.trim(),
+          description,
+          keycloakGroup: normaliseKeycloakGroup(keycloakGroup),
+        },
         include: COUNTS,
       });
       return toSummary(g);
@@ -221,7 +241,7 @@ export class UserGroupsService {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
       if (e.code === 'P2002') {
         return new ConflictException(
-          'A user group with this name already exists.',
+          'A user group with this name (or Keycloak group mapping) already exists.',
         );
       }
       if (e.code === 'P2025') {
