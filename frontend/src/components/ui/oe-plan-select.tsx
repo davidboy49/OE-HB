@@ -2,7 +2,40 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
-import type { OePlan } from "@oeportal/shared";
+import type { OePlan, Project, Department } from "@oeportal/shared";
+
+export interface OePlanOptionDisplay {
+  pill: string;
+  text: string;
+}
+
+/**
+ * An OE Plan is displayed as Pill: BU-Department-Version, Text: Project name - resolved from
+ * its linked Project (OePlan.projectId), not the OePlan's own code/name. Falls back to the
+ * OePlan's own code/name when it has no linked Project (or the link is stale), so the dropdown
+ * never renders blank.
+ *
+ * The BU segment uses the Business Unit's short ID (e.g. "HB"), not its full name (e.g.
+ * "Hanuman Estate") - Project.bu only stores the full name, so it's resolved via the linked
+ * Project's department (Department.businessUnitId holds the short ID). Falls back to
+ * Project.bu itself if the department can't be resolved.
+ */
+export function formatOePlanOption(
+  oePlan: OePlan,
+  linkedProjectsById: Record<string, Project> = {},
+  departmentsById: Record<string, Department> = {}
+): OePlanOptionDisplay {
+  const linkedProject = oePlan.projectId ? linkedProjectsById[oePlan.projectId] : undefined;
+  if (linkedProject) {
+    const department = linkedProject.departmentId ? departmentsById[linkedProject.departmentId] : undefined;
+    const buCode = department?.businessUnitId || linkedProject.bu;
+    return {
+      pill: `${buCode}-${linkedProject.topic}-${linkedProject.version || "V1"}`,
+      text: linkedProject.projectName || linkedProject.topic,
+    };
+  }
+  return { pill: oePlan.code, text: oePlan.name };
+}
 
 interface OePlanSelectProps {
   projects: OePlan[];
@@ -10,6 +43,10 @@ interface OePlanSelectProps {
   onSelect: (projectId: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Project lookup by id, used to resolve the BU-Department-Version pill / Project name text. */
+  linkedProjectsById?: Record<string, Project>;
+  /** Department lookup by id, used to resolve the BU segment's short ID (e.g. "HB"). */
+  departmentsById?: Record<string, Department>;
 }
 
 export default function OePlanSelect({
@@ -18,6 +55,8 @@ export default function OePlanSelect({
   onSelect,
   placeholder = "Choose OE Plan...",
   disabled = false,
+  linkedProjectsById = {},
+  departmentsById = {},
 }: OePlanSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -37,11 +76,16 @@ export default function OePlanSelect({
     };
   }, []);
 
-  const filteredProjects = projects.filter(
-    (p) =>
-      p.code.toLowerCase().includes(search.toLowerCase()) ||
-      p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredProjects = projects.filter((p) => {
+    const { pill, text } = formatOePlanOption(p, linkedProjectsById, departmentsById);
+    const q = search.toLowerCase();
+    return (
+      pill.toLowerCase().includes(q) ||
+      text.toLowerCase().includes(q) ||
+      p.code.toLowerCase().includes(q) ||
+      p.name.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div ref={containerRef} className="relative w-full text-xs">
@@ -57,14 +101,19 @@ export default function OePlanSelect({
       >
         <div className="flex items-center gap-2 overflow-hidden me-2">
           {selectedProject ? (
-            <>
-              <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                {selectedProject.code}
-              </span>
-              <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                {selectedProject.name}
-              </span>
-            </>
+            (() => {
+              const { pill, text } = formatOePlanOption(selectedProject, linkedProjectsById, departmentsById);
+              return (
+                <>
+                  <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
+                    {pill}
+                  </span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
+                    {text}
+                  </span>
+                </>
+              );
+            })()
           ) : (
             <span className="text-slate-400 font-normal">{placeholder}</span>
           )}
@@ -96,6 +145,7 @@ export default function OePlanSelect({
             ) : (
               filteredProjects.map((p) => {
                 const isSelected = p.id === selectedProjectId;
+                const { pill, text } = formatOePlanOption(p, linkedProjectsById, departmentsById);
                 return (
                   <button
                     key={p.id}
@@ -113,10 +163,10 @@ export default function OePlanSelect({
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                        {p.code}
+                        {pill}
                       </span>
                       <span className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">
-                        {p.name}
+                        {text}
                       </span>
                     </div>
                     {isSelected && <Check className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />}
