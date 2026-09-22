@@ -2,6 +2,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { MeetingsService } from './meetings.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 
 function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
@@ -19,10 +20,20 @@ function makePrisma(overrides: Record<string, unknown> = {}) {
   } as unknown as PrismaService;
 }
 
+/** None of these tests are about objectives/scope content - just enough to let
+ * findOne/create/update complete without error. */
+function makePlanItems(): PlanItemsService {
+  return {
+    writeList: jest.fn().mockResolvedValue(undefined),
+    readOne: jest.fn().mockResolvedValue('[]'),
+    readMany: jest.fn().mockResolvedValue(new Map()),
+  } as unknown as PlanItemsService;
+}
+
 describe('MeetingsService.confirmAttendee', () => {
   it('writes a single atomic jsonb_set keyed by the attendee name, not a read/merge/write', async () => {
     const prisma = makePrisma();
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await service.confirmAttendee('m1', 'Dara', 'Dara');
 
@@ -38,7 +49,7 @@ describe('MeetingsService.confirmAttendee', () => {
 
   it('never sends the meeting back to DRAFT the way the generic update() does', async () => {
     const prisma = makePrisma();
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await service.confirmAttendee('m1', 'Dara', 'Dara');
 
@@ -55,7 +66,7 @@ describe('MeetingsService.confirmAttendee', () => {
         update: jest.fn(),
       },
     });
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await expect(
       service.confirmAttendee('missing', 'Dara', 'Dara'),
@@ -69,7 +80,7 @@ describe('MeetingsService.update - optimistic concurrency', () => {
 
   it('lands the write when nobody else has changed the record since expectedUpdatedAt', async () => {
     const prisma = makePrisma();
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await service.update(
       'm1',
@@ -91,7 +102,7 @@ describe('MeetingsService.update - optimistic concurrency', () => {
         update: jest.fn(),
       },
     });
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await expect(
       service.update(
@@ -110,7 +121,7 @@ describe('MeetingsService.update - optimistic concurrency', () => {
         update: jest.fn(),
       },
     });
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await expect(
       service.update(
@@ -128,7 +139,7 @@ describe('MeetingsService.update - optimistic concurrency', () => {
       isDeleted: false,
       oePlan: { name: 'x', code: 'OEP-1' },
     });
-    const service = new MeetingsService(prisma);
+    const service = new MeetingsService(prisma, makePlanItems());
 
     await service.update('m1', okData, 'Dara');
 

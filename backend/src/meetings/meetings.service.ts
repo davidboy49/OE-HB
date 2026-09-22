@@ -7,6 +7,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
 
 const CONFLICT_MESSAGE =
   'Someone else changed this Open Meeting after you loaded it. Reload and try again.';
@@ -73,14 +77,21 @@ export const ALLOWED_MEETING_STATUS_TRANSITIONS: Record<string, string[]> = {
 
 @Injectable()
 export class MeetingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planItems: PlanItemsService,
+  ) {}
 
   /**
    * `projectId`/`projectName`/`projectCode` are kept as the API's field names for backward
    * compatibility, even though they describe the parent Individual OE Plan (`oePlanId` in the
    * database), not a Project.
    */
-  private toDto(m: any): any {
+  private toDto(
+    m: any,
+    objectivesOverride?: string,
+    scopeOverride?: string,
+  ): any {
     return {
       id: m.id,
       projectId: m.oePlanId,
@@ -98,8 +109,8 @@ export class MeetingsService {
       attendeeConfirmations: m.attendeeConfirmations,
       standards: m.standards,
       status: m.status,
-      objectives: m.objectives,
-      scope: m.scope,
+      objectives: objectivesOverride ?? '[]',
+      scope: scopeOverride ?? '[]',
       scheduleRows: m.scheduleRows,
       ownerName: m.ownerName,
       lastModifiedBy: m.lastModifiedBy,
@@ -111,6 +122,19 @@ export class MeetingsService {
     };
   }
 
+  /** Batched objectives/scope read for a list of meetings - one query per field instead of one
+   * per meeting (this DB is remote, so round trips are the expensive part). */
+  private async readObjectivesAndScope(meetingIds: string[]) {
+    const [objectivesById, scopeById] = await Promise.all([
+      this.planItems.readMany(
+        PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type,
+        meetingIds,
+      ),
+      this.planItems.readMany(PLAN_ITEM_OWNER.MEETING_SCOPE.type, meetingIds),
+    ]);
+    return { objectivesById, scopeById };
+  }
+
   /** `visibleTo` is the caller's view scope (see AccessScopeService). */
   async findAll(visibleTo: Prisma.OpenMeetingWhereInput = {}): Promise<any[]> {
     const meetings = await this.prisma.openMeeting.findMany({
@@ -118,7 +142,12 @@ export class MeetingsService {
       include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
-    return meetings.map((m) => this.toDto(m));
+    const { objectivesById, scopeById } = await this.readObjectivesAndScope(
+      meetings.map((m) => m.id),
+    );
+    return meetings.map((m) =>
+      this.toDto(m, objectivesById.get(m.id), scopeById.get(m.id)),
+    );
   }
 
   /** `oePlanId` is the Individual OE Plan; called `projectId` at the API boundary. */
@@ -131,7 +160,12 @@ export class MeetingsService {
       include: { oePlan: true },
       orderBy: { createdAt: 'asc' },
     });
-    return meetings.map((m) => this.toDto(m));
+    const { objectivesById, scopeById } = await this.readObjectivesAndScope(
+      meetings.map((m) => m.id),
+    );
+    return meetings.map((m) =>
+      this.toDto(m, objectivesById.get(m.id), scopeById.get(m.id)),
+    );
   }
 
   async findOne(id: string): Promise<any | null> {
@@ -140,7 +174,11 @@ export class MeetingsService {
       include: { oePlan: true },
     });
     if (!m || m.isDeleted) return null;
-    return this.toDto(m);
+    const [objectives, scope] = await Promise.all([
+      this.planItems.readOne(PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type, id),
+      this.planItems.readOne(PLAN_ITEM_OWNER.MEETING_SCOPE.type, id),
+    ]);
+    return this.toDto(m, objectives, scope);
   }
 
   /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
@@ -168,14 +206,26 @@ export class MeetingsService {
         standards: data.standards,
         // Always DRAFT: status only moves through updateStatus (submit -> approve).
         status: 'DRAFT',
-        objectives: data.objectives,
-        scope: data.scope,
         scheduleRows: data.scheduleRows,
         ownerName: actorName,
         lastModifiedBy: actorName,
       },
       include: { oePlan: true },
     });
+    await Promise.all([
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type,
+        m.id,
+        data.objectives,
+        PLAN_ITEM_OWNER.MEETING_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.MEETING_SCOPE.type,
+        m.id,
+        data.scope,
+        PLAN_ITEM_OWNER.MEETING_SCOPE.prefix,
+      ),
+    ]);
     return this.findOne(m.id);
   }
 
@@ -205,11 +255,25 @@ export class MeetingsService {
       // An edit always sends the meeting back to DRAFT so it must be submitted and
       // approved again; a client-supplied status is never trusted.
       status: 'DRAFT',
-      objectives: data.objectives,
-      scope: data.scope,
       scheduleRows: data.scheduleRows,
       lastModifiedBy: actorName,
     };
+
+    const writePlanItems = () =>
+      Promise.all([
+        this.planItems.writeList(
+          PLAN_ITEM_OWNER.MEETING_OBJECTIVE.type,
+          id,
+          data.objectives,
+          PLAN_ITEM_OWNER.MEETING_OBJECTIVE.prefix,
+        ),
+        this.planItems.writeList(
+          PLAN_ITEM_OWNER.MEETING_SCOPE.type,
+          id,
+          data.scope,
+          PLAN_ITEM_OWNER.MEETING_SCOPE.prefix,
+        ),
+      ]);
 
     if (data.expectedUpdatedAt !== undefined) {
       const { count } = await this.prisma.openMeeting.updateMany({
@@ -226,6 +290,7 @@ export class MeetingsService {
         }
         throw new ConflictException(CONFLICT_MESSAGE);
       }
+      await writePlanItems();
       return this.findOne(id);
     }
 
@@ -234,6 +299,7 @@ export class MeetingsService {
       data: updateData,
       include: { oePlan: true },
     });
+    await writePlanItems();
     return this.findOne(m.id);
   }
 

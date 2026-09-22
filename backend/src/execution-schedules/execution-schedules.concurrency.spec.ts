@@ -2,6 +2,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ExecutionSchedulesService } from './execution-schedules.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PlanItemsService } from '../common/plan-items.service';
 
 function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
@@ -18,6 +19,16 @@ function makePrisma(overrides: Record<string, unknown> = {}) {
   } as unknown as PrismaService;
 }
 
+/** None of these tests are about objectives/scope content - just enough to let
+ * findOne/create/update complete without error. */
+function makePlanItems(): PlanItemsService {
+  return {
+    writeList: jest.fn().mockResolvedValue(undefined),
+    readOne: jest.fn().mockResolvedValue('[]'),
+    readMany: jest.fn().mockResolvedValue(new Map()),
+  } as unknown as PlanItemsService;
+}
+
 describe('ExecutionSchedulesService.confirmAttendee', () => {
   it('writes a single atomic jsonb_set keyed by the attendee name, not a read/merge/write', async () => {
     const prisma = makePrisma();
@@ -25,7 +36,7 @@ describe('ExecutionSchedulesService.confirmAttendee', () => {
       id: 's1',
       oePlan: { name: 'x', code: 'OEP-1' },
     });
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await service.confirmAttendee('s1', 'Dara', 'Dara');
 
@@ -44,7 +55,7 @@ describe('ExecutionSchedulesService.confirmAttendee', () => {
   it('404s when the schedule does not exist, instead of writing to a nonexistent row', async () => {
     const prisma = makePrisma();
     (prisma.executionSchedule.findUnique as jest.Mock).mockResolvedValue(null);
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await expect(
       service.confirmAttendee('missing', 'Dara', 'Dara'),
@@ -65,7 +76,7 @@ describe('ExecutionSchedulesService.updateDepartmentConsent', () => {
       { id: 's2' },
       { id: 's3' },
     ]);
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await service.updateDepartmentConsent('s1', 'dept-1', {
       status: 'ACCEPTED',
@@ -98,7 +109,7 @@ describe('ExecutionSchedulesService.update - optimistic concurrency', () => {
         updatedAt: new Date(),
       },
     );
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await service.update(
       's1',
@@ -122,7 +133,7 @@ describe('ExecutionSchedulesService.update - optimistic concurrency', () => {
         findUniqueOrThrow: jest.fn(),
       },
     });
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await expect(
       service.update(
@@ -144,7 +155,7 @@ describe('ExecutionSchedulesService.update - optimistic concurrency', () => {
         findUniqueOrThrow: jest.fn(),
       },
     });
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await expect(
       service.update(
@@ -163,7 +174,7 @@ describe('ExecutionSchedulesService.update - optimistic concurrency', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    const service = new ExecutionSchedulesService(prisma);
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
     await service.update('s1', okData, 'Dara');
 

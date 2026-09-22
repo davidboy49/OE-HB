@@ -7,6 +7,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { validateScope } from '@oeportal/shared';
 import type { Project as ProjectShape } from '@oeportal/shared';
 import type { Prisma } from '../generated/prisma/client';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
 
 /**
  * Shape returned by getEnrichedProjects in the original dbService (typed `any[]` there).
@@ -19,7 +23,10 @@ export interface EnrichedProject extends ProjectShape {
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planItems: PlanItemsService,
+  ) {}
 
   /**
    * Mirrors dbService.getEnrichedPlannedEngagements. Computes, for every OE plan:
@@ -51,6 +58,17 @@ export class ProjectsService {
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    // One batched query per field instead of one per project - this DB is remote, so avoiding
+    // an objectives/scope round trip per project matters once there are more than a handful.
+    const projectIds = allPlans.map((p) => p.id);
+    const [objectivesById, scopeById] = await Promise.all([
+      this.planItems.readMany(
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.type,
+        projectIds,
+      ),
+      this.planItems.readMany(PLAN_ITEM_OWNER.PROJECT_SCOPE.type, projectIds),
+    ]);
 
     // Pass 1: Count total approved occurrences per department/topic
     const approvedDeptCounts: Record<string, number> = {};
@@ -128,8 +146,8 @@ export class ProjectsService {
         endDate: p.endDate.toISOString().split('T')[0],
         durationDay: p.durationDay,
         purpose: p.purpose,
-        objectives: p.objectives,
-        scope: p.scope,
+        objectives: objectivesById.get(p.id) ?? '[]',
+        scope: scopeById.get(p.id) ?? '[]',
         version: currentVersion,
         nextVersion,
         processedCount,
@@ -237,10 +255,22 @@ export class ProjectsService {
         endDate,
         durationDay,
         purpose,
-        objectives,
-        scope,
       },
     });
+    await Promise.all([
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.type,
+        p.id,
+        objectives,
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.PROJECT_SCOPE.type,
+        p.id,
+        scope,
+        PLAN_ITEM_OWNER.PROJECT_SCOPE.prefix,
+      ),
+    ]);
 
     const allPlans = await this.getEnrichedProjects(annualPlanId);
     const createdPlan = allPlans.find((plan) => plan.id === p.id);
@@ -262,8 +292,10 @@ export class ProjectsService {
       endDate: p.endDate.toISOString().split('T')[0],
       durationDay: p.durationDay,
       purpose: p.purpose,
-      objectives: p.objectives,
-      scope: p.scope,
+      // The record we just wrote, not a re-read - avoids an extra query in this rarely-hit
+      // fallback (getEnrichedProjects not finding its own just-created row).
+      objectives,
+      scope,
       version: 'V1',
       nextVersion: 'V1',
       processedCount: 0,
@@ -305,10 +337,22 @@ export class ProjectsService {
         endDate,
         durationDay,
         purpose,
-        objectives,
-        scope,
       },
     });
+    await Promise.all([
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.type,
+        p.id,
+        objectives,
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.PROJECT_SCOPE.type,
+        p.id,
+        scope,
+        PLAN_ITEM_OWNER.PROJECT_SCOPE.prefix,
+      ),
+    ]);
 
     const allPlans = await this.getEnrichedProjects(p.annualPlanId);
     const updatedPlan = allPlans.find((plan) => plan.id === p.id);
@@ -330,8 +374,10 @@ export class ProjectsService {
       endDate: p.endDate.toISOString().split('T')[0],
       durationDay: p.durationDay,
       purpose: p.purpose,
-      objectives: p.objectives,
-      scope: p.scope,
+      // The record we just wrote, not a re-read - avoids an extra query in this rarely-hit
+      // fallback (getEnrichedProjects not finding its own just-updated row).
+      objectives,
+      scope,
       version: 'V1',
       nextVersion: 'V1',
       processedCount: 0,
