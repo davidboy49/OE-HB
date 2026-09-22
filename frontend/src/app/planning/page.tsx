@@ -1,6 +1,6 @@
 import { apiFetch, fetchOr } from "@/lib/apiClient";
 import { guardPage } from "@/lib/page-access";
-import type { OePlan, User, Department, AnnualPlan, PlannedEngagement } from "@oeportal/shared";
+import type { OePlan, User, Department, AnnualPlan, Project } from "@oeportal/shared";
 import PlanningClient from "./planning-client";
 
 export default async function PlanningPage() {
@@ -11,7 +11,7 @@ export default async function PlanningPage() {
     fetchOr<User[]>("/users", []), // For selecting OE Leader
     fetchOr<Department[]>("/departments", []), // For selecting Departments
     fetchOr<AnnualPlan[]>("/annual-plans", []),
-    fetchOr<PlannedEngagement[]>("/planned-engagements", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (

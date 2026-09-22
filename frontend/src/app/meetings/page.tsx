@@ -1,6 +1,6 @@
 import { apiFetch, fetchOr } from "@/lib/apiClient";
 import { guardPage } from "@/lib/page-access";
-import type { OePlan, OpenMeeting, User, Department, PlannedEngagement } from "@oeportal/shared";
+import type { OePlan, OpenMeeting, User, Department, Project } from "@oeportal/shared";
 import MeetingsClient from "./meetings-client";
 
 export default async function MeetingsPage() {
@@ -11,7 +11,7 @@ export default async function MeetingsPage() {
     apiFetch<OpenMeeting[]>("/meetings"),
     fetchOr<User[]>("/users", []),
     fetchOr<Department[]>("/departments", []),
-    fetchOr<PlannedEngagement[]>("/planned-engagements", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (

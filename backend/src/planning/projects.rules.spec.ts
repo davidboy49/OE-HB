@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { BadRequestException } from '@nestjs/common';
-import { PlannedEngagementsService } from './planned-engagements.service';
+import { ProjectsService } from './projects.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 const noDb = {
   department: { findUnique: jest.fn() },
-  plannedEngagement: { create: jest.fn(), update: jest.fn() },
+  project: { create: jest.fn(), update: jest.fn() },
 } as unknown as PrismaService;
 
-const service = new PlannedEngagementsService(noDb);
+const service = new ProjectsService(noDb);
 
 const create = (scope: string, departmentId = 'dept-1') =>
   service.create(
@@ -26,7 +26,7 @@ const create = (scope: string, departmentId = 'dept-1') =>
     scope,
   );
 
-describe('a Project (Planned Engagement) cannot be saved without scope', () => {
+describe('a Project cannot be saved without scope', () => {
   it.each([
     ['nothing', ''],
     ['an empty item list', '[]'],
@@ -34,7 +34,7 @@ describe('a Project (Planned Engagement) cannot be saved without scope', () => {
     ['spaces only', JSON.stringify([{ id: 'OE-SCP-01', text: '   ' }])],
   ])('rejects %s on create', async (_label, scope) => {
     await expect(create(scope)).rejects.toThrow(BadRequestException);
-    expect(noDb.plannedEngagement.create).not.toHaveBeenCalled();
+    expect(noDb.project.create).not.toHaveBeenCalled();
   });
 
   it('rejects an empty scope on update too', async () => {

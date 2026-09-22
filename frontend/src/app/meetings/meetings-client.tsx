@@ -30,7 +30,7 @@ import type {
   OpenMeeting,
   ScheduleRow,
   Department,
-  PlannedEngagement
+  Project
 } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
@@ -129,7 +129,7 @@ interface MeetingsClientProps {
   projects: OePlan[];
   users: User[];
   departments: Department[];
-  plannedEngagements?: PlannedEngagement[];
+  plannedEngagements?: Project[];
   currentUser: User;
 }
 
@@ -224,9 +224,9 @@ export default function MeetingsClient({
       // If dept already has a version pattern like "Finance - V1", return as-is
       if (/\s*-\s*V\d+/i.test(dept)) return dept;
 
-      // 1. Check if linked project has an explicit plannedEngagementId
-      if (proj?.plannedEngagementId) {
-        const ap = plannedEngagements.find(a => a.id === proj.plannedEngagementId);
+      // 1. Check if linked project has an explicit projectId
+      if (proj?.projectId) {
+        const ap = plannedEngagements.find(a => a.id === proj.projectId);
         if (ap && (ap.topic.toLowerCase() === dept.toLowerCase() || depts.length === 1)) {
           return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
         }
@@ -298,8 +298,8 @@ export default function MeetingsClient({
     if (proj) {
       // Resolve inherited objectives/scope from the linked Planned Engagement -
       // OePlan.objectives/scope alone can be empty or stale.
-      const linkedPlannedEngagement = proj.plannedEngagementId
-        ? plannedEngagements.find(a => a.id === proj.plannedEngagementId)
+      const linkedPlannedEngagement = proj.projectId
+        ? plannedEngagements.find(a => a.id === proj.projectId)
         : null;
       const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
       setObjectives(inherited.objectives);

@@ -20,7 +20,7 @@ import {
   Layers,
   ChevronRight
 } from "lucide-react";
-import type { User, AnnualPlan, PlannedEngagement, Department, BusinessUnit, PlanItem } from "@oeportal/shared";
+import type { User, AnnualPlan, Project, Department, BusinessUnit, PlanItem } from "@oeportal/shared";
 import { parsePlanItems, serializePlanItems } from "@oeportal/shared";
 import QRCodeModal from "@/components/ui/qr-code-modal";
 import QRCode from "qrcode";
@@ -98,9 +98,9 @@ export default function AnnualPlansClient({
   const canDeletePlan = RBAC.can(currentUser, "annual-plans:delete");
   const canSubmitPlan = RBAC.can(currentUser, "annual-plans:submit");
   const canApprovePlan = RBAC.can(currentUser, "annual-plans:approve");
-  const canCreateChildPlan = RBAC.can(currentUser, "planned-engagements:create");
-  const canUpdateChildPlan = RBAC.can(currentUser, "planned-engagements:update");
-  const canDeleteChildPlan = RBAC.can(currentUser, "planned-engagements:delete");
+  const canCreateChildPlan = RBAC.can(currentUser, "projects:create");
+  const canUpdateChildPlan = RBAC.can(currentUser, "projects:update");
+  const canDeleteChildPlan = RBAC.can(currentUser, "projects:delete");
 
   const loadApprovedTopicCounts = () => {
     clientApi<Record<string, number>>("/annual-plans/approved-topic-counts").then(setApprovedTopicCounts).catch(console.error);
@@ -112,7 +112,7 @@ export default function AnnualPlansClient({
 
   useEffect(() => {
     if (selectedPlanId && modalMode === "edit") {
-      clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`).then(setPlannedEngagements).catch(console.error);
+      clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`).then(setPlannedEngagements).catch(console.error);
       const plan = annualPlans.find(p => p.id === selectedPlanId);
       if (plan?.qrToken) {
         const url = `${window.location.origin}/scan/${plan.qrToken}`;
@@ -179,7 +179,7 @@ export default function AnnualPlansClient({
             for (let i = 0; i < plansToPersist.length; i++) {
               const ap = plansToPersist[i];
               const no = `PRJ-${String(i + 1).padStart(3, '0')}`;
-              await clientApi<PlannedEngagement>("/planned-engagements", {
+              await clientApi<Project>("/projects", {
                 method: "POST",
                 body: JSON.stringify({
                   annualPlanId: newPlan.id,
@@ -252,7 +252,7 @@ export default function AnnualPlansClient({
       if (updated) {
         setAnnualPlans(annualPlans.map(p => p.id === selectedPlanId ? updated : p));
         setStatusInput(newStatus);
-        const updatedAps = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
+        const updatedAps = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
         setPlannedEngagements(updatedAps);
         loadApprovedTopicCounts();
         showFeedback(`Annual Plan status updated to ${newStatus}.`);
@@ -404,7 +404,7 @@ export default function AnnualPlansClient({
         if (!selectedPlanId) return;
         if (childModalMode === "create") {
           const no = `PRJ-${String(plannedEngagements.length + 1).padStart(3, '0')}`;
-          const newAp = await clientApi<PlannedEngagement>("/planned-engagements", {
+          const newAp = await clientApi<Project>("/projects", {
             method: "POST",
             body: JSON.stringify({
               annualPlanId: selectedPlanId,
@@ -424,14 +424,14 @@ export default function AnnualPlansClient({
             }),
           });
           if (newAp) {
-            const updated = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
+            const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
             setPlannedEngagements(updated);
             setIsChildModalOpen(false);
             showFeedback("Project added successfully.");
           }
         } else {
           if (!selectedPlannedEngagementId) return;
-          const updatedAp = await clientApi<PlannedEngagement>(`/planned-engagements/${selectedPlannedEngagementId}`, {
+          const updatedAp = await clientApi<Project>(`/projects/${selectedPlannedEngagementId}`, {
             method: "PATCH",
             body: JSON.stringify({
               projectName: apProjectName,
@@ -449,7 +449,7 @@ export default function AnnualPlansClient({
             }),
           });
           if (updatedAp) {
-            const updated = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
+            const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
             setPlannedEngagements(updated);
             setIsChildModalOpen(false);
             showFeedback("Project updated successfully.");
@@ -481,10 +481,10 @@ export default function AnnualPlansClient({
     }
 
     try {
-      const success = await clientApi<boolean>(`/planned-engagements/${id}`, { method: "DELETE" });
+      const success = await clientApi<boolean>(`/projects/${id}`, { method: "DELETE" });
       if (success) {
         if (selectedPlanId) {
-          const updated = await clientApi<PlannedEngagement[]>(`/planned-engagements/by-annual-plan/${selectedPlanId}`);
+          const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
           setPlannedEngagements(updated);
         } else {
           setPlannedEngagements(plannedEngagements.filter(ap => ap.id !== id));

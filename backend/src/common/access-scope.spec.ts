@@ -5,7 +5,7 @@ import {
   findingWhere,
   meetingWhere,
   oePlanWhere,
-  plannedEngagementWhere,
+  projectWhere,
   scheduleWhere,
 } from './access-scope';
 
@@ -24,40 +24,40 @@ const noDept: ViewerContext = {
 
 const NOTHING = { id: { in: [] } };
 
-describe('plannedEngagementWhere', () => {
+describe('projectWhere', () => {
   it('ALL reaches every project', () => {
-    expect(plannedEngagementWhere('ALL', inDept)).toEqual({});
+    expect(projectWhere('ALL', inDept)).toEqual({});
   });
 
   it("DEPARTMENT reaches only the viewer's own department", () => {
-    expect(plannedEngagementWhere('DEPARTMENT', inDept)).toEqual({
+    expect(projectWhere('DEPARTMENT', inDept)).toEqual({
       departmentId: 'dept-fin',
     });
   });
 
   it("BU reaches every department of the viewer's Business Unit", () => {
-    expect(plannedEngagementWhere('BU', inDept)).toEqual({
+    expect(projectWhere('BU', inDept)).toEqual({
       department: { businessUnitId: 'bu-corp' },
     });
   });
 
   it('a viewer with no department sees nothing when scoped to it (never everything)', () => {
-    expect(plannedEngagementWhere('DEPARTMENT', noDept)).toEqual(NOTHING);
-    expect(plannedEngagementWhere('BU', noDept)).toEqual(NOTHING);
+    expect(projectWhere('DEPARTMENT', noDept)).toEqual(NOTHING);
+    expect(projectWhere('BU', noDept)).toEqual(NOTHING);
   });
 
   it('MEMBER is not a Project scope and sees nothing', () => {
-    expect(plannedEngagementWhere('MEMBER', inDept)).toEqual(NOTHING);
+    expect(projectWhere('MEMBER', inDept)).toEqual(NOTHING);
   });
 });
 
 describe('oePlanWhere', () => {
   it("follows the Project's department / Business Unit", () => {
     expect(oePlanWhere('DEPARTMENT', inDept)).toEqual({
-      plannedEngagement: { departmentId: 'dept-fin' },
+      project: { departmentId: 'dept-fin' },
     });
     expect(oePlanWhere('BU', inDept)).toEqual({
-      plannedEngagement: { department: { businessUnitId: 'bu-corp' } },
+      project: { department: { businessUnitId: 'bu-corp' } },
     });
   });
 
@@ -86,14 +86,14 @@ describe('annualPlanWhere', () => {
     expect(annualPlanWhere('DEPARTMENT', inDept)).toEqual({
       OR: [
         { createdBy: 'Dara' },
-        { plannedEngagements: { some: { departmentId: 'dept-fin' } } },
+        { projects: { some: { departmentId: 'dept-fin' } } },
       ],
     });
   });
 
   it('a department-less viewer sees only the plans they created', () => {
     expect(annualPlanWhere('DEPARTMENT', noDept)).toEqual({
-      OR: [{ createdBy: 'Sok' }, { plannedEngagements: { some: NOTHING } }],
+      OR: [{ createdBy: 'Sok' }, { projects: { some: NOTHING } }],
     });
   });
 });
@@ -107,10 +107,10 @@ describe('records that hang off an OE Plan', () => {
 
   it('a narrower scope is applied through the parent OE Plan', () => {
     const plan = oePlanWhere('DEPARTMENT', inDept);
-    expect(meetingWhere('DEPARTMENT', inDept)).toEqual({ project: plan });
-    expect(scheduleWhere('DEPARTMENT', inDept)).toEqual({ project: plan });
+    expect(meetingWhere('DEPARTMENT', inDept)).toEqual({ oePlan: plan });
+    expect(scheduleWhere('DEPARTMENT', inDept)).toEqual({ oePlan: plan });
     expect(findingWhere('DEPARTMENT', inDept)).toEqual({
-      executionSchedule: { project: plan },
+      executionSchedule: { oePlan: plan },
     });
   });
 });

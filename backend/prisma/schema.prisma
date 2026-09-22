@@ -37,7 +37,7 @@ model Department {
   businessUnitId     String? // Each Business Unit has its own departments; required by the UI, nullable for legacy rows
   businessUnit       BusinessUnit?       @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
   users              User[]
-  plannedEngagements PlannedEngagement[]
+  projects           Project[]
   openMeetings       OpenMeeting[]
   meetingResponses   MeetingResponse[]
   createdAt          DateTime            @default(now())
@@ -108,9 +108,9 @@ model OePlan {
   executionSchedules ExecutionSchedule[]
   openMeetings       OpenMeeting[]
 
-  annualPlanId        String?
-  plannedEngagementId String?
-  plannedEngagement   PlannedEngagement? @relation(fields: [plannedEngagementId], references: [id])
+  annualPlanId String?
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id])
 
   createdBy String @default("") // Name of the user who created this plan
 }
@@ -119,8 +119,8 @@ model Document {
   id         String   @id @default(uuid())
   title      String
   content    String
-  projectId  String
-  project    OePlan   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  oePlanId   String
+  oePlan     OePlan   @relation(fields: [oePlanId], references: [id], onDelete: Cascade)
   uploaderId String
   uploader   User     @relation(fields: [uploaderId], references: [id])
   createdAt  DateTime @default(now())
@@ -147,8 +147,8 @@ model Report {
   title     String
   summary   String
   status    String // "DRAFT", "FINAL"
-  projectId String
-  project   OePlan   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  oePlanId  String
+  oePlan    OePlan   @relation(fields: [oePlanId], references: [id], onDelete: Cascade)
   creatorId String
   creator   User     @relation(fields: [creatorId], references: [id])
   createdAt DateTime @default(now())
@@ -157,8 +157,8 @@ model Report {
 
 model ExecutionSchedule {
   id                    String    @id @default(uuid())
-  projectId             String
-  project               OePlan    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  oePlanId              String
+  oePlan                OePlan    @relation(fields: [oePlanId], references: [id], onDelete: Cascade)
   findings              Finding[]
   departments           String    @default("")
   address               String
@@ -186,8 +186,8 @@ model ExecutionSchedule {
 
 model OpenMeeting {
   id                    String            @id @default(uuid())
-  projectId             String
-  project               OePlan            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  oePlanId              String
+  oePlan                OePlan            @relation(fields: [oePlanId], references: [id], onDelete: Cascade)
   departmentId          String?
   department            Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   responses             MeetingResponse[]
@@ -259,10 +259,10 @@ model AnnualPlan {
   qrToken            String              @unique @default(dbgenerated("(gen_random_uuid())::text")) // Unguessable, rotatable; the QR code encodes this, never the plan id
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
-  plannedEngagements PlannedEngagement[]
+  projects           Project[]
 }
 
-model PlannedEngagement {
+model Project {
   id           String      @id @default(uuid())
   annualPlanId String
   annualPlan   AnnualPlan  @relation(fields: [annualPlanId], references: [id], onDelete: Cascade)

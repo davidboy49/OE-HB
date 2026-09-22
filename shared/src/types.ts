@@ -124,7 +124,7 @@ export interface OePlan {
   openMeetings?: OpenMeeting[];
 
   annualPlanId?: string | null;
-  plannedEngagementId?: string | null;
+  projectId?: string | null;
 }
 
 export interface Finding {
@@ -226,7 +226,7 @@ export interface AnnualPlan {
   updatedAt?: string;
 }
 
-export interface PlannedEngagement {
+export interface Project {
   id: string;
   annualPlanId: string;
   no: string;
@@ -246,8 +246,8 @@ export interface PlannedEngagement {
   nextVersion?: string;
   isProcessed?: boolean;
   isApproved?: boolean;
-  isUsed?: boolean; // true once an Individual OE Plan (OePlan) has been created from this engagement
-  individualPlanStatus?: OePlan["status"]; // status of the (latest) Individual OE Plan created from this engagement
+  isUsed?: boolean; // true once an Individual OE Plan (OePlan) has been created from this Project
+  individualPlanStatus?: OePlan["status"]; // status of the (latest) Individual OE Plan created from this Project
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;

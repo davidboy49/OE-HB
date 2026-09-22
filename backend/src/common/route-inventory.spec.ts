@@ -50,7 +50,7 @@ describe('route inventory / access audit', () => {
   it('every read of a record module requires its view permission', () => {
     const viewModules = [
       'annual-plans',
-      'planned-engagements',
+      'projects',
       'oe-plans',
       'meetings',
       'execution-schedules',

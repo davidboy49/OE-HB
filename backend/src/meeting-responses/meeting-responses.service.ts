@@ -21,8 +21,8 @@ import type { UpsertMeetingResponseDto } from './dto/upsert-response.dto';
 const VIEW_ALL = 'meeting-responses:view-all';
 
 const meetingInclude = {
-  project: {
-    include: { plannedEngagement: { include: { annualPlan: true } } },
+  oePlan: {
+    include: { project: { include: { annualPlan: true } } },
   },
   department: { include: { businessUnit: true } },
   responses: { orderBy: { createdAt: 'asc' } },
@@ -89,8 +89,8 @@ export class MeetingResponsesService {
     return getResponseWindow({
       meetingStatus: m.status,
       meetingDate: m.actualVisitDate,
-      planStatus: m.project.status,
-      annualPlanStatus: m.project.plannedEngagement?.annualPlan?.status,
+      planStatus: m.oePlan.status,
+      annualPlanStatus: m.oePlan.project?.annualPlan?.status,
       today: todayInTimeZone(this.timeZone),
     });
   }
@@ -115,15 +115,17 @@ export class MeetingResponsesService {
     const mine = m.responses.find((r) => r.userId === viewerId);
     return {
       id: m.id,
-      projectId: m.projectId,
-      projectName: m.project.name,
-      projectCode: m.project.code,
+      // projectId/projectName/projectCode are the API's field names for backward
+      // compatibility; they describe the parent Individual OE Plan, not a Project.
+      projectId: m.oePlanId,
+      projectName: m.oePlan.name,
+      projectCode: m.oePlan.code,
       departmentId: m.departmentId,
       departmentName: m.department?.name ?? m.departments,
       businessUnitName: m.department?.businessUnit?.name ?? '',
       meetingDate: m.actualVisitDate,
       address: m.address,
-      annualPlanId: m.project.annualPlanId,
+      annualPlanId: m.oePlan.annualPlanId,
       window: {
         open: window.open,
         reason: window.reason,
@@ -158,7 +160,7 @@ export class MeetingResponsesService {
           where: {
             isDeleted: false,
             status: 'RELEASED',
-            project: { annualPlanId: annualPlan.id },
+            oePlan: { annualPlanId: annualPlan.id },
             ...(viewer.canViewAll ? {} : { departmentId: viewer.departmentId }),
           },
           include: meetingInclude,
@@ -289,7 +291,7 @@ export class MeetingResponsesService {
       where: {
         isDeleted: false,
         status: 'RELEASED',
-        ...(annualPlanId ? { project: { annualPlanId } } : {}),
+        ...(annualPlanId ? { oePlan: { annualPlanId } } : {}),
       },
       include: meetingInclude,
       orderBy: [{ actualVisitDate: 'asc' }, { createdAt: 'asc' }],

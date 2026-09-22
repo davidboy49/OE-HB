@@ -20,7 +20,7 @@ export const PERMISSIONS: PermissionDef[] = [
   // that does not hold the key gets a 403 from the API and never sees the menu item.
   // Record-bearing modules can additionally be limited by a scope (see ACCESS_SCOPES).
   { key: 'annual-plans:view', description: 'View Annual OE Plans' },
-  { key: 'planned-engagements:view', description: 'View Projects' },
+  { key: 'projects:view', description: 'View Projects' },
   { key: 'oe-plans:view', description: 'View Individual OE Plans' },
   { key: 'meetings:view', description: 'View Open Meetings' },
   { key: 'execution-schedules:view', description: 'View Execution Schedules' },
@@ -134,9 +134,9 @@ export const PERMISSIONS: PermissionDef[] = [
   },
 
   // OE Plans
-  { key: 'planned-engagements:create', description: 'Create Projects' },
-  { key: 'planned-engagements:update', description: 'Edit Projects' },
-  { key: 'planned-engagements:delete', description: 'Delete Projects' },
+  { key: 'projects:create', description: 'Create Projects' },
+  { key: 'projects:update', description: 'Edit Projects' },
+  { key: 'projects:delete', description: 'Delete Projects' },
 
   // Notifications
   {
@@ -170,7 +170,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
   OE_LEADER: PERMISSION_KEYS.filter((k) => k !== 'notifications:configure'),
   OE_MEMBER: [
     'annual-plans:view',
-    'planned-engagements:view',
+    'projects:view',
     'oe-plans:view',
     'meetings:view',
     'execution-schedules:view',
@@ -192,8 +192,8 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, string[]> = {
     'annual-plans:create',
     'annual-plans:update',
     'annual-plans:submit',
-    'planned-engagements:create',
-    'planned-engagements:update',
+    'projects:create',
+    'projects:update',
     'notifications:send-test',
     'notifications:send',
   ],
@@ -223,7 +223,7 @@ const SCOPED_MODULES_WITH_MEMBER = [
   'execution-schedules',
   'findings',
 ];
-const SCOPED_MODULES_NO_MEMBER = ['annual-plans', 'planned-engagements'];
+const SCOPED_MODULES_NO_MEMBER = ['annual-plans', 'projects'];
 
 export const moduleOf = (key: string) => key.split(':')[0];
 export const actionOf = (key: string) => key.split(':').slice(1).join(':');
@@ -241,7 +241,7 @@ export const isScopable = (key: string) => scopesFor(key).length > 1;
 
 export const MODULE_LABELS: Record<string, string> = {
   'annual-plans': 'Annual OE Plans',
-  'planned-engagements': 'Projects',
+  projects: 'Projects',
   'oe-plans': 'Individual OE Plans',
   meetings: 'Open Meetings',
   'meeting-responses': 'Department Responses',

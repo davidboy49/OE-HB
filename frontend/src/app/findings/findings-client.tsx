@@ -24,7 +24,7 @@ import {
 import type {
   User,
   OePlan,
-  PlannedEngagement,
+  Project,
   ExecutionSchedule as FindingReport,
   ScheduleRow,
   Department
@@ -133,7 +133,7 @@ interface FindingsClientProps {
   projects: OePlan[];
   users: User[];
   departments: Department[];
-  plannedEngagements?: PlannedEngagement[];
+  plannedEngagements?: Project[];
   currentUser: User;
 }
 
@@ -318,8 +318,8 @@ export default function FindingsClient({
     // Resolve inherited objectives/scope from the linked Planned Engagement -
     // OePlan.objectives/scope alone can be empty or stale.
     if (proj) {
-      const linkedPlannedEngagement = proj.plannedEngagementId
-        ? plannedEngagements.find(a => a.id === proj.plannedEngagementId)
+      const linkedPlannedEngagement = proj.projectId
+        ? plannedEngagements.find(a => a.id === proj.projectId)
         : null;
       const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
       setObjectives(inherited.objectives);

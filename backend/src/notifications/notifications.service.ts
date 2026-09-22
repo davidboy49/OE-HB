@@ -166,7 +166,7 @@ export class NotificationsService {
     try {
       const schedule = await this.prisma.executionSchedule.findUnique({
         where: { id: scheduleId },
-        include: { project: true },
+        include: { oePlan: true },
       });
       if (!schedule) {
         return { success: false, simulatedAlerts: [] };
@@ -197,8 +197,8 @@ export class NotificationsService {
 
       const smtp = await this.getSmtpConfig();
       const simulatedAlerts: SimulatedAlert[] = [];
-      const projectName = schedule.project?.name || 'Open Meeting Report';
-      const projectCode = schedule.project?.code || 'N/A';
+      const projectName = schedule.oePlan?.name || 'Open Meeting Report';
+      const projectCode = schedule.oePlan?.code || 'N/A';
       const subject = `Open Meeting Report Released - ${projectCode}`;
       const body = `
         <p>Hello {{recipientName}},</p>

@@ -59,5 +59,5 @@ export class CreateOePlanDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  plannedEngagementId?: string | null;
+  projectId?: string | null;
 }

@@ -5,23 +5,23 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasPlanItemContent } from '@oeportal/shared';
-import type { PlannedEngagement } from '@oeportal/shared';
+import type { Project as ProjectShape } from '@oeportal/shared';
 import type { Prisma } from '../generated/prisma/client';
 
 const SCOPE_REQUIRED_MESSAGE =
   'Scope is required: add at least one scope item before saving the Project.';
 
 /**
- * Shape returned by getEnrichedPlannedEngagements in the original dbService (typed `any[]` there).
- * Adds the two computed fields the shared PlannedEngagement type doesn't carry.
+ * Shape returned by getEnrichedProjects in the original dbService (typed `any[]` there).
+ * Adds the two computed fields the shared Project type doesn't carry.
  */
-export interface EnrichedPlannedEngagement extends PlannedEngagement {
+export interface EnrichedProject extends ProjectShape {
   processedCount: number;
   totalSchedules: number;
 }
 
 @Injectable()
-export class PlannedEngagementsService {
+export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -32,11 +32,11 @@ export class PlannedEngagementsService {
    *    RELEASED/APPROVED for a matching department.
    * Used internally by findAll, findByAnnualPlan, create, and update.
    */
-  private async getEnrichedPlannedEngagements(
+  private async getEnrichedProjects(
     annualPlanIdFilter?: string,
-    visibleTo: Prisma.PlannedEngagementWhereInput = {},
-  ): Promise<EnrichedPlannedEngagement[]> {
-    const allPlans = await this.prisma.plannedEngagement.findMany({
+    visibleTo: Prisma.ProjectWhereInput = {},
+  ): Promise<EnrichedProject[]> {
+    const allPlans = await this.prisma.project.findMany({
       include: {
         annualPlan: true,
         oePlans: {
@@ -68,7 +68,7 @@ export class PlannedEngagementsService {
     const runningApprovedOccurrence: Record<string, number> = {};
     const runningDraftOccurrence: Record<string, number> = {};
 
-    const enriched: EnrichedPlannedEngagement[] = allPlans.map((p) => {
+    const enriched: EnrichedProject[] = allPlans.map((p) => {
       const deptKey = p.departmentId ?? (p.topic || '').trim().toLowerCase();
       const isApproved = p.annualPlan?.status === 'APPROVED';
 
@@ -141,7 +141,7 @@ export class PlannedEngagementsService {
         isUsed: (p.oePlans || []).length > 0,
         individualPlanStatus: [...(p.oePlans || [])].sort(
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-        )[0]?.status as PlannedEngagement['individualPlanStatus'],
+        )[0]?.status as ProjectShape['individualPlanStatus'],
         annualPlanStatus: p.annualPlan?.status || 'DRAFT',
         totalSchedules,
         createdAt: p.createdAt.toISOString(),
@@ -155,7 +155,7 @@ export class PlannedEngagementsService {
       Object.keys(visibleTo).length > 0
         ? new Set(
             (
-              await this.prisma.plannedEngagement.findMany({
+              await this.prisma.project.findMany({
                 where: visibleTo,
                 select: { id: true },
               })
@@ -195,16 +195,16 @@ export class PlannedEngagementsService {
 
   /** `visibleTo` is the caller's view scope (see AccessScopeService). */
   async findAll(
-    visibleTo: Prisma.PlannedEngagementWhereInput = {},
-  ): Promise<EnrichedPlannedEngagement[]> {
-    return this.getEnrichedPlannedEngagements(undefined, visibleTo);
+    visibleTo: Prisma.ProjectWhereInput = {},
+  ): Promise<EnrichedProject[]> {
+    return this.getEnrichedProjects(undefined, visibleTo);
   }
 
   async findByAnnualPlan(
     annualPlanId: string,
-    visibleTo: Prisma.PlannedEngagementWhereInput = {},
-  ): Promise<EnrichedPlannedEngagement[]> {
-    return this.getEnrichedPlannedEngagements(annualPlanId, visibleTo);
+    visibleTo: Prisma.ProjectWhereInput = {},
+  ): Promise<EnrichedProject[]> {
+    return this.getEnrichedProjects(annualPlanId, visibleTo);
   }
 
   async create(
@@ -220,12 +220,12 @@ export class PlannedEngagementsService {
     purpose: string,
     objectives: string = '',
     scope: string = '',
-  ): Promise<EnrichedPlannedEngagement> {
+  ): Promise<EnrichedProject> {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
     const { topic, bu } = await this.resolveDepartment(departmentId);
-    const p = await this.prisma.plannedEngagement.create({
+    const p = await this.prisma.project.create({
       data: {
         annualPlanId,
         no,
@@ -244,7 +244,7 @@ export class PlannedEngagementsService {
       },
     });
 
-    const allPlans = await this.getEnrichedPlannedEngagements(annualPlanId);
+    const allPlans = await this.getEnrichedProjects(annualPlanId);
     const createdPlan = allPlans.find((plan) => plan.id === p.id);
     if (createdPlan) {
       return createdPlan;
@@ -288,12 +288,12 @@ export class PlannedEngagementsService {
     purpose: string,
     objectives: string = '',
     scope: string = '',
-  ): Promise<EnrichedPlannedEngagement> {
+  ): Promise<EnrichedProject> {
     if (!hasPlanItemContent(scope)) {
       throw new BadRequestException(SCOPE_REQUIRED_MESSAGE);
     }
     const { topic, bu } = await this.resolveDepartment(departmentId);
-    const p = await this.prisma.plannedEngagement.update({
+    const p = await this.prisma.project.update({
       where: { id },
       data: {
         projectName,
@@ -311,7 +311,7 @@ export class PlannedEngagementsService {
       },
     });
 
-    const allPlans = await this.getEnrichedPlannedEngagements(p.annualPlanId);
+    const allPlans = await this.getEnrichedProjects(p.annualPlanId);
     const updatedPlan = allPlans.find((plan) => plan.id === p.id);
     if (updatedPlan) {
       return updatedPlan;
@@ -345,14 +345,14 @@ export class PlannedEngagementsService {
 
   async remove(id: string): Promise<boolean> {
     const inUse = await this.prisma.oePlan.findFirst({
-      where: { plannedEngagementId: id },
+      where: { projectId: id },
     });
     if (inUse) {
       throw new ConflictException(
         'This Project is already in use by an Individual OE Plan and cannot be deleted.',
       );
     }
-    await this.prisma.plannedEngagement.delete({ where: { id } });
+    await this.prisma.project.delete({ where: { id } });
     return true;
   }
 }

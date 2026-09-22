@@ -1,9 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
-import { assertProjectReleased } from '../common/assert-project-status';
+import { assertOePlanReleased } from '../common/assert-oe-plan-status';
 
 export interface CreateExecutionScheduleInput {
+  /** The Individual OE Plan this schedule belongs to. Called `projectId` in the API for
+   * backward compatibility with existing clients - it is not a Project (see Prisma's
+   * `oePlanId`, which is what it is actually stored as). */
   projectId: string;
   departments: string;
   address: string;
@@ -94,13 +97,18 @@ export class ExecutionSchedulesService {
       .$executeRaw`UPDATE "ExecutionSchedule" SET "attendeeConfirmations" = ${attendeeConfirmations} WHERE id = ${id}`;
   }
 
-  /** Shared response shape used by findAll/create/findOne (dbService.ts:730-757, 795-822, 831-858). */
+  /**
+   * Shared response shape used by findAll/create/findOne (dbService.ts:730-757, 795-822,
+   * 831-858). `projectId`/`projectName`/`projectCode` are kept as the API's field names for
+   * backward compatibility, even though they describe the parent Individual OE Plan
+   * (`oePlanId` in the database), not a Project.
+   */
   private toDto(s: any, attendeeConfirmationsOverride?: string): any {
     return {
       id: s.id,
-      projectId: s.projectId,
-      projectName: s.project?.name,
-      projectCode: s.project?.code,
+      projectId: s.oePlanId,
+      projectName: s.oePlan?.name,
+      projectCode: s.oePlan?.code,
       departments: s.departments,
       address: s.address,
       visitNumber: s.visitNumber,
@@ -134,7 +142,7 @@ export class ExecutionSchedulesService {
   ): Promise<any[]> {
     const schedules = await this.prisma.executionSchedule.findMany({
       where,
-      include: { project: true },
+      include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
     const confirmationMap = await this.getScheduleAttendeeConfirmations(
@@ -148,13 +156,18 @@ export class ExecutionSchedulesService {
     data: CreateExecutionScheduleInput,
     actorName: string,
   ): Promise<any> {
-    await assertProjectReleased(this.prisma, data.projectId);
+    await assertOePlanReleased(this.prisma, data.projectId);
 
-    const { attendeeConfirmations, ...createData } = data;
+    const { attendeeConfirmations, projectId, ...createData } = data;
     const s = await this.prisma.executionSchedule.create({
       // Spread first so a client-supplied ownerName/lastModifiedBy is overridden.
-      data: { ...createData, ownerName: actorName, lastModifiedBy: actorName },
-      include: { project: true },
+      data: {
+        ...createData,
+        oePlanId: projectId,
+        ownerName: actorName,
+        lastModifiedBy: actorName,
+      },
+      include: { oePlan: true },
     });
     await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
     return this.toDto(s, attendeeConfirmations);
@@ -163,7 +176,7 @@ export class ExecutionSchedulesService {
   async findOne(id: string): Promise<any | null> {
     const s = await this.prisma.executionSchedule.findUnique({
       where: { id },
-      include: { project: true },
+      include: { oePlan: true },
     });
     if (!s) return null;
     const confirmationMap = await this.getScheduleAttendeeConfirmations([id]);
@@ -172,7 +185,7 @@ export class ExecutionSchedulesService {
 
   /**
    * dbService.updateDepartmentConsent (dbService.ts:1422-1463). Records a single
-   * department's consent decision and fans it out to sibling schedules on the same project.
+   * department's consent decision and fans it out to sibling schedules on the same OE Plan.
    */
   async updateDepartmentConsent(
     scheduleId: string,
@@ -195,12 +208,12 @@ export class ExecutionSchedulesService {
     const updated = await this.prisma.executionSchedule.update({
       where: { id: scheduleId },
       data: { departmentConsents: JSON.stringify(consents) },
-      include: { project: true },
+      include: { oePlan: true },
     });
 
-    if (s.projectId) {
+    if (s.oePlanId) {
       const siblingSchedules = await this.prisma.executionSchedule.findMany({
-        where: { projectId: s.projectId, NOT: { id: scheduleId } },
+        where: { oePlanId: s.oePlanId, NOT: { id: scheduleId } },
       });
       for (const sib of siblingSchedules) {
         let sibConsents: Record<string, any> = {};
@@ -219,8 +232,8 @@ export class ExecutionSchedulesService {
 
     return {
       ...updated,
-      projectName: updated.project?.name,
-      projectCode: updated.project?.code,
+      projectName: updated.oePlan?.name,
+      projectCode: updated.oePlan?.code,
     };
   }
 
@@ -241,14 +254,14 @@ export class ExecutionSchedulesService {
     const s = await this.prisma.executionSchedule.update({
       where: { id },
       data: { ...updateData, lastModifiedBy: actorName },
-      include: { project: true },
+      include: { oePlan: true },
     });
     await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
     return {
       id: s.id,
-      projectId: s.projectId,
-      projectName: s.project.name,
-      projectCode: s.project.code,
+      projectId: s.oePlanId,
+      projectName: s.oePlan.name,
+      projectCode: s.oePlan.code,
       departments: s.departments,
       address: s.address,
       visitNumber: s.visitNumber,

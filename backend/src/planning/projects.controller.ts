@@ -9,9 +9,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { PlannedEngagementsService } from './planned-engagements.service';
-import { CreatePlannedEngagementDto } from './dto/create-planned-engagement.dto';
-import { UpdatePlannedEngagementDto } from './dto/update-planned-engagement.dto';
+import { ProjectsService } from './projects.service';
+import { CreateProjectDto } from './dto/create-project.dto';
+import { UpdateProjectDto } from './dto/update-project.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -19,44 +19,46 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AccessScopeService } from '../common/access-scope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
-@ApiTags('planned-engagements')
+@ApiTags('projects')
 @ApiBearerAuth()
-@Controller('planned-engagements')
-export class PlannedEngagementsController {
+// "planned-engagements" is kept as an alias so the mobile app's existing integration keeps
+// working unchanged; all new code should call /projects.
+@Controller(['projects', 'planned-engagements'])
+export class ProjectsController {
   constructor(
-    private readonly plannedEngagementsService: PlannedEngagementsService,
+    private readonly projectsService: ProjectsService,
     private readonly accessScope: AccessScopeService,
   ) {}
 
   @Get()
-  @RequirePermission('planned-engagements:view')
+  @RequirePermission('projects:view')
   async findAll(@CurrentUser() user: AuthenticatedUser) {
-    return this.plannedEngagementsService.findAll(
-      await this.accessScope.plannedEngagements(user.sub),
+    return this.projectsService.findAll(
+      await this.accessScope.projects(user.sub),
     );
   }
 
   @Get('by-annual-plan/:annualPlanId')
-  @RequirePermission('planned-engagements:view')
+  @RequirePermission('projects:view')
   async findByAnnualPlan(
     @Param('annualPlanId') annualPlanId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.plannedEngagementsService.findByAnnualPlan(
+    return this.projectsService.findByAnnualPlan(
       annualPlanId,
-      await this.accessScope.plannedEngagements(user.sub),
+      await this.accessScope.projects(user.sub),
     );
   }
 
   @Post()
-  @RequirePermission('planned-engagements:create')
+  @RequirePermission('projects:create')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'CREATE_PLANNED_ENGAGEMENT',
-    details: `Created OE Plan "${req.body.topic}" (No: ${req.body.no})`,
+    action: 'CREATE_PROJECT',
+    details: `Created Project "${req.body.projectName}" (No: ${req.body.no})`,
   }))
   async create(
-    @Body() dto: CreatePlannedEngagementDto,
+    @Body() dto: CreateProjectDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     await this.accessScope.assertVisible(
@@ -65,7 +67,7 @@ export class PlannedEngagementsController {
       user.sub,
     );
     await this.accessScope.assertDepartmentInScope(dto.departmentId, user.sub);
-    return this.plannedEngagementsService.create(
+    return this.projectsService.create(
       dto.annualPlanId,
       dto.no,
       dto.projectName,
@@ -82,20 +84,20 @@ export class PlannedEngagementsController {
   }
 
   @Patch(':id')
-  @RequirePermission('planned-engagements:update')
+  @RequirePermission('projects:update')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'UPDATE_PLANNED_ENGAGEMENT',
-    details: `Updated OE Plan ID: ${req.params.id}`,
+    action: 'UPDATE_PROJECT',
+    details: `Updated Project ID: ${req.params.id}`,
   }))
   async update(
     @Param('id') id: string,
-    @Body() dto: UpdatePlannedEngagementDto,
+    @Body() dto: UpdateProjectDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.accessScope.assertVisible('plannedEngagement', id, user.sub);
+    await this.accessScope.assertVisible('project', id, user.sub);
     await this.accessScope.assertDepartmentInScope(dto.departmentId, user.sub);
-    return this.plannedEngagementsService.update(
+    return this.projectsService.update(
       id,
       dto.projectName,
       dto.departmentId,
@@ -111,17 +113,17 @@ export class PlannedEngagementsController {
   }
 
   @Delete(':id')
-  @RequirePermission('planned-engagements:delete')
+  @RequirePermission('projects:delete')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'DELETE_PLANNED_ENGAGEMENT',
-    details: `Deleted OE Plan ID: ${req.params.id}`,
+    action: 'DELETE_PROJECT',
+    details: `Deleted Project ID: ${req.params.id}`,
   }))
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.accessScope.assertVisible('plannedEngagement', id, user.sub);
-    return this.plannedEngagementsService.remove(id);
+    await this.accessScope.assertVisible('project', id, user.sub);
+    return this.projectsService.remove(id);
   }
 }

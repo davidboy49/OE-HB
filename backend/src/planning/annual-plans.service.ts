@@ -121,9 +121,9 @@ export class AnnualPlansService {
 
   /** Mirrors dbService.getApprovedTopicCounts: occurrence count per topic across APPROVED annual plans. */
   async getApprovedTopicCounts(
-    projectScope: Prisma.PlannedEngagementWhereInput = {},
+    projectScope: Prisma.ProjectWhereInput = {},
   ): Promise<Record<string, number>> {
-    const approvedPlans = await this.prisma.plannedEngagement.findMany({
+    const approvedPlans = await this.prisma.project.findMany({
       where: {
         annualPlan: {
           status: 'APPROVED',

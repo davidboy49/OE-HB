@@ -5,9 +5,12 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
-import { assertProjectReleased } from '../common/assert-project-status';
+import { assertOePlanReleased } from '../common/assert-oe-plan-status';
 
 export interface CreateOpenMeetingInput {
+  /** The Individual OE Plan this meeting belongs to. Called `projectId` in the API for
+   * backward compatibility with existing clients - it is not a Project (see Prisma's
+   * `oePlanId`, which is what it is actually stored as). */
   projectId: string;
   departments: string;
   address: string;
@@ -65,12 +68,17 @@ export const ALLOWED_MEETING_STATUS_TRANSITIONS: Record<string, string[]> = {
 export class MeetingsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * `projectId`/`projectName`/`projectCode` are kept as the API's field names for backward
+   * compatibility, even though they describe the parent Individual OE Plan (`oePlanId` in the
+   * database), not a Project.
+   */
   private toDto(m: any): any {
     return {
       id: m.id,
-      projectId: m.projectId,
-      projectName: m.project?.name,
-      projectCode: m.project?.code,
+      projectId: m.oePlanId,
+      projectName: m.oePlan?.name,
+      projectCode: m.oePlan?.code,
       departmentId: m.departmentId,
       departments: m.departments,
       address: m.address,
@@ -100,19 +108,20 @@ export class MeetingsService {
   async findAll(visibleTo: Prisma.OpenMeetingWhereInput = {}): Promise<any[]> {
     const meetings = await this.prisma.openMeeting.findMany({
       where: { isDeleted: false, ...visibleTo },
-      include: { project: true },
+      include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
     return meetings.map((m) => this.toDto(m));
   }
 
+  /** `oePlanId` is the Individual OE Plan; called `projectId` at the API boundary. */
   async findByProject(
-    projectId: string,
+    oePlanId: string,
     visibleTo: Prisma.OpenMeetingWhereInput = {},
   ): Promise<any[]> {
     const meetings = await this.prisma.openMeeting.findMany({
-      where: { projectId, isDeleted: false, ...visibleTo },
-      include: { project: true },
+      where: { oePlanId, isDeleted: false, ...visibleTo },
+      include: { oePlan: true },
       orderBy: { createdAt: 'asc' },
     });
     return meetings.map((m) => this.toDto(m));
@@ -121,7 +130,7 @@ export class MeetingsService {
   async findOne(id: string): Promise<any | null> {
     const m = await this.prisma.openMeeting.findUnique({
       where: { id },
-      include: { project: true },
+      include: { oePlan: true },
     });
     if (!m || m.isDeleted) return null;
     return this.toDto(m);
@@ -129,18 +138,18 @@ export class MeetingsService {
 
   /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
   async create(data: CreateOpenMeetingInput, actorName: string): Promise<any> {
-    await assertProjectReleased(this.prisma, data.projectId);
-    // The department is fixed by the project (one project = one department), never
+    await assertOePlanReleased(this.prisma, data.projectId);
+    // The department is fixed by the OE Plan's Project (one Project = one department), never
     // taken from the client.
-    const project = await this.prisma.oePlan.findUnique({
+    const oePlan = await this.prisma.oePlan.findUnique({
       where: { id: data.projectId },
-      include: { plannedEngagement: true },
+      include: { project: true },
     });
     const m = await this.prisma.openMeeting.create({
       data: {
-        projectId: data.projectId,
-        departmentId: project?.plannedEngagement?.departmentId ?? null,
-        departments: project?.plannedEngagement?.topic ?? data.departments,
+        oePlanId: data.projectId,
+        departmentId: oePlan?.project?.departmentId ?? null,
+        departments: oePlan?.project?.topic ?? data.departments,
         address: data.address,
         visitNumber: data.visitNumber,
         actualVisitDate: data.actualVisitDate,
@@ -158,7 +167,7 @@ export class MeetingsService {
         ownerName: actorName,
         lastModifiedBy: actorName,
       },
-      include: { project: true },
+      include: { oePlan: true },
     });
     return this.findOne(m.id);
   }
@@ -191,7 +200,7 @@ export class MeetingsService {
     const m = await this.prisma.openMeeting.update({
       where: { id },
       data: updateData,
-      include: { project: true },
+      include: { oePlan: true },
     });
     return this.findOne(m.id);
   }

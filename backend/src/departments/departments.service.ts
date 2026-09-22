@@ -71,7 +71,7 @@ export class DepartmentsService {
       });
       // Projects and meetings carry the department/BU names as text for display -
       // keep them in step when either changes.
-      await this.prisma.plannedEngagement.updateMany({
+      await this.prisma.project.updateMany({
         where: { departmentId: id },
         data: { topic: d.name, bu: d.businessUnit?.name ?? '' },
       });

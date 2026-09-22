@@ -34,14 +34,18 @@ const METHOD_NAMES: Record<number, string> = {
   [RequestMethod.HEAD]: 'HEAD',
 };
 
-const joinPath = (...parts: Array<string | string[] | undefined>) =>
+const joinPath = (...parts: Array<string | undefined>) =>
   '/' +
   parts
-    .flatMap((p) => (Array.isArray(p) ? p : [p]))
     .filter((p): p is string => typeof p === 'string' && p !== '')
     .map((p) => p.replace(/^\/+|\/+$/g, ''))
     .filter(Boolean)
     .join('/');
+
+/** A controller or handler path decorator can hold one path or several (registers one route
+ * per entry) - normalise to a list, keeping a lone `undefined` as "no path segment here". */
+const asList = (v: string | string[] | undefined): (string | undefined)[] =>
+  v === undefined ? [undefined] : Array.isArray(v) ? v : [v];
 
 /**
  * Lists every HTTP route of the given controller classes with the way it is protected, read
@@ -78,21 +82,28 @@ export function inventoryRoutes(
       const routePath = Reflect.getMetadata(PATH_METADATA, handler) as
         string | string[] | undefined;
 
-      routes.push({
-        controller: ctrl.name,
-        handler: name,
-        method: METHOD_NAMES[method] ?? String(method),
-        path: joinPath(basePath, routePath),
-        access: isPublic
-          ? 'PUBLIC'
-          : permission
-            ? 'PERMISSION'
-            : isAuthenticated
-              ? 'AUTHENTICATED'
-              : 'UNDECLARED',
-        permission: permission ?? undefined,
-        dynamic: dynamicKeys ? true : undefined,
-      });
+      // A controller (or, rarely, a handler) with several paths registers one real route per
+      // path - e.g. @Controller(['projects', 'planned-engagements']) is two routes sharing one
+      // handler, not one route with a nonsense combined path.
+      for (const base of asList(basePath)) {
+        for (const route of asList(routePath)) {
+          routes.push({
+            controller: ctrl.name,
+            handler: name,
+            method: METHOD_NAMES[method] ?? String(method),
+            path: joinPath(base, route),
+            access: isPublic
+              ? 'PUBLIC'
+              : permission
+                ? 'PERMISSION'
+                : isAuthenticated
+                  ? 'AUTHENTICATED'
+                  : 'UNDECLARED',
+            permission: permission ?? undefined,
+            dynamic: dynamicKeys ? true : undefined,
+          });
+        }
+      }
     }
   }
 

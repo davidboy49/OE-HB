@@ -59,7 +59,7 @@ export class OePlansService {
             ...(read ? (read.meetings ?? NOTHING) : {}),
           },
         },
-        plannedEngagement: true,
+        project: true,
       },
       orderBy: { code: 'desc' },
       // This DB is remote (~200ms/round-trip); the default "query" strategy issues
@@ -93,9 +93,9 @@ export class OePlansService {
       workflowStage: p.workflowStage as any,
       createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
-      departments: p.plannedEngagement?.topic || p.departments,
+      departments: p.project?.topic || p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      plannedEngagementId: p.plannedEngagementId || undefined,
+      projectId: p.projectId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
@@ -143,7 +143,7 @@ export class OePlansService {
         })),
       openMeetings: p.openMeetings.map((m) => ({
         id: m.id,
-        projectId: m.projectId,
+        projectId: m.oePlanId, // API field name kept for backward compatibility; means the OE Plan
         departments: m.departments,
         address: m.address,
         visitNumber: m.visitNumber,
@@ -164,15 +164,15 @@ export class OePlansService {
     }));
   }
 
-  /** A Planned Engagement can back at most one Individual OE Plan. */
-  private async ensurePlannedEngagementAvailable(
-    plannedEngagementId: string,
-    excludeProjectId?: string,
+  /** A Project can back at most one Individual OE Plan. */
+  private async ensureProjectAvailable(
+    projectId: string,
+    excludeOePlanId?: string,
   ): Promise<void> {
     const existing = await this.prisma.oePlan.findFirst({
       where: {
-        plannedEngagementId,
-        ...(excludeProjectId ? { id: { not: excludeProjectId } } : {}),
+        projectId,
+        ...(excludeOePlanId ? { id: { not: excludeOePlanId } } : {}),
       },
     });
     if (existing) {
@@ -193,7 +193,7 @@ export class OePlansService {
     leaderId: string | null,
     departments: string = '',
     annualPlanId: string | null = null,
-    plannedEngagementId: string | null = null,
+    projectId: string | null = null,
     createdBy: string = '',
   ): Promise<OePlan> {
     let normalizedCode = (code || '').trim().toUpperCase();
@@ -213,24 +213,22 @@ export class OePlansService {
 
     let inheritedObjectives = '';
 
-    if (plannedEngagementId) {
-      const parentPlannedEngagement =
-        await this.prisma.plannedEngagement.findUnique({
-          where: { id: plannedEngagementId },
-          include: { annualPlan: true },
-        });
-      if (parentPlannedEngagement?.annualPlan?.status !== 'APPROVED') {
+    if (projectId) {
+      const parentProject = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: { annualPlan: true },
+      });
+      if (parentProject?.annualPlan?.status !== 'APPROVED') {
         throw new BadRequestException(
           'The parent Annual Plan must be APPROVED before an Individual OE Plan can be created under it.',
         );
       }
-      await this.ensurePlannedEngagementAvailable(plannedEngagementId);
-      // Objectives are inherited from the Planned Engagement as plain text (the
-      // editor shows them read-only, never entered independently). Scope is NOT
-      // copied here: OePlan.scope holds a { inactiveIds, extraItems } JSON
-      // override on top of the Planned Engagement's scope, not the scope text
-      // itself - see ScopeOverride in planning-client.tsx.
-      inheritedObjectives = parentPlannedEngagement.objectives || '';
+      await this.ensureProjectAvailable(projectId);
+      // Objectives are inherited from the Project as plain text (the editor shows them
+      // read-only, never entered independently). Scope is NOT copied here: OePlan.scope
+      // holds a { inactiveIds, extraItems } JSON override on top of the Project's scope,
+      // not the scope text itself - see ScopeOverride in planning-client.tsx.
+      inheritedObjectives = parentProject.objectives || '';
     }
 
     const p = await this.prisma.oePlan.create({
@@ -249,7 +247,7 @@ export class OePlansService {
         deptPicIds: '',
         departments,
         annualPlanId,
-        plannedEngagementId,
+        projectId,
         objectives: inheritedObjectives,
         riskProcess: '',
         riskClass: '',
@@ -287,7 +285,7 @@ export class OePlansService {
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      plannedEngagementId: p.plannedEngagementId || undefined,
+      projectId: p.projectId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
@@ -389,11 +387,8 @@ export class OePlansService {
       };
     }
 
-    if (updates.plannedEngagementId) {
-      await this.ensurePlannedEngagementAvailable(
-        updates.plannedEngagementId,
-        id,
-      );
+    if (updates.projectId) {
+      await this.ensureProjectAvailable(updates.projectId, id);
     }
 
     const p = await this.prisma.oePlan.update({
@@ -421,7 +416,7 @@ export class OePlansService {
         opExTimeline: updates.opExTimeline,
         approvals: updates.approvals,
         annualPlanId: updates.annualPlanId,
-        plannedEngagementId: updates.plannedEngagementId,
+        projectId: updates.projectId,
         members: memberConnections,
       },
       include: {
@@ -455,7 +450,7 @@ export class OePlansService {
       deptPicIds: p.deptPicIds,
       departments: p.departments,
       annualPlanId: p.annualPlanId || undefined,
-      plannedEngagementId: p.plannedEngagementId || undefined,
+      projectId: p.projectId || undefined,
       scope: p.scope,
       planningDetails: p.planningDetails,
       startDate: p.startDate.toISOString().split('T')[0],
@@ -501,7 +496,7 @@ export class OePlansService {
       })),
       openMeetings: finalOpenMeetings.map((m) => ({
         id: m.id,
-        projectId: m.projectId,
+        projectId: m.oePlanId, // API field name kept for backward compatibility; means the OE Plan
         departments: m.departments,
         address: m.address,
         visitNumber: m.visitNumber,

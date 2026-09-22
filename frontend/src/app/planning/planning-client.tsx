@@ -37,7 +37,7 @@ import {
   Unlock,
   Link
 } from "lucide-react";
-import type { OePlan, User, ScheduleRow, Department, AnnualPlan, PlannedEngagement, PlanItem } from "@oeportal/shared";
+import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanItem } from "@oeportal/shared";
 import { parsePlanItems, serializePlanItems } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
@@ -72,7 +72,7 @@ interface PlanningClientProps {
   users: User[];
   departments: Department[];
   annualPlans: AnnualPlan[];
-  plannedEngagements: PlannedEngagement[];
+  plannedEngagements: Project[];
   currentUser: User;
 }
 
@@ -390,7 +390,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (editName !== selectedProject.name) return true;
     if (editStatus !== selectedProject.status) return true;
     if (editAnnualPlanId !== (selectedProject.annualPlanId || "")) return true;
-    if (editPlannedEngagementId !== (selectedProject.plannedEngagementId || "")) return true;
+    if (editPlannedEngagementId !== (selectedProject.projectId || "")) return true;
     
     const prevDepartments = selectedProject.departments ? selectedProject.departments.split(",").map(s => s.trim()).filter(Boolean) : [];
     if (editDepartments.length !== prevDepartments.length || !editDepartments.every(d => prevDepartments.includes(d))) return true;
@@ -494,7 +494,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setSelectedProjectId(proj.id);
     // Project Name mirrors the linked Project's Project Name; fall
     // back to whatever name is already stored for legacy/unlinked plans.
-    const linkedAp = proj.plannedEngagementId ? plannedEngagements?.find(ap => ap.id === proj.plannedEngagementId) : null;
+    const linkedAp = proj.projectId ? plannedEngagements?.find(ap => ap.id === proj.projectId) : null;
     setEditName(linkedAp?.projectName?.trim() || proj.name);
     setEditStatus(proj.status);
 
@@ -514,7 +514,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
       return matched ? matched.name : clean;
     }) : []);
     setEditAnnualPlanId(proj.annualPlanId || "");
-    setEditPlannedEngagementId(proj.plannedEngagementId || "");
+    setEditPlannedEngagementId(proj.projectId || "");
 
     // Load scoping values from database fields, with default fallback templates if null/empty
     setEditRiskClass(proj.riskClass || "");
@@ -624,7 +624,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          plannedEngagementId: editPlannedEngagementId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -684,7 +684,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          plannedEngagementId: editPlannedEngagementId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -761,7 +761,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          plannedEngagementId: editPlannedEngagementId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -943,7 +943,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         leaderId: leaderIdParam,
         departments: deptVal,
         annualPlanId: newAnnualPlanId || null,
-        plannedEngagementId: newPlannedEngagementId || null
+        projectId: newPlannedEngagementId || null
       })
     });
 
@@ -1117,8 +1117,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const canReopenProject = RBAC.can(currentUser, "oe-plans:reopen");
   const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
   const leaders = users.filter(u => u.role === "OE_LEADER" || u.role === "ADMIN");
-  const linkedPlannedEngagement = selectedProject?.plannedEngagementId
-    ? plannedEngagements?.find(ap => ap.id === selectedProject.plannedEngagementId)
+  const linkedPlannedEngagement = selectedProject?.projectId
+    ? plannedEngagements?.find(ap => ap.id === selectedProject.projectId)
     : null;
 
   const statusOptions = [
@@ -1839,7 +1839,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         const meetings = selectedProject.openMeetings?.filter(m => !m.isDeleted) || [];
                         if (meetings.length === 0) return null;
                         return meetings.map(m => {
-                          const ap = selectedProject.plannedEngagementId ? plannedEngagements?.find(a => a.id === selectedProject.plannedEngagementId) : null;
+                          const ap = selectedProject.projectId ? plannedEngagements?.find(a => a.id === selectedProject.projectId) : null;
                           const deptDisplay = ap ? `${m.departments} - ${ap.version || "V1"}` : m.departments;
                           return (
                             <div key={m.id} className="flex items-center gap-1.5">

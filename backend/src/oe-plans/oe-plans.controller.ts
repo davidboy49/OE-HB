@@ -41,18 +41,14 @@ export class OePlansController {
   @RequirePermission('oe-plans:create')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req, result) => ({
-    action: 'CREATE_PROJECT',
-    details: `Created project "${req.body.name}" (Code: ${result.code})`,
+    action: 'CREATE_OE_PLAN',
+    details: `Created Individual OE Plan "${req.body.name}" (Code: ${result.code})`,
   }))
   async create(
     @Body() dto: CreateOePlanDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.accessScope.assertVisible(
-      'plannedEngagement',
-      dto.plannedEngagementId,
-      user.sub,
-    );
+    await this.accessScope.assertVisible('project', dto.projectId, user.sub);
     return this.oePlansService.create(
       dto.name,
       dto.code ?? 'AUTO',
@@ -64,7 +60,7 @@ export class OePlansController {
       dto.leaderId ?? null,
       dto.departments ?? '',
       dto.annualPlanId ?? null,
-      dto.plannedEngagementId ?? null,
+      dto.projectId ?? null,
       user.name,
     );
   }
@@ -85,8 +81,8 @@ export class OePlansController {
   )
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'UPDATE_PROJECT',
-    details: `Updated project ID: ${req.params.id}`,
+    action: 'UPDATE_OE_PLAN',
+    details: `Updated Individual OE Plan ID: ${req.params.id}`,
   }))
   async update(
     @Param('id') id: string,
@@ -102,8 +98,8 @@ export class OePlansController {
   @RequirePermission('oe-plans:delete')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'DELETE_PROJECT',
-    details: `Deleted project ID: ${req.params.id}`,
+    action: 'DELETE_OE_PLAN',
+    details: `Deleted Individual OE Plan ID: ${req.params.id}`,
   }))
   async remove(
     @Param('id') id: string,

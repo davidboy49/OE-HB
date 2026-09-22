@@ -264,7 +264,7 @@
       "items": [
         "JwtAuthGuard, then PermissionsGuard, on every route",
         "Grants re-read from the database each request",
-        "Keys such as oe-plans:create and planned-engagements:update"
+        "Keys such as oe-plans:create and projects:update"
       ]
     },
     {

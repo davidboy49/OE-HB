@@ -25,7 +25,7 @@ import type {
   ExecutionSchedule,
   OpenMeeting,
   OePlan,
-  PlannedEngagement,
+  Project,
   User,
   Department,
   ScheduleRow
@@ -104,7 +104,7 @@ interface ScheduleClientProps {
   projects: OePlan[];
   users: User[];
   departments: Department[];
-  plannedEngagements?: PlannedEngagement[];
+  plannedEngagements?: Project[];
   currentUser: User | null;
 }
 
@@ -139,14 +139,14 @@ export default function ScheduleClient({
   // "V2" already shown as the OE Plan Department's version elsewhere) - not a
   // count recomputed from this project's own released execution schedules.
   // Same department-resolution fallback as meetings-client.tsx's
-  // getDepartmentWithVersion: explicit plannedEngagementId match, then annualPlanId +
+  // getDepartmentWithVersion: explicit projectId match, then annualPlanId +
   // topic match, then a topic-only match across all Planned Engagements.
   const resolveDepartmentVersion = (dept: string, proj: OePlan | null | undefined): string => {
     if (!dept) return "V1";
     const cleanDept = dept.trim().toLowerCase();
 
-    if (proj?.plannedEngagementId) {
-      const ap = plannedEngagements.find(a => a.id === proj.plannedEngagementId);
+    if (proj?.projectId) {
+      const ap = plannedEngagements.find(a => a.id === proj.projectId);
       if (ap && ap.topic.toLowerCase() === cleanDept) return ap.version || "V1";
     }
     if (proj?.annualPlanId) {
@@ -330,8 +330,8 @@ export default function ScheduleClient({
 
     // Resolve inherited objectives/scope from the linked Planned Engagement -
     // OePlan.objectives/scope alone can be empty or stale.
-    const linkedPlannedEngagement = project.plannedEngagementId
-      ? plannedEngagements.find(ap => ap.id === project.plannedEngagementId)
+    const linkedPlannedEngagement = project.projectId
+      ? plannedEngagements.find(ap => ap.id === project.projectId)
       : null;
     const inherited = resolveInheritedPlanContent(project, linkedPlannedEngagement);
     setObjectives(inherited.objectives);

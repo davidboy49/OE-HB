@@ -14,22 +14,17 @@ import {
   findingWhere,
   meetingWhere,
   oePlanWhere,
-  plannedEngagementWhere,
+  projectWhere,
   scheduleWhere,
 } from './access-scope';
 
 /** The record types that carry a scope, and the view permission that governs each. */
 export type ScopedKind =
-  | 'annualPlan'
-  | 'plannedEngagement'
-  | 'oePlan'
-  | 'meeting'
-  | 'schedule'
-  | 'finding';
+  'annualPlan' | 'project' | 'oePlan' | 'meeting' | 'schedule' | 'finding';
 
 const VIEW_KEY: Record<ScopedKind, string> = {
   annualPlan: 'annual-plans:view',
-  plannedEngagement: 'planned-engagements:view',
+  project: 'projects:view',
   oePlan: 'oe-plans:view',
   meeting: 'meetings:view',
   schedule: 'execution-schedules:view',
@@ -113,11 +108,9 @@ export class AccessScopeService {
     );
   }
 
-  async plannedEngagements(
-    userId: string,
-  ): Promise<Prisma.PlannedEngagementWhereInput> {
-    return plannedEngagementWhere(
-      await this.scopeOf(userId, 'plannedEngagement'),
+  async projects(userId: string): Promise<Prisma.ProjectWhereInput> {
+    return projectWhere(
+      await this.scopeOf(userId, 'project'),
       await this.context(userId),
     );
   }
@@ -158,7 +151,7 @@ export class AccessScopeService {
     departmentId: string,
     userId: string,
   ): Promise<void> {
-    const scope = await this.scopeOf(userId, 'plannedEngagement');
+    const scope = await this.scopeOf(userId, 'project');
     if (scope === 'ALL') return;
     const dept = await this.prisma.department.findUnique({
       where: { id: departmentId },
@@ -194,9 +187,9 @@ export class AccessScopeService {
           where: { id, ...annualPlanWhere(scope, ctx) },
         });
         break;
-      case 'plannedEngagement':
-        visible = await this.prisma.plannedEngagement.count({
-          where: { id, ...plannedEngagementWhere(scope, ctx) },
+      case 'project':
+        visible = await this.prisma.project.count({
+          where: { id, ...projectWhere(scope, ctx) },
         });
         break;
       case 'oePlan':

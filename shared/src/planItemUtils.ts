@@ -70,7 +70,7 @@ export interface ScopeOverride {
 /**
  * Parses an Individual OE Plan's OePlan.scope field, which - unlike
  * objectives - does NOT hold scope text directly. Scope lives on the Planned
- * Engagement (PlannedEngagement.scope); OePlan.scope only stores a delta on top
+ * Engagement (Project.scope); OePlan.scope only stores a delta on top
  * of it: which inherited item ids are deactivated for this plan, plus any
  * extra items added locally. See ScopeOverride usage in planning-client.tsx.
  */
@@ -111,20 +111,20 @@ export function resolveEffectiveScopeItems(
 
 /**
  * Resolves an Individual OE Plan's actual inherited objectives + scope text
- * from its linked Planned Engagement, falling back to whatever is stored
+ * from its linked Project, falling back to whatever is stored
  * directly on the OePlan (e.g. a manually-created plan with no linked
- * Planned Engagement, or legacy data). Always prefer this over reading
+ * Project, or legacy data). Always prefer this over reading
  * OePlan.objectives/scope directly: objectives can go stale if the
- * linked Planned Engagement is edited or swapped after this plan was
+ * linked Project is edited or swapped after this plan was
  * created, and scope is a { inactiveIds, extraItems } override, not text -
  * see resolveEffectiveScopeItems.
  */
 export function resolveInheritedPlanContent(
   oePlan: { objectives?: string; scope?: string },
-  linkedPlannedEngagement: { objectives?: string; scope?: string } | null | undefined,
+  linkedProject: { objectives?: string; scope?: string } | null | undefined,
 ): { objectives: string; scope: string } {
-  const objectives = linkedPlannedEngagement?.objectives || oePlan.objectives || '';
-  const scopeItems = resolveEffectiveScopeItems(linkedPlannedEngagement?.scope, oePlan.scope);
+  const objectives = linkedProject?.objectives || oePlan.objectives || '';
+  const scopeItems = resolveEffectiveScopeItems(linkedProject?.scope, oePlan.scope);
   const scope = scopeItems.length > 0 ? serializePlanItems(scopeItems) : '';
   return { objectives, scope };
 }

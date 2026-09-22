@@ -1,6 +1,6 @@
 import { apiFetch, fetchOr } from "@/lib/apiClient";
 import { guardPage } from "@/lib/page-access";
-import type { OePlan, PlannedEngagement, Department, ExecutionSchedule, User } from "@oeportal/shared";
+import type { OePlan, Project, Department, ExecutionSchedule, User } from "@oeportal/shared";
 import ScheduleClient from "./schedule-client";
 
 export default async function SchedulePage() {
@@ -11,7 +11,7 @@ export default async function SchedulePage() {
     apiFetch<ExecutionSchedule[]>("/execution-schedules"),
     fetchOr<User[]>("/users", []),
     fetchOr<Department[]>("/departments", []),
-    fetchOr<PlannedEngagement[]>("/planned-engagements", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (

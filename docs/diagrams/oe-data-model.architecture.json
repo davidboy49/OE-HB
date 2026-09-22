@@ -38,7 +38,7 @@
     {
       "id": "engagement",
       "type": "database",
-      "label": "PlannedEngagement",
+      "label": "Project",
       "sublabel": "scope required",
       "pos": [
         290,

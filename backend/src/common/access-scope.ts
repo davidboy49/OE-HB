@@ -5,8 +5,8 @@ import type { AccessScope } from './permissions';
  * Pure translation of "how far does this grant reach?" into database filters. No database or
  * framework code lives here so every rule can be unit-tested.
  *
- * Everything hangs off one chain:  Annual Plan -> Project (PlannedEngagement, ONE department,
- * whose department belongs to ONE Business Unit) -> OE Plan -> meetings / schedules -> findings.
+ * Everything hangs off one chain: Annual Plan -> Project (ONE department, whose department
+ * belongs to ONE Business Unit) -> OE Plan -> meetings / schedules -> findings.
  */
 export interface ViewerContext {
   id: string;
@@ -18,10 +18,10 @@ export interface ViewerContext {
 /** Matches no rows at all: what a scope resolves to when the viewer lacks what it needs. */
 const NOTHING = { id: { in: [] as string[] } };
 
-export function plannedEngagementWhere(
+export function projectWhere(
   scope: AccessScope,
   ctx: ViewerContext,
-): Prisma.PlannedEngagementWhereInput {
+): Prisma.ProjectWhereInput {
   switch (scope) {
     case 'ALL':
       return {};
@@ -47,14 +47,14 @@ export function oePlanWhere(
     case 'BU':
       return ctx.businessUnitId
         ? {
-            plannedEngagement: {
+            project: {
               department: { businessUnitId: ctx.businessUnitId },
             },
           }
         : NOTHING;
     case 'DEPARTMENT':
       return ctx.departmentId
-        ? { plannedEngagement: { departmentId: ctx.departmentId } }
+        ? { project: { departmentId: ctx.departmentId } }
         : NOTHING;
     case 'MEMBER':
       return {
@@ -81,7 +81,7 @@ export function annualPlanWhere(
   return {
     OR: [
       { createdBy: ctx.name },
-      { plannedEngagements: { some: plannedEngagementWhere(scope, ctx) } },
+      { projects: { some: projectWhere(scope, ctx) } },
     ],
   };
 }
@@ -110,14 +110,14 @@ export function meetingWhere(
   scope: AccessScope,
   ctx: ViewerContext,
 ): Prisma.OpenMeetingWhereInput {
-  return scope === 'ALL' ? {} : { project: oePlanWhere(scope, ctx) };
+  return scope === 'ALL' ? {} : { oePlan: oePlanWhere(scope, ctx) };
 }
 
 export function scheduleWhere(
   scope: AccessScope,
   ctx: ViewerContext,
 ): Prisma.ExecutionScheduleWhereInput {
-  return scope === 'ALL' ? {} : { project: oePlanWhere(scope, ctx) };
+  return scope === 'ALL' ? {} : { oePlan: oePlanWhere(scope, ctx) };
 }
 
 export function findingWhere(
@@ -126,5 +126,5 @@ export function findingWhere(
 ): Prisma.FindingWhereInput {
   return scope === 'ALL'
     ? {}
-    : { executionSchedule: { project: oePlanWhere(scope, ctx) } };
+    : { executionSchedule: { oePlan: oePlanWhere(scope, ctx) } };
 }

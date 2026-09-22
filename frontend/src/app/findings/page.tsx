@@ -1,6 +1,6 @@
 import { apiFetch, fetchOr } from "@/lib/apiClient";
 import { guardPage } from "@/lib/page-access";
-import type { OePlan, PlannedEngagement, ExecutionSchedule, User, Department } from "@oeportal/shared";
+import type { OePlan, Project, ExecutionSchedule, User, Department } from "@oeportal/shared";
 import FindingsClient from "./findings-client";
 
 export default async function FindingsPage() {
@@ -11,7 +11,7 @@ export default async function FindingsPage() {
     apiFetch<ExecutionSchedule[]>("/execution-schedules"),
     fetchOr<User[]>("/users", []),
     fetchOr<Department[]>("/departments", []),
-    fetchOr<PlannedEngagement[]>("/planned-engagements", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   // Finding reports are execution schedules with language="finding"

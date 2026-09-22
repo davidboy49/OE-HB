@@ -52,7 +52,7 @@ export class AnnualPlansController {
   @RequirePermission('annual-plans:view')
   async getApprovedTopicCounts(@CurrentUser() user: AuthenticatedUser) {
     return this.annualPlansService.getApprovedTopicCounts(
-      await this.accessScope.plannedEngagements(user.sub),
+      await this.accessScope.projects(user.sub),
     );
   }
 

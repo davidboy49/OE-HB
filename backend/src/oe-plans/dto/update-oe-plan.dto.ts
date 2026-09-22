@@ -129,7 +129,7 @@ export class UpdateOePlanDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  plannedEngagementId?: string | null;
+  projectId?: string | null;
 
   @ApiPropertyOptional({
     type: [String],

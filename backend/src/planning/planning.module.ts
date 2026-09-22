@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AnnualPlansService } from './annual-plans.service';
 import { AnnualPlansController } from './annual-plans.controller';
-import { PlannedEngagementsService } from './planned-engagements.service';
-import { PlannedEngagementsController } from './planned-engagements.controller';
+import { ProjectsService } from './projects.service';
+import { ProjectsController } from './projects.controller';
 
 @Module({
-  controllers: [AnnualPlansController, PlannedEngagementsController],
-  providers: [AnnualPlansService, PlannedEngagementsService],
-  exports: [AnnualPlansService, PlannedEngagementsService],
+  controllers: [AnnualPlansController, ProjectsController],
+  providers: [AnnualPlansService, ProjectsService],
+  exports: [AnnualPlansService, ProjectsService],
 })
 export class PlanningModule {}

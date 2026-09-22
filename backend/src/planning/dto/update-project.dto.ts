@@ -8,17 +8,7 @@ import {
   Min,
 } from 'class-validator';
 
-export class CreatePlannedEngagementDto {
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  annualPlanId!: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  no!: string;
-
+export class UpdateProjectDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -29,10 +19,10 @@ export class CreatePlannedEngagementDto {
   @IsNotEmpty()
   departmentId!: string;
 
-  @ApiPropertyOptional({ default: 'OE' })
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  type?: string;
+  @IsNotEmpty()
+  type!: string;
 
   @ApiProperty({ description: 'Comma-separated User IDs' })
   @IsString()
