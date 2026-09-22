@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import type { BusinessUnit } from '@auditdesk/shared';
+import type { BusinessUnit } from '@oeportal/shared';
 
 @Injectable()
 export class BusinessUnitsService {

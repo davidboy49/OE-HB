@@ -157,7 +157,7 @@ export function groupFindingAlerts(alerts: FindingAlertItem[]): GroupedFindingAl
       overallAlertType = "PENDING_RESOLUTION";
     }
 
-    const primaryFindingTitle = first.activity || "Audit Finding Document";
+    const primaryFindingTitle = first.activity || "OE Finding Document";
 
     grouped.push({
       scheduleId,

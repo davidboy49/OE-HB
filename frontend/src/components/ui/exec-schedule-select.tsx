@@ -2,11 +2,11 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
-import type { ExecutionSchedule as FindingReport, AuditProject } from "@auditdesk/shared";
+import type { ExecutionSchedule as FindingReport, OePlan } from "@oeportal/shared";
 
 interface ExecScheduleSelectProps {
   schedules: FindingReport[];
-  projects: AuditProject[];
+  projects: OePlan[];
   selectedExecScheduleId: string;
   onSelect: (scheduleId: string) => void;
   placeholder?: string;
@@ -67,7 +67,7 @@ export default function ExecScheduleSelect({
                 {selectedSchedule.projectCode || selectedProject?.code}
               </span>
               <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                {selectedProject?.name || "Unknown Audit Plan"}
+                {selectedProject?.name || "Unknown OE Plan"}
               </span>
               <span className="text-slate-550 dark:text-slate-400 shrink-0">
                 — {selectedSchedule.departments} ({selectedSchedule.actualVisitDate})
@@ -89,7 +89,7 @@ export default function ExecScheduleSelect({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search schedule, ID or Audit Plan..."
+                placeholder="Search schedule, ID or OE Plan..."
                 className="w-full bg-transparent border-none p-0 focus:outline-none text-xs text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
                 autoFocus
               />
@@ -129,11 +129,11 @@ export default function ExecScheduleSelect({
                         {s.projectCode || project?.code}
                       </span>
                       <span className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">
-                        {project?.name || "Unknown Audit Plan"}
+                        {project?.name || "Unknown OE Plan"}
                       </span>
                       <span className="text-slate-550 dark:text-slate-400 truncate font-medium">
                         — {s.departments} ({s.actualVisitDate})
-                        {isClosed && " - Audit Plan closed; reopen it first"}
+                        {isClosed && " - OE Plan closed; reopen it first"}
                       </span>
                     </div>
                     {isSelected && <Check className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />}

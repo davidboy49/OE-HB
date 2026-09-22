@@ -1,18 +1,17 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, ExecutionSchedule, User, Department } from "@auditdesk/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { OePlan, Project, ExecutionSchedule, User, Department } from "@oeportal/shared";
 import FindingsClient from "./findings-client";
 
 export default async function FindingsPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/findings");
 
-  const [projects, allSchedules, users, departments] = await Promise.all([
-    apiFetch<AuditProject[]>("/audit-projects"),
+  const [projects, allSchedules, users, departments, plannedEngagements] = await Promise.all([
+    fetchOr<OePlan[]>("/oe-plans", []),
     apiFetch<ExecutionSchedule[]>("/execution-schedules"),
-    apiFetch<User[]>("/users"),
-    apiFetch<Department[]>("/departments"),
+    fetchOr<User[]>("/users", []),
+    fetchOr<Department[]>("/departments", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   // Finding reports are execution schedules with language="finding"
@@ -30,6 +29,7 @@ export default async function FindingsPage() {
       projects={projects}
       users={users}
       departments={departments}
+      plannedEngagements={plannedEngagements}
       currentUser={currentUser}
     />
   );

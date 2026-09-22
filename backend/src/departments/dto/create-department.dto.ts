@@ -16,4 +16,9 @@ export class CreateDepartmentDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiProperty({ description: 'The Business Unit this department belongs to' })
+  @IsString()
+  @IsNotEmpty()
+  businessUnitId!: string;
 }

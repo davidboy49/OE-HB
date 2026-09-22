@@ -1,16 +1,10 @@
 import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import { redirect } from "next/navigation";
+import { guardPage } from "@/lib/page-access";
 import LogsClient from "./logs-client";
 
 export default async function LogsPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/logs");
 
-  // Restrict page access to ADMIN only
-  if (currentUser.role !== "ADMIN") {
-    redirect("/dashboard");
-  }
 
   const logs = await apiFetch<any[]>("/activity-logs");
 

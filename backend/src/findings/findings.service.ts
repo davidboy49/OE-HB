@@ -4,41 +4,65 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertProjectNotClosed } from '../common/assert-project-status';
-import type { Finding } from '@auditdesk/shared';
+import { assertOePlanNotClosed } from '../common/assert-oe-plan-status';
+import type { Finding } from '@oeportal/shared';
+import type { Prisma } from '../generated/prisma/client';
 
 const findingInclude = {
   executionSchedule: {
     include: {
-      project: true,
+      oePlan: true,
     },
   },
-  auditor: true,
+  member: true,
 } as const;
+
+/**
+ * `projectId`/`projectName` on the returned Finding are kept as the API's field names for
+ * backward compatibility, even though they describe the parent Individual OE Plan
+ * (`executionSchedule.oePlanId` in the database), not a Project.
+ */
+function toFinding(f: {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  severity: string;
+  recommendation: string;
+  executionScheduleId: string;
+  executionSchedule: { oePlanId: string; oePlan: { name: string } };
+  memberId: string;
+  member: { name: string };
+  createdAt: Date;
+}): Finding {
+  return {
+    id: f.id,
+    title: f.title,
+    description: f.description,
+    status: f.status as any,
+    severity: f.severity as any,
+    recommendation: f.recommendation,
+    executionScheduleId: f.executionScheduleId,
+    projectId: f.executionSchedule.oePlanId,
+    projectName: f.executionSchedule.oePlan.name,
+    memberId: f.memberId,
+    memberName: f.member.name,
+    createdAt: f.createdAt.toISOString(),
+  };
+}
 
 @Injectable()
 export class FindingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<Finding[]> {
+  /** `where` is the caller's view scope (see AccessScopeService). */
+  async findAll(where: Prisma.FindingWhereInput = {}): Promise<Finding[]> {
     const findings = await this.prisma.finding.findMany({
+      where,
       include: findingInclude,
       orderBy: { createdAt: 'desc' },
     });
-    return findings.map((f) => ({
-      id: f.id,
-      title: f.title,
-      description: f.description,
-      status: f.status as any,
-      severity: f.severity as any,
-      recommendation: f.recommendation,
-      executionScheduleId: f.executionScheduleId,
-      projectId: f.executionSchedule.projectId,
-      projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
-      createdAt: f.createdAt.toISOString(),
-    }));
+    return findings.map(toFinding);
   }
 
   async create(
@@ -48,7 +72,7 @@ export class FindingsService {
     status: any,
     recommendation: string,
     executionScheduleId: string,
-    auditorId: string,
+    memberId: string,
   ): Promise<Finding> {
     const sched = await this.prisma.executionSchedule.findUnique({
       where: { id: executionScheduleId },
@@ -61,7 +85,7 @@ export class FindingsService {
         'This Execution Schedule must be RELEASED before findings can be logged against it.',
       );
     }
-    await assertProjectNotClosed(this.prisma, sched.projectId);
+    await assertOePlanNotClosed(this.prisma, sched.oePlanId);
     const f = await this.prisma.finding.create({
       data: {
         title,
@@ -70,24 +94,11 @@ export class FindingsService {
         status,
         recommendation,
         executionScheduleId,
-        auditorId,
+        memberId,
       },
       include: findingInclude,
     });
-    return {
-      id: f.id,
-      title: f.title,
-      description: f.description,
-      status: f.status as any,
-      severity: f.severity as any,
-      recommendation: f.recommendation,
-      executionScheduleId: f.executionScheduleId,
-      projectId: f.executionSchedule.projectId,
-      projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
-      createdAt: f.createdAt.toISOString(),
-    };
+    return toFinding(f);
   }
 
   async updateStatus(id: string, status: any): Promise<Finding | null> {
@@ -96,20 +107,7 @@ export class FindingsService {
       data: { status },
       include: findingInclude,
     });
-    return {
-      id: f.id,
-      title: f.title,
-      description: f.description,
-      status: f.status as any,
-      severity: f.severity as any,
-      recommendation: f.recommendation,
-      executionScheduleId: f.executionScheduleId,
-      projectId: f.executionSchedule.projectId,
-      projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
-      createdAt: f.createdAt.toISOString(),
-    };
+    return toFinding(f);
   }
 
   async update(
@@ -127,19 +125,6 @@ export class FindingsService {
       data: updates,
       include: findingInclude,
     });
-    return {
-      id: f.id,
-      title: f.title,
-      description: f.description,
-      status: f.status as any,
-      severity: f.severity as any,
-      recommendation: f.recommendation,
-      executionScheduleId: f.executionScheduleId,
-      projectId: f.executionSchedule.projectId,
-      projectName: f.executionSchedule.project.name,
-      auditorId: f.auditorId,
-      auditorName: f.auditor.name,
-      createdAt: f.createdAt.toISOString(),
-    };
+    return toFinding(f);
   }
 }

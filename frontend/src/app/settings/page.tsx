@@ -1,15 +1,10 @@
-import { getCurrentUserServer } from "@/lib/auth";
+import { guardPage } from "@/lib/page-access";
 import { apiFetch } from "@/lib/apiClient";
-import { redirect } from "next/navigation";
 import SettingsClient from "./settings-client";
 
 export default async function SettingsPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/settings");
 
-  if (currentUser.role !== "ADMIN") {
-    redirect("/dashboard");
-  }
 
   const [smtpConfig, templates] = await Promise.all([
     apiFetch<any>("/notifications/smtp-config"),

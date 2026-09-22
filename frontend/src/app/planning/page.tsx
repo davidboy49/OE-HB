@@ -1,19 +1,17 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, User, Department, AnnualPlan, AuditPlan } from "@auditdesk/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { OePlan, User, Department, AnnualPlan, Project } from "@oeportal/shared";
 import PlanningClient from "./planning-client";
 
 export default async function PlanningPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/planning");
 
-  const [projects, users, departments, annualPlans, auditPlans] = await Promise.all([
-    apiFetch<AuditProject[]>("/audit-projects"),
-    apiFetch<User[]>("/users"), // For selecting OE Leader
-    apiFetch<Department[]>("/departments"), // For selecting Departments
-    apiFetch<AnnualPlan[]>("/annual-plans"),
-    apiFetch<AuditPlan[]>("/audit-plans"),
+  const [projects, users, departments, annualPlans, plannedEngagements] = await Promise.all([
+    apiFetch<OePlan[]>("/oe-plans"),
+    fetchOr<User[]>("/users", []), // For selecting OE Leader
+    fetchOr<Department[]>("/departments", []), // For selecting Departments
+    fetchOr<AnnualPlan[]>("/annual-plans", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (
@@ -22,7 +20,7 @@ export default async function PlanningPage() {
       users={users}
       departments={departments}
       annualPlans={annualPlans}
-      auditPlans={auditPlans}
+      plannedEngagements={plannedEngagements}
       currentUser={currentUser}
     />
   );

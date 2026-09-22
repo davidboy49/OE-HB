@@ -2,13 +2,13 @@
 
 import React from "react";
 import { Plus, Trash2, Tag, ChevronUp, ChevronDown } from "lucide-react";
-import type { AuditPlanItem } from "@auditdesk/shared";
+import type { PlanItem } from "@oeportal/shared";
 
 interface PlanItemEditorProps {
   sectionTitle: string;
-  items: AuditPlanItem[];
-  onChange: (items: AuditPlanItem[]) => void;
-  prefix: string; // e.g. "IAP-OBJ" or "IAP-ISCP"
+  items: PlanItem[];
+  onChange: (items: PlanItem[]) => void;
+  prefix: string; // e.g. "IOE-OBJ" or "IOE-SCP"
   editable?: boolean;
   placeholder?: string;
   addBtnText?: string;

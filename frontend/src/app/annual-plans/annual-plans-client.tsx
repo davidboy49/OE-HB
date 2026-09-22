@@ -12,13 +12,16 @@ import {
   Edit2,
   QrCode,
   CheckCircle,
+  CheckCircle2,
+  Circle,
+  FileText,
   XCircle,
   Send,
   Layers,
   ChevronRight
 } from "lucide-react";
-import type { User, AnnualPlan, AuditPlan, Department, BusinessUnit, AuditPlanItem } from "@auditdesk/shared";
-import { parsePlanItems, serializePlanItems } from "@auditdesk/shared";
+import type { User, AnnualPlan, Project, Department, BusinessUnit, PlanItem } from "@oeportal/shared";
+import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import QRCodeModal from "@/components/ui/qr-code-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
@@ -60,7 +63,7 @@ export default function AnnualPlansClient({
 
   // QR Modal States
   const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [qrModalData, setQrModalData] = useState<{ qrToken: string; projectTitle: string }>({ qrToken: "", projectTitle: "" });
+  const [qrModalData, setQrModalData] = useState<{ qrToken: string; planName: string; period: string }>({ qrToken: "", planName: "", period: "" });
   const [miniQrDataUrl, setMiniQrDataUrl] = useState("");
 
   // Feedback
@@ -70,34 +73,34 @@ export default function AnnualPlansClient({
   // twice before isSavingPlan reflects true - this ref guards re-entrancy synchronously.
   const isSavingPlanRef = useRef(false);
 
-  // Child Plan (Audit Plan) states
-  const [auditPlans, setAuditPlans] = useState<any[]>([]);
+  // Child Plan (OE Plan) states
+  const [plannedEngagements, setPlannedEngagements] = useState<any[]>([]);
   const [isChildModalOpen, setIsChildModalOpen] = useState(false);
   const [childModalMode, setChildModalMode] = useState<"create" | "edit">("create");
-  const [selectedAuditPlanId, setSelectedAuditPlanId] = useState<string | null>(null);
+  const [selectedPlannedEngagementId, setSelectedPlannedEngagementId] = useState<string | null>(null);
   const [approvedTopicCounts, setApprovedTopicCounts] = useState<Record<string, number>>({});
 
   // Child Plan fields
   const [apProjectName, setApProjectName] = useState("");
-  const [apTopic, setApTopic] = useState("");
-  const [apBu, setApBu] = useState("");
+  const [apBuId, setApBuId] = useState(""); // Business Unit picked first ...
+  const [apDepartmentId, setApDepartmentId] = useState(""); // ... then one of its departments
   const [apType, setApType] = useState("OE");
   const [apVersion, setApVersion] = useState("V1");
   const [apRevieweeIds, setApRevieweeIds] = useState<string[]>([]);
   const [apConductDate, setApConductDate] = useState("");
   const [apEndDate, setApEndDate] = useState("");
   const [apPurpose, setApPurpose] = useState("");
-  const [apObjectivesItems, setApObjectivesItems] = useState<AuditPlanItem[]>([]);
-  const [apScopeItems, setApScopeItems] = useState<AuditPlanItem[]>([]);
+  const [apObjectivesItems, setApObjectivesItems] = useState<PlanItem[]>([]);
+  const [apScopeItems, setApScopeItems] = useState<PlanItem[]>([]);
 
   const canCreatePlan = RBAC.can(currentUser, "annual-plans:create");
   const canUpdatePlan = RBAC.can(currentUser, "annual-plans:update");
   const canDeletePlan = RBAC.can(currentUser, "annual-plans:delete");
   const canSubmitPlan = RBAC.can(currentUser, "annual-plans:submit");
   const canApprovePlan = RBAC.can(currentUser, "annual-plans:approve");
-  const canCreateChildPlan = RBAC.can(currentUser, "audit-plans:create");
-  const canUpdateChildPlan = RBAC.can(currentUser, "audit-plans:update");
-  const canDeleteChildPlan = RBAC.can(currentUser, "audit-plans:delete");
+  const canCreateChildPlan = RBAC.can(currentUser, "projects:create");
+  const canUpdateChildPlan = RBAC.can(currentUser, "projects:update");
+  const canDeleteChildPlan = RBAC.can(currentUser, "projects:delete");
 
   const loadApprovedTopicCounts = () => {
     clientApi<Record<string, number>>("/annual-plans/approved-topic-counts").then(setApprovedTopicCounts).catch(console.error);
@@ -109,10 +112,10 @@ export default function AnnualPlansClient({
 
   useEffect(() => {
     if (selectedPlanId && modalMode === "edit") {
-      clientApi<AuditPlan[]>(`/audit-plans/by-annual-plan/${selectedPlanId}`).then(setAuditPlans).catch(console.error);
+      clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`).then(setPlannedEngagements).catch(console.error);
       const plan = annualPlans.find(p => p.id === selectedPlanId);
-      if (plan) {
-        const url = `${window.location.origin}/annual-plans/scan/${plan.id}`;
+      if (plan?.qrToken) {
+        const url = `${window.location.origin}/scan/${plan.qrToken}`;
         QRCode.toDataURL(url, { width: 100, margin: 1, color: { dark: '#334155', light: '#ffffff00' } })
           .then(setMiniQrDataUrl)
           .catch(console.error);
@@ -129,7 +132,7 @@ export default function AnnualPlansClient({
     setCommentInput("");
     setStatusInput("DRAFT");
     setSelectedPlanId(null);
-    setAuditPlans([]);
+    setPlannedEngagements([]);
     setIsModalOpen(true);
   };
 
@@ -169,25 +172,28 @@ export default function AnnualPlansClient({
         });
         if (newPlan) {
           // If child plans were added during creation, create them under the new annual plan
-          if (auditPlans.length > 0) {
-            const plansToPersist = [...auditPlans].sort((a, b) =>
+          if (plannedEngagements.length > 0) {
+            const plansToPersist = [...plannedEngagements].sort((a, b) =>
               (a.no || "").localeCompare(b.no || "", undefined, { numeric: true, sensitivity: "base" })
             );
             for (let i = 0; i < plansToPersist.length; i++) {
               const ap = plansToPersist[i];
-              const no = `AP-${new Date().getFullYear()}-${String(i + 1).padStart(3, '0')}`;
-              await clientApi<AuditPlan>("/audit-plans", {
+              const no = `PRJ-${String(i + 1).padStart(3, '0')}`;
+              await clientApi<Project>("/projects", {
                 method: "POST",
                 body: JSON.stringify({
                   annualPlanId: newPlan.id,
                   no,
-                  topic: ap.topic,
+                  projectName: ap.projectName || "",
+                  departmentId: ap.departmentId,
                   type: ap.type || "OE",
                   revieweeIds: ap.revieweeIds || "",
                   conductDate: ap.conductDate,
                   endDate: ap.endDate,
                   durationDay: ap.durationDay || 1,
                   purpose: ap.purpose || "",
+                  objectives: ap.objectives || "",
+                  scope: ap.scope || "",
                 }),
               });
             }
@@ -221,6 +227,21 @@ export default function AnnualPlansClient({
     }
   };
 
+  // Issues a new QR token; the previous QR code (and any printed copy) stops working.
+  const handleRotateQr = async () => {
+    if (!selectedPlanId) return;
+    try {
+      const updated = await clientApi<AnnualPlan>(`/annual-plans/${selectedPlanId}/rotate-qr`, { method: "POST" });
+      if (updated) {
+        setAnnualPlans(annualPlans.map(p => (p.id === selectedPlanId ? updated : p)));
+        setQrModalData(d => ({ ...d, qrToken: updated.qrToken ?? "" }));
+        showFeedback("QR code reset. The previous code no longer works.");
+      }
+    } catch (err: any) {
+      showFeedback(`Error: ${err.message || err.toString()}`);
+    }
+  };
+
   const handleUpdateStatus = async (newStatus: string) => {
     if (!selectedPlanId) return;
     try {
@@ -231,8 +252,8 @@ export default function AnnualPlansClient({
       if (updated) {
         setAnnualPlans(annualPlans.map(p => p.id === selectedPlanId ? updated : p));
         setStatusInput(newStatus);
-        const updatedAps = await clientApi<AuditPlan[]>(`/audit-plans/by-annual-plan/${selectedPlanId}`);
-        setAuditPlans(updatedAps);
+        const updatedAps = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
+        setPlannedEngagements(updatedAps);
         loadApprovedTopicCounts();
         showFeedback(`Annual Plan status updated to ${newStatus}.`);
       }
@@ -265,38 +286,42 @@ export default function AnnualPlansClient({
     }
   };
 
-  // --- Child Audit Plan Handlers ---
+  // --- Child OE Plan Handlers ---
   const openChildCreateModal = () => {
     setChildModalMode("create");
     setApProjectName("");
-    setApTopic("");
-    setApBu("");
+    setApBuId("");
+    setApDepartmentId("");
     setApType("OE");
     setApVersion("V1");
     setApRevieweeIds([]);
     setApConductDate("");
     setApEndDate("");
     setApPurpose("");
-    setApObjectivesItems(parsePlanItems("", "AP-OBJ"));
-    setApScopeItems(parsePlanItems("", "AP-ISCP"));
-    setSelectedAuditPlanId(null);
+    setApObjectivesItems(parsePlanItems("", "OE-OBJ"));
+    setApScopeItems(parsePlanItems("", "OE-SCP"));
+    setSelectedPlannedEngagementId(null);
     setIsChildModalOpen(true);
   };
 
   const openChildEditModal = (ap: any) => {
     setChildModalMode("edit");
-    setSelectedAuditPlanId(ap.id);
+    setSelectedPlannedEngagementId(ap.id);
     setApProjectName(ap.projectName || "");
-    setApTopic(ap.topic);
-    setApBu(ap.bu || "");
+    // Older projects only stored the department name and BU name as text.
+    const dept =
+      departments.find(d => d.id === ap.departmentId) ||
+      departments.find(d => d.name === ap.topic && d.businessUnitName === ap.bu);
+    setApDepartmentId(dept?.id ?? "");
+    setApBuId(dept?.businessUnitId ?? "");
     setApType(ap.type || "OE");
     setApVersion(ap.version || "V1");
     setApRevieweeIds(ap.revieweeIds ? ap.revieweeIds.split(",") : []);
     setApConductDate(ap.conductDate);
     setApEndDate(ap.endDate);
     setApPurpose(ap.purpose);
-    setApObjectivesItems(parsePlanItems(ap.objectives, "AP-OBJ"));
-    setApScopeItems(parsePlanItems(ap.scope, "AP-ISCP"));
+    setApObjectivesItems(parsePlanItems(ap.objectives, "OE-OBJ"));
+    setApScopeItems(parsePlanItems(ap.scope, "OE-SCP"));
     setIsChildModalOpen(true);
   };
 
@@ -309,8 +334,25 @@ export default function AnnualPlansClient({
   };
 
   const handleSaveChildPlan = async () => {
-    if (!apProjectName.trim() || !apTopic.trim() || !apBu.trim() || !apConductDate || !apEndDate) {
-      showFeedback("Error: Project Name, Department, BU, Conduct Date, and End Date are required.");
+    if (!apProjectName.trim() || !apBuId || !apDepartmentId || !apConductDate || !apEndDate) {
+      showFeedback("Error: Project Name, BU, Department, Conduct Date, and End Date are required.");
+      return;
+    }
+    // Display text for the local draft rows; the server derives these from departmentId.
+    const chosenDept = departments.find(d => d.id === apDepartmentId);
+    const apTopic = chosenDept?.name ?? "";
+    const apBu = chosenDept?.businessUnitName ?? "";
+    if (!apPurpose.trim() || apRevieweeIds.length === 0) {
+      showFeedback("Error: Purpose and Reviewee(s) are required.");
+      return;
+    }
+    if (!apScopeItems.some((item) => item.text.trim())) {
+      showFeedback("Error: Scope is required. Add at least one scope item before saving.");
+      return;
+    }
+    const dateError = validateDateRange(apConductDate, apEndDate);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
       return;
     }
 
@@ -320,12 +362,13 @@ export default function AnnualPlansClient({
     try {
       if (modalMode === "create") {
         if (childModalMode === "create") {
-          const no = `AP-${new Date().getFullYear()}-${String(auditPlans.length + 1).padStart(3, '0')}`;
+          const no = `PRJ-${String(plannedEngagements.length + 1).padStart(3, '0')}`;
           const newAp = {
             id: `draft-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             annualPlanId: "",
             no,
             projectName: apProjectName,
+            departmentId: apDepartmentId,
             topic: apTopic,
             bu: apBu,
             type: apType,
@@ -338,14 +381,15 @@ export default function AnnualPlansClient({
             objectives: serializePlanItems(apObjectivesItems),
             scope: serializePlanItems(apScopeItems)
           };
-          setAuditPlans([...auditPlans, newAp]);
+          setPlannedEngagements([...plannedEngagements, newAp]);
           setIsChildModalOpen(false);
-          showFeedback("Audit Plan added to draft.");
+          showFeedback("Project added to draft.");
         } else {
-          if (!selectedAuditPlanId) return;
-          setAuditPlans(auditPlans.map(ap => ap.id === selectedAuditPlanId ? {
+          if (!selectedPlannedEngagementId) return;
+          setPlannedEngagements(plannedEngagements.map(ap => ap.id === selectedPlannedEngagementId ? {
             ...ap,
             projectName: apProjectName,
+            departmentId: apDepartmentId,
             topic: apTopic,
             bu: apBu,
             type: apType,
@@ -359,18 +403,19 @@ export default function AnnualPlansClient({
             scope: serializePlanItems(apScopeItems)
           } : ap));
           setIsChildModalOpen(false);
-          showFeedback("Audit Plan updated in draft.");
+          showFeedback("Project updated in draft.");
         }
       } else {
         if (!selectedPlanId) return;
         if (childModalMode === "create") {
-          const no = `AP-${new Date().getFullYear()}-${String(auditPlans.length + 1).padStart(3, '0')}`;
-          const newAp = await clientApi<AuditPlan>("/audit-plans", {
+          const no = `PRJ-${String(plannedEngagements.length + 1).padStart(3, '0')}`;
+          const newAp = await clientApi<Project>("/projects", {
             method: "POST",
             body: JSON.stringify({
               annualPlanId: selectedPlanId,
               no,
               projectName: apProjectName,
+              departmentId: apDepartmentId,
               topic: apTopic,
               bu: apBu,
               type: apType,
@@ -384,17 +429,18 @@ export default function AnnualPlansClient({
             }),
           });
           if (newAp) {
-            const updated = await clientApi<AuditPlan[]>(`/audit-plans/by-annual-plan/${selectedPlanId}`);
-            setAuditPlans(updated);
+            const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
+            setPlannedEngagements(updated);
             setIsChildModalOpen(false);
-            showFeedback("Audit Plan added successfully.");
+            showFeedback("Project added successfully.");
           }
         } else {
-          if (!selectedAuditPlanId) return;
-          const updatedAp = await clientApi<AuditPlan>(`/audit-plans/${selectedAuditPlanId}`, {
+          if (!selectedPlannedEngagementId) return;
+          const updatedAp = await clientApi<Project>(`/projects/${selectedPlannedEngagementId}`, {
             method: "PATCH",
             body: JSON.stringify({
               projectName: apProjectName,
+              departmentId: apDepartmentId,
               topic: apTopic,
               bu: apBu,
               type: apType,
@@ -408,10 +454,10 @@ export default function AnnualPlansClient({
             }),
           });
           if (updatedAp) {
-            const updated = await clientApi<AuditPlan[]>(`/audit-plans/by-annual-plan/${selectedPlanId}`);
-            setAuditPlans(updated);
+            const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
+            setPlannedEngagements(updated);
             setIsChildModalOpen(false);
-            showFeedback("Audit Plan updated successfully.");
+            showFeedback("Project updated successfully.");
           }
         }
       }
@@ -422,11 +468,11 @@ export default function AnnualPlansClient({
   };
 
   const handleDeleteChildPlan = async (id: string) => {
-    const confirmDel = window.confirm("Are you sure you want to delete this planned engagement?");
+    const confirmDel = window.confirm("Are you sure you want to delete this project?");
     if (!confirmDel) return;
 
     if (modalMode === "create" || id.startsWith("draft-")) {
-      const remaining = auditPlans.filter(ap => ap.id !== id);
+      const remaining = plannedEngagements.filter(ap => ap.id !== id);
       const deptCounts: Record<string, number> = {};
       const remapped = remaining.map(ap => {
         const key = (ap.topic || "").trim().toLowerCase();
@@ -434,21 +480,21 @@ export default function AnnualPlansClient({
         deptCounts[key] = count;
         return { ...ap, version: `V${count}` };
       });
-      setAuditPlans(remapped);
-      showFeedback("Audit Plan removed from draft.");
+      setPlannedEngagements(remapped);
+      showFeedback("Project removed from draft.");
       return;
     }
 
     try {
-      const success = await clientApi<boolean>(`/audit-plans/${id}`, { method: "DELETE" });
+      const success = await clientApi<boolean>(`/projects/${id}`, { method: "DELETE" });
       if (success) {
         if (selectedPlanId) {
-          const updated = await clientApi<AuditPlan[]>(`/audit-plans/by-annual-plan/${selectedPlanId}`);
-          setAuditPlans(updated);
+          const updated = await clientApi<Project[]>(`/projects/by-annual-plan/${selectedPlanId}`);
+          setPlannedEngagements(updated);
         } else {
-          setAuditPlans(auditPlans.filter(ap => ap.id !== id));
+          setPlannedEngagements(plannedEngagements.filter(ap => ap.id !== id));
         }
-        showFeedback("Audit Plan deleted successfully.");
+        showFeedback("Project deleted successfully.");
       }
     } catch (err: any) {
       console.error(err);
@@ -595,7 +641,7 @@ export default function AnnualPlansClient({
                       <CalendarDays className="w-3.5 h-3.5 font-roboto" /> Period: {periodInput[0] || "N/A"}
                     </span>
                     <span className="flex items-center gap-1 font-roboto">
-                      <Activity className="w-3.5 h-3.5" /> Owner: {currentUser?.name}
+                      <Activity className="w-3.5 h-3.5" /> Owner: {annualPlans.find(p => p.id === selectedPlanId)?.createdBy || "—"}
                     </span>
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-semibold uppercase rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 text-slate-700 dark:text-slate-300">
                       {statusInput === "APPROVED" && <CheckCircle className="w-3 h-3 text-slate-600 dark:text-slate-400" />}
@@ -644,11 +690,12 @@ export default function AnnualPlansClient({
                     )}
                   </>
                 )}
-                {modalMode === "edit" && selectedPlanId && (
+                {modalMode === "edit" && selectedPlanId && statusInput === "APPROVED" && annualPlans.find(p => p.id === selectedPlanId)?.qrToken && (
                   <button
                     type="button"
                     onClick={() => {
-                      setQrModalData({ qrToken: selectedPlanId, projectTitle: planNameInput });
+                      const plan = annualPlans.find(p => p.id === selectedPlanId);
+                      setQrModalData({ qrToken: plan?.qrToken ?? "", planName: planNameInput, period: periodInput[0] || "" });
                       setQrModalOpen(true);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 rounded cursor-pointer group"
@@ -753,11 +800,11 @@ export default function AnnualPlansClient({
                 </div>
               </div>
               
-              {/* Child Audit Plans List */}
+              {/* Child OE Plans List */}
               <div className="bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-lg p-6 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-3 mb-4">
                   <h3 className="text-xs font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                    Planned OE Engagements
+                    Projects
                   </h3>
                   {canCreateChildPlan && statusInput !== "APPROVED" && (
                     <button
@@ -765,7 +812,7 @@ export default function AnnualPlansClient({
                       onClick={openChildCreateModal}
                       className="flex items-center gap-1 text-xs font-medium text-[#0066cc] hover:underline"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Add Planned Engagement
+                      <Plus className="w-3.5 h-3.5" /> Add Project
                     </button>
                   )}
                 </div>
@@ -783,11 +830,12 @@ export default function AnnualPlansClient({
                         <th className="px-4 py-3">Conduct Date</th>
                         <th className="px-4 py-3">End Date</th>
                         <th className="px-4 py-3">Duration (Day)</th>
+                        <th className="px-4 py-3">Status</th>
                         {(canUpdateChildPlan || canDeleteChildPlan) && <th className="px-4 py-3 text-center w-20">Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                      {[...auditPlans].sort((a, b) => a.no.localeCompare(b.no, undefined, { numeric: true, sensitivity: "base" })).map((ap) => (
+                      {[...plannedEngagements].sort((a, b) => a.no.localeCompare(b.no, undefined, { numeric: true, sensitivity: "base" })).map((ap) => (
                         <tr key={ap.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
                           <td className="px-4 py-3 text-slate-600 font-medium">{ap.no}</td>
                           <td className="px-4 py-3 text-slate-500 font-medium">{ap.type || "OE"}</td>
@@ -813,6 +861,36 @@ export default function AnnualPlansClient({
                           <td className="px-4 py-3 text-slate-500">{ap.conductDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.endDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.durationDay}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                              {!ap.isUsed ? (
+                                <>
+                                  <Circle className="w-3 h-3 text-slate-400" />
+                                  Available
+                                </>
+                              ) : ap.individualPlanStatus === "RELEASED" ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-slate-600 dark:text-slate-400" />
+                                  Released
+                                </>
+                              ) : ap.individualPlanStatus === "CLOSED" ? (
+                                <>
+                                  <CheckCircle className="w-3 h-3 text-slate-500" />
+                                  Closed
+                                </>
+                              ) : ap.individualPlanStatus === "SUBMITTED_FOR_APPROVAL" ? (
+                                <>
+                                  <FileText className="w-3 h-3 text-slate-500" />
+                                  Submitted
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="w-3 h-3 text-slate-400" />
+                                  Planning
+                                </>
+                              )}
+                            </span>
+                          </td>
                           {(canUpdateChildPlan || canDeleteChildPlan) && (
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center gap-2">
@@ -821,17 +899,17 @@ export default function AnnualPlansClient({
                                     type="button"
                                     onClick={() => openChildEditModal(ap)}
                                     className="text-slate-400 hover:text-[#0066cc]"
-                                    title={statusInput === "APPROVED" ? "View Planned Engagement" : "Edit Planned Engagement"}
+                                    title={statusInput === "APPROVED" ? "View Project" : "Edit Project"}
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {statusInput !== "APPROVED" && canDeleteChildPlan && (
+                                {statusInput !== "APPROVED" && !ap.isUsed && canDeleteChildPlan && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteChildPlan(ap.id)}
                                     className="text-slate-400 hover:text-red-600"
-                                    title="Delete Planned Engagement"
+                                    title="Delete Project"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -841,10 +919,10 @@ export default function AnnualPlansClient({
                           )}
                         </tr>
                       ))}
-                      {auditPlans.length === 0 && (
+                      {plannedEngagements.length === 0 && (
                         <tr>
-                          <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 10 : 9} className="px-4 py-6 text-center text-slate-400 text-xs italic">
-                            No Planned Engagements added yet.
+                          <td colSpan={canUpdateChildPlan || canDeleteChildPlan ? 11 : 10} className="px-4 py-6 text-center text-slate-400 text-xs italic">
+                            No Projects added yet.
                           </td>
                         </tr>
                       )}
@@ -858,13 +936,13 @@ export default function AnnualPlansClient({
         </div>
       )}
 
-      {/* Child Audit Plan Modal */}
+      {/* Child OE Plan Modal */}
       {isChildModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center items-center z-[60] p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-950 w-full max-w-3xl rounded-lg shadow-xl overflow-hidden border border-slate-200 dark:border-slate-800">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
-                {statusInput === "APPROVED" ? "View Planned Engagement" : (childModalMode === "create" ? "Add Planned Engagement" : "Edit Planned Engagement")}
+                {statusInput === "APPROVED" ? "View Project" : (childModalMode === "create" ? "Add Project" : "Edit Project")}
               </h2>
               <button onClick={() => setIsChildModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -904,21 +982,46 @@ export default function AnnualPlansClient({
                 </div>
               </div>
 
-              <div className="grid grid-cols-[2fr_1fr_1fr] gap-4">
+              <div className="grid grid-cols-[1fr_2fr_1fr] gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department / Engagement Topic</label>
+                  <label className="text-xs font-sans font-bold uppercase text-slate-500">BU *</label>
                   <div className="border border-slate-200 dark:border-slate-800 rounded-md">
                     <MultiSelect
-                      selectedValues={apTopic ? [apTopic] : []}
+                      selectedValues={apBuId ? [apBuId] : []}
                       onChange={(values) => {
-                        const chosenTopic = values.length > 0 ? values[0] : "";
-                        setApTopic(chosenTopic);
-                        if (chosenTopic) {
-                          const topicKey = chosenTopic.trim().toLowerCase();
-                          const baseApproved = approvedTopicCounts[topicKey] || 0;
-                          const draftCount = auditPlans.filter(p =>
-                            (childModalMode === "create" || p.id !== selectedAuditPlanId) &&
-                            (p.topic || "").trim().toLowerCase() === topicKey
+                        const chosen = values.length > 0 ? values[0] : "";
+                        if (chosen !== apBuId) {
+                          // Departments belong to one Business Unit, so changing it clears the department.
+                          setApDepartmentId("");
+                          setApVersion("V1");
+                        }
+                        setApBuId(chosen);
+                      }}
+                      singleSelect={true}
+                      disabled={statusInput === "APPROVED"}
+                      options={businessUnits.map((b) => ({
+                        value: b.id,
+                        label: b.name,
+                      }))}
+                      placeholder="Select BU..."
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department / Project Topic *</label>
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-md">
+                    <MultiSelect
+                      selectedValues={apDepartmentId ? [apDepartmentId] : []}
+                      onChange={(values) => {
+                        const chosenId = values.length > 0 ? values[0] : "";
+                        setApDepartmentId(chosenId);
+                        if (chosenId) {
+                          // Versions count per department (ids, so two BUs can both have a "Finance").
+                          const baseApproved = approvedTopicCounts[chosenId] || 0;
+                          const draftCount = plannedEngagements.filter(p =>
+                            (childModalMode === "create" || p.id !== selectedPlannedEngagementId) &&
+                            p.departmentId === chosenId
                           ).length;
                           const computedVersion = statusInput === "APPROVED"
                             ? `V${baseApproved}`
@@ -929,29 +1032,14 @@ export default function AnnualPlansClient({
                         }
                       }}
                       singleSelect={true}
-                      disabled={statusInput === "APPROVED"}
-                      options={departments.map((d) => ({
-                        value: d.name,
-                        label: d.name,
-                      }))}
-                      placeholder="Select Department..."
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-sans font-bold uppercase text-slate-500">BU</label>
-                  <div className="border border-slate-200 dark:border-slate-800 rounded-md">
-                    <MultiSelect
-                      selectedValues={apBu ? [apBu] : []}
-                      onChange={(values) => setApBu(values.length > 0 ? values[0] : "")}
-                      singleSelect={true}
-                      disabled={statusInput === "APPROVED"}
-                      options={businessUnits.map((b) => ({
-                        value: b.name,
-                        label: b.name,
-                      }))}
-                      placeholder="Select BU..."
+                      disabled={statusInput === "APPROVED" || !apBuId}
+                      options={departments
+                        .filter((d) => d.businessUnitId === apBuId)
+                        .map((d) => ({
+                          value: d.id,
+                          label: d.name,
+                        }))}
+                      placeholder={apBuId ? "Select Department..." : "Select a BU first..."}
                     />
                   </div>
                 </div>
@@ -969,7 +1057,7 @@ export default function AnnualPlansClient({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-sans font-bold uppercase text-slate-500">Reviewee(s)</label>
+                <label className="text-xs font-sans font-bold uppercase text-slate-500">Reviewee(s) *</label>
                 <MultiSelect
                   options={[
                     { label: 'Related', value: 'Related' },
@@ -1007,7 +1095,7 @@ export default function AnnualPlansClient({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-sans font-bold uppercase text-slate-500">Purpose</label>
+                <label className="text-xs font-sans font-bold uppercase text-slate-500">Purpose *</label>
                 <textarea
                   value={apPurpose}
                   onChange={(e) => setApPurpose(e.target.value)}
@@ -1022,17 +1110,17 @@ export default function AnnualPlansClient({
                   sectionTitle="Objectives"
                   items={apObjectivesItems}
                   onChange={setApObjectivesItems}
-                  prefix="AP-OBJ"
+                  prefix="OE-OBJ"
                   editable={statusInput !== "APPROVED"}
                   placeholder="Enter objective item description..."
                   addBtnText="Add Objective"
                 />
 
                 <PlanItemEditor
-                  sectionTitle="Scope"
+                  sectionTitle="Scope *"
                   items={apScopeItems}
                   onChange={setApScopeItems}
-                  prefix="AP-ISCP"
+                  prefix="OE-SCP"
                   editable={statusInput !== "APPROVED"}
                   placeholder="Enter scope item description..."
                   addBtnText="Add Scope Item"
@@ -1067,9 +1155,9 @@ export default function AnnualPlansClient({
           isOpen={qrModalOpen}
           onClose={() => setQrModalOpen(false)}
           qrToken={qrModalData.qrToken}
-          projectTitle={qrModalData.projectTitle}
-          projectCode="Annual Plan"
-          departments=""
+          planName={qrModalData.planName}
+          period={qrModalData.period}
+          onRotate={canUpdatePlan ? handleRotateQr : undefined}
         />
       )}
     </div>

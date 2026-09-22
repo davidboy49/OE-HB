@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AnnualPlansService } from './annual-plans.service';
 import { AnnualPlansController } from './annual-plans.controller';
-import { AuditPlansService } from './audit-plans.service';
-import { AuditPlansController } from './audit-plans.controller';
+import { ProjectsService } from './projects.service';
+import { ProjectsController } from './projects.controller';
 
 @Module({
-  controllers: [AnnualPlansController, AuditPlansController],
-  providers: [AnnualPlansService, AuditPlansService],
-  exports: [AnnualPlansService, AuditPlansService],
+  controllers: [AnnualPlansController, ProjectsController],
+  providers: [AnnualPlansService, ProjectsService],
+  exports: [AnnualPlansService, ProjectsService],
 })
 export class PlanningModule {}

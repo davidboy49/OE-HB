@@ -3,15 +3,25 @@ import { ConfigService } from '@nestjs/config';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export interface KeycloakClaims {
+  /** Keycloak's permanent id for the person. Unlike the email, it never changes or gets reused. */
+  sub: string;
   email: string;
+  /** Whether Keycloak has confirmed the person owns this email address. */
+  emailVerified: boolean;
   name: string | null;
   preferredUsername: string | null;
+  /** Group names from the token's "groups" claim (needs a Group Membership mapper); [] if absent. */
+  groups: string[];
 }
 
 /**
- * Verifies access tokens issued by the company's Keycloak realm (used by the
- * mobile app's existing SSO login) so they can be exchanged for our own JWT.
- * KEYCLOAK_ISSUER is the realm base, e.g. https://sso.example.com/realms/company.
+ * Verifies access tokens issued by the company's Keycloak realm so they can be exchanged for
+ * our own JWT (used by the mobile app and the web "Sign in with SSO" button).
+ *
+ * Configuration:
+ *   KEYCLOAK_ISSUER     realm base, e.g. https://sso.example.com/realms/company   (required)
+ *   KEYCLOAK_CLIENT_ID  when set, the token must have been issued to (azp) or for (aud) this
+ *                       client, so a token minted for some other app in the realm is refused
  */
 @Injectable()
 export class KeycloakService {
@@ -47,6 +57,13 @@ export class KeycloakService {
       throw new UnauthorizedException('Invalid or expired Keycloak token');
     }
 
+    const sub = payload.sub;
+    if (!sub) {
+      throw new UnauthorizedException('Keycloak token has no subject');
+    }
+
+    this.assertIssuedForThisApp(payload);
+
     const email = payload.email as string | undefined;
     if (!email) {
       throw new UnauthorizedException(
@@ -54,11 +71,33 @@ export class KeycloakService {
       );
     }
 
+    const rawGroups = payload.groups;
+    const groups = Array.isArray(rawGroups)
+      ? rawGroups.filter((g): g is string => typeof g === 'string')
+      : [];
+
     return {
+      sub,
       email,
+      emailVerified: payload.email_verified === true,
       name: (payload.name as string | undefined) ?? null,
       preferredUsername:
         (payload.preferred_username as string | undefined) ?? null,
+      groups,
     };
+  }
+
+  private assertIssuedForThisApp(payload: {
+    azp?: unknown;
+    aud?: unknown;
+  }): void {
+    const clientId = this.config.get<string>('KEYCLOAK_CLIENT_ID');
+    if (!clientId) return;
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (payload.azp !== clientId && !aud.includes(clientId)) {
+      throw new UnauthorizedException(
+        'This Keycloak token was not issued for the OE Portal',
+      );
+    }
   }
 }

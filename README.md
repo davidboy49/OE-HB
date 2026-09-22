@@ -1,6 +1,6 @@
-# 🔍 AuditDesk - Modern Audit Management System
+# 🔍 OE Portal - Operational Excellence Management System
 
-AuditDesk is a comprehensive Audit Management web application. It streamlines the entire internal and external audit lifecycle from initial planning to execution tracking, findings management, meeting records, and reporting.
+OE Portal is a comprehensive Operational Excellence (OE) management web application. It streamlines the entire OE lifecycle from initial planning to execution tracking, findings management, meeting records, and reporting.
 
 This repo is a fresh rework of the original [AuditDesk](https://github.com/davidboy49/AuditDesk) Next.js monolith, split into an independent **frontend** and **backend** in one monorepo.
 
@@ -8,12 +8,12 @@ This repo is a fresh rework of the original [AuditDesk](https://github.com/david
 
 ## ✨ Features
 
-- **📋 Audit Planning & Scoping**: Define audit projects, scope, risk analysis, timeline, and lead auditor assignments.
-- **📅 Execution Schedules**: Organize site visits, daily audit activities, attendees, and schedule sign-offs.
-- **⚠️ Findings & CAR/PAR Tracking**: Record audit findings with severity ratings (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), recommendations, and corrective action plans.
+- **📋 OE Planning & Scoping**: Define OE plans, scope, risk analysis, timeline, and lead member assignments.
+- **📅 Execution Schedules**: Organize site visits, daily OE activities, attendees, and schedule sign-offs.
+- **⚠️ Findings & CAR/PAR Tracking**: Record OE findings with severity ratings (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), recommendations, and corrective action plans.
 - **🤝 Meetings & Minutes**: Document opening and closing meeting discussions with TipTap rich text editing and attendance confirmations.
-- **🏢 Departments & User Management**: Role-Based Access Control (RBAC) supporting `ADMIN`, `LEAD_AUDITOR`, `AUDITOR`, and `AUDITEE`, plus per-`UserGroup` granular permissions (create/update/delete, per domain) that an admin can tick on and off.
-- **📜 Audit Trail & Activity Logs**: Record all system actions for compliance and history tracking.
+- **🏢 Departments & User Management**: Role-Based Access Control (RBAC) supporting `ADMIN`, `OE_LEADER`, `OE_MEMBER`, and `DEPT_PIC`, plus per-`UserGroup` granular permissions (create/update/delete, per domain) that an admin can tick on and off.
+- **📜 Activity Log & Activity Logs**: Record all system actions for compliance and history tracking.
 - **📑 OpenAPI & Swagger Documentation**: REST API with interactive Swagger UI served by the backend.
 
 ---
@@ -118,4 +118,4 @@ This runs the backend (`http://localhost:3001`) and frontend (`http://localhost:
 
 ## 📄 License
 
-Private & Proprietary - AuditDesk Project.
+Private & Proprietary - OE Portal Project.

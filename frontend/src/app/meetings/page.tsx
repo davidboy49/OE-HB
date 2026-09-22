@@ -1,19 +1,17 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, OpenMeeting, User, Department, AuditPlan } from "@auditdesk/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { OePlan, OpenMeeting, User, Department, Project } from "@oeportal/shared";
 import MeetingsClient from "./meetings-client";
 
 export default async function MeetingsPage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/meetings");
 
-  const [projects, schedules, users, departments, auditPlans] = await Promise.all([
-    apiFetch<AuditProject[]>("/audit-projects"),
+  const [projects, schedules, users, departments, plannedEngagements] = await Promise.all([
+    fetchOr<OePlan[]>("/oe-plans", []),
     apiFetch<OpenMeeting[]>("/meetings"),
-    apiFetch<User[]>("/users"),
-    apiFetch<Department[]>("/departments"),
-    apiFetch<AuditPlan[]>("/audit-plans"),
+    fetchOr<User[]>("/users", []),
+    fetchOr<Department[]>("/departments", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (
@@ -22,7 +20,7 @@ export default async function MeetingsPage() {
       projects={projects}
       users={users}
       departments={departments}
-      auditPlans={auditPlans}
+      plannedEngagements={plannedEngagements}
       currentUser={currentUser}
     />
   );

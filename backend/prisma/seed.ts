@@ -26,7 +26,7 @@ async function main() {
   await prisma.executionSchedule.deleteMany();
   await prisma.document.deleteMany();
   await prisma.report.deleteMany();
-  await prisma.auditProject.deleteMany();
+  await prisma.oePlan.deleteMany();
   await prisma.user.deleteMany();
   await prisma.department.deleteMany();
   await prisma.userGroup.deleteMany();
@@ -34,14 +34,6 @@ async function main() {
   await prisma.emailTemplate.deleteMany();
 
   console.log("Cleared existing database records.");
-
-  // Seed Document Sequences (starts from 0 so first generated code is AP-2026-0001)
-  await prisma.documentSequence.create({
-    data: { key: "AP-2026", currentVal: 0 }
-  });
-  await prisma.documentSequence.create({
-    data: { key: "AP-2025", currentVal: 0 }
-  });
 
   // 1. Seed Departments
   const dept1 = await prisma.department.create({
@@ -62,34 +54,31 @@ async function main() {
   // 2. Seed User Groups (groups are pure permission bundles - see grants below;
   // a group no longer carries or assigns a role to its members)
   const group1 = await prisma.userGroup.create({
-    data: { id: "group-1", name: "Internal Audit Team", description: "Certified internal auditors and leads" }
+    data: { id: "group-1", name: "OE Team", description: "Certified internal members and leads" }
   });
   const group2 = await prisma.userGroup.create({
     data: { id: "group-2", name: "Risk Management Committee", description: "Executive oversight for enterprise risks" }
   });
   const group3 = await prisma.userGroup.create({
-    data: { id: "group-3", name: "External Auditing Partner", description: "Contracted external compliance specialists" }
+    data: { id: "group-3", name: "External OE Partner", description: "Contracted external compliance specialists" }
   });
 
   console.log("User Groups seeded.");
 
   // Seed every known permission key, then grant each existing group a starter
-  // set matching what its name implies (auditor-tier vs lead-tier access) -
+  // set matching what its name implies (member-tier vs lead-tier access) -
   // admins narrow access per group from here via PATCH /user-groups/:id/permissions.
   await prisma.permission.deleteMany();
   await prisma.permission.createMany({ data: PERMISSIONS });
 
-  await prisma.userGroup.update({
-    where: { id: group1.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.AUDITOR.map((key) => ({ key })) } }
-  });
-  await prisma.userGroup.update({
-    where: { id: group2.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.LEAD_AUDITOR.map((key) => ({ key })) } }
-  });
-  await prisma.userGroup.update({
-    where: { id: group3.id },
-    data: { permissions: { connect: DEFAULT_PERMISSIONS_BY_ROLE.AUDITOR.map((key) => ({ key })) } }
+  const grantsFor = (groupId: string, keys: string[]) =>
+    keys.map((permissionKey) => ({ groupId, permissionKey, scope: "ALL" }));
+  await prisma.groupPermission.createMany({
+    data: [
+      ...grantsFor(group1.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
+      ...grantsFor(group2.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_LEADER),
+      ...grantsFor(group3.id, DEFAULT_PERMISSIONS_BY_ROLE.OE_MEMBER),
+    ],
   });
 
   console.log("Permissions seeded and granted to existing groups.");
@@ -100,16 +89,16 @@ async function main() {
     data: { id: "user-1", email: "admin@auditdesk.com", name: "Alex Admin", role: "ADMIN", passwordHash: adminPasswordHash }
   });
   const user2 = await prisma.user.create({
-    data: { id: "user-2", email: "sarah.lead@auditdesk.com", name: "Sarah Lead", role: "LEAD_AUDITOR", departmentId: dept3.id, groupId: group1.id }
+    data: { id: "user-2", email: "sarah.lead@auditdesk.com", name: "Sarah Lead", role: "OE_LEADER", departmentId: dept3.id, groupId: group1.id }
   });
   const user3 = await prisma.user.create({
-    data: { id: "user-3", email: "david.auditor@auditdesk.com", name: "David Auditor", role: "AUDITOR", departmentId: dept3.id, groupId: group1.id }
+    data: { id: "user-3", email: "david.member@auditdesk.com", name: "David OE Member", role: "OE_MEMBER", departmentId: dept3.id, groupId: group1.id }
   });
   const user4 = await prisma.user.create({
-    data: { id: "user-4", email: "alice.auditee@auditdesk.com", name: "Alice Auditee", role: "AUDITEE", departmentId: dept2.id, groupId: group2.id }
+    data: { id: "user-4", email: "alice.department PIC@auditdesk.com", name: "Alice Department PIC", role: "DEPT_PIC", departmentId: dept2.id, groupId: group2.id }
   });
   const user5 = await prisma.user.create({
-    data: { id: "user-5", email: "bob.developer@auditdesk.com", name: "Bob Developer", role: "AUDITEE", departmentId: dept1.id }
+    data: { id: "user-5", email: "bob.developer@auditdesk.com", name: "Bob Developer", role: "DEPT_PIC", departmentId: dept1.id }
   });
 
   console.log("Users seeded.");
@@ -132,8 +121,8 @@ async function main() {
   await prisma.emailTemplate.create({
     data: {
       id: "planning",
-      subject: "Audit Planning Scoping Update - {{projectCode}}",
-      body: "<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>Audit Management System</p>"
+      subject: "OE Planning Scoping Update - {{projectCode}}",
+      body: "<p>Hello {{recipientName}},</p><p>An update has occurred on the scoping document for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Current Status: <strong>{{status}}</strong></p><p>Details: {{details}}</p><p>Best regards,<br/>OE Portal</p>"
     }
   });
   await prisma.emailTemplate.create({
@@ -147,13 +136,13 @@ async function main() {
     data: {
       id: "schedule",
       subject: "Execution Schedule Released - {{projectCode}}",
-      body: "<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Audit Period: {{auditPeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>"
+      body: "<p>Hello {{recipientName}},</p><p>An execution schedule and document request list has been updated for <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>OE Period: {{oePeriod}}</p><p>Lead Execution: {{leadExecution}}</p><p>Standards: {{standards}}</p><p>Please upload the requested files as soon as possible.</p>"
     }
   });
   await prisma.emailTemplate.create({
     data: {
       id: "findings",
-      subject: "New Audit Finding Registered - {{projectCode}}",
+      subject: "New OE Finding Registered - {{projectCode}}",
       body: "<p>Hello {{recipientName}},</p><p>A new compliance nonconformity has been logged under <strong>{{projectName}}</strong> ({{projectCode}}).</p><p>Finding: <strong>{{findingTitle}}</strong></p><p>Severity: <strong>{{severity}}</strong></p><p>Recommendation: {{recommendation}}</p>"
     }
   });

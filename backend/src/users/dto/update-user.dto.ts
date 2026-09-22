@@ -6,9 +6,9 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import type { UserRole } from '@auditdesk/shared';
+import type { UserRole } from '@oeportal/shared';
 
-const USER_ROLES: UserRole[] = ['ADMIN', 'LEAD_AUDITOR', 'AUDITOR', 'AUDITEE'];
+const USER_ROLES: UserRole[] = ['ADMIN', 'OE_LEADER', 'OE_MEMBER', 'DEPT_PIC'];
 
 export class UpdateUserDto {
   @ApiProperty()

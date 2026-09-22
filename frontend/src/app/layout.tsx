@@ -11,8 +11,8 @@ const roboto = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: "AuditDesk - Auditing System Portal",
-  description: "Enterprise Auditing portal for timeline planning, findings tracking, and document management.",
+  title: "OE Portal - Operational Excellence System",
+  description: "Enterprise Operational Excellence portal for timeline planning, findings tracking, and document management.",
 };
 
 export default async function RootLayout({

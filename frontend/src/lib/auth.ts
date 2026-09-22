@@ -1,5 +1,5 @@
 import { serverApi, ApiError } from "./apiClient";
-import type { User } from "@auditdesk/shared";
+import type { User } from "@oeportal/shared";
 
 /** Resolves the current user from the JWT cookie via the backend. Null if not logged in. */
 export async function getCurrentUserServer(): Promise<User | null> {
@@ -25,24 +25,24 @@ export const RBAC = {
     return user.role === "ADMIN";
   },
   canManageUsers(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
   canCreateProject(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
   canEditScope(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
   canWriteFinding(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR" || user.role === "AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER" || user.role === "OE_MEMBER";
   },
   canUploadDocuments(_user: User): boolean {
     return true;
   },
   canApproveReport(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
   canApproveAnnualPlan(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "LEAD_AUDITOR";
+    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
 };

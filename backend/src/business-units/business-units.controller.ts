@@ -23,6 +23,7 @@ export class BusinessUnitsController {
   constructor(private readonly businessUnitsService: BusinessUnitsService) {}
 
   @Get()
+  @RequirePermission('business-units:view')
   findAll() {
     return this.businessUnitsService.findAll();
   }
@@ -50,7 +51,11 @@ export class BusinessUnitsController {
     details: `Updated business unit "${req.params.id}" (${req.body.name})`,
   }))
   update(@Param('id') id: string, @Body() dto: UpdateBusinessUnitDto) {
-    return this.businessUnitsService.update(id, dto.name, dto.description ?? '');
+    return this.businessUnitsService.update(
+      id,
+      dto.name,
+      dto.description ?? '',
+    );
   }
 
   @Delete(':id')

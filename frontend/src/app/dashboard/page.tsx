@@ -1,7 +1,6 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, Department, User } from "@auditdesk/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { OePlan, Department, User } from "@oeportal/shared";
 import {
   Building2,
   FolderLock,
@@ -15,19 +14,18 @@ import {
 import Link from "next/link";
 
 export default async function DashboardPage() {
-  const user = await getCurrentUserServer();
-  if (!user) redirect("/login");
+  const user = await guardPage("/dashboard");
 
   const [projects, users, departments] = await Promise.all([
-    apiFetch<AuditProject[]>("/audit-projects"),
-    apiFetch<User[]>("/users"),
-    apiFetch<Department[]>("/departments"),
+    apiFetch<OePlan[]>("/oe-plans"),
+    fetchOr<User[]>("/users", []),
+    fetchOr<Department[]>("/departments", []),
   ]);
 
   // Metrics calculations
-  const totalAudits = projects.length;
-  const activeAudits = projects.filter(p => p.status === "RELEASED").length;
-  const planningAudits = projects.filter(p => p.status === "PLANNING").length;
+  const totalOePlans = projects.length;
+  const activeOePlans = projects.filter(p => p.status === "RELEASED").length;
+  const planningOePlans = projects.filter(p => p.status === "PLANNING").length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -35,7 +33,7 @@ export default async function DashboardPage() {
       {/* Welcome Banner */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">OE Desk Portal</h1>
+          <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">OE Portal</h1>
           <p className="text-xs text-muted-foreground">
             Welcome back, <span className="text-slate-800 dark:text-slate-200 font-semibold">{user.name}</span>. Below is the operational compliance status for Hanuman Estate.
           </p>
@@ -55,9 +53,9 @@ export default async function DashboardPage() {
             <FolderLock className="w-4 h-4 text-slate-400" />
           </div>
           <div className="space-y-0.5">
-            <div className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100">{totalAudits}</div>
+            <div className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100">{totalOePlans}</div>
             <div className="text-[10px] text-slate-400">
-              <span className="text-slate-700 dark:text-slate-300 font-bold">{activeAudits}</span> active, <span className="text-slate-700 dark:text-slate-300 font-bold">{planningAudits}</span> in planning
+              <span className="text-slate-700 dark:text-slate-300 font-bold">{activeOePlans}</span> active, <span className="text-slate-700 dark:text-slate-300 font-bold">{planningOePlans}</span> in planning
             </div>
           </div>
         </div>
@@ -77,7 +75,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Main Grid: Active Audits Table */}
+      {/* Main Grid: Active OE Plans Table */}
       <div className="space-y-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm overflow-hidden">
           <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900">
@@ -113,7 +111,7 @@ export default async function DashboardPage() {
                       <Link href="/planning">{proj.name}</Link>
                     </td>
                     <td className="px-5 py-3.5 text-slate-500">
-                      {users.find(u => u.id === proj.leadAuditorId)?.name || "Unassigned"}
+                      {users.find(u => u.id === proj.leaderId)?.name || "Unassigned"}
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">

@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Login and permission check",
+    "output": "oe-login-permissions.html",
+    "viewBox": [
+      1040,
+      632
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Browser",
+      "sublabel": "OE staff"
+    },
+    {
+      "id": "next",
+      "type": "frontend",
+      "label": "Next.js",
+      "sublabel": "server :3000"
+    },
+    {
+      "id": "auth",
+      "type": "backend",
+      "label": "Auth module",
+      "sublabel": "/auth/login"
+    },
+    {
+      "id": "guards",
+      "type": "security",
+      "label": "Guards",
+      "sublabel": "JWT + permissions"
+    },
+    {
+      "id": "svc",
+      "type": "backend",
+      "label": "OE Plans",
+      "sublabel": "service"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "Prisma"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 293,
+      "label": "Login"
+    },
+    {
+      "from": 309,
+      "to": 565,
+      "label": "Create an OE Plan"
+    }
+  ],
+  "messages": [
+    {
+      "id": "login-post",
+      "from": "browser",
+      "to": "next",
+      "y": 165,
+      "label": "POST /api/session/login",
+      "variant": "emphasis"
+    },
+    {
+      "id": "auth-post",
+      "from": "next",
+      "to": "auth",
+      "y": 193,
+      "label": "POST /auth/login",
+      "variant": "default"
+    },
+    {
+      "id": "user-lookup",
+      "from": "auth",
+      "to": "db",
+      "y": 221,
+      "label": "find user, check password",
+      "variant": "security"
+    },
+    {
+      "id": "token-issued",
+      "from": "auth",
+      "to": "next",
+      "y": 249,
+      "label": "12h JWT + user",
+      "variant": "return"
+    },
+    {
+      "id": "cookie-set",
+      "from": "next",
+      "to": "browser",
+      "y": 277,
+      "label": "httpOnly cookie",
+      "variant": "return"
+    },
+    {
+      "id": "create-click",
+      "from": "browser",
+      "to": "next",
+      "y": 325,
+      "label": "create OE Plan",
+      "variant": "emphasis"
+    },
+    {
+      "id": "create-post",
+      "from": "next",
+      "to": "guards",
+      "y": 353,
+      "label": "POST /oe-plans, Bearer JWT",
+      "variant": "emphasis"
+    },
+    {
+      "id": "grants-read",
+      "from": "guards",
+      "to": "db",
+      "y": 381,
+      "label": "read user's group grants",
+      "variant": "security"
+    },
+    {
+      "id": "grants-rows",
+      "from": "db",
+      "to": "guards",
+      "y": 409,
+      "label": "permission keys",
+      "variant": "return"
+    },
+    {
+      "id": "denied",
+      "from": "guards",
+      "to": "next",
+      "y": 437,
+      "label": "403 if key missing",
+      "variant": "security"
+    },
+    {
+      "id": "allowed",
+      "from": "guards",
+      "to": "svc",
+      "y": 465,
+      "label": "oe-plans:create granted",
+      "variant": "emphasis"
+    },
+    {
+      "id": "insert-plan",
+      "from": "svc",
+      "to": "db",
+      "y": 493,
+      "label": "next OEP code, insert",
+      "variant": "default"
+    },
+    {
+      "id": "created",
+      "from": "svc",
+      "to": "next",
+      "y": 521,
+      "label": "201 OE Plan",
+      "variant": "return"
+    },
+    {
+      "id": "page-updated",
+      "from": "next",
+      "to": "browser",
+      "y": 549,
+      "label": "updated page",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "next",
+      "from": 160,
+      "to": 283,
+      "type": "frontend"
+    },
+    {
+      "participant": "auth",
+      "from": 188,
+      "to": 255,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 213,
+      "to": 233,
+      "type": "database"
+    },
+    {
+      "participant": "next",
+      "from": 320,
+      "to": 556,
+      "type": "frontend"
+    },
+    {
+      "participant": "guards",
+      "from": 348,
+      "to": 470,
+      "type": "security"
+    },
+    {
+      "participant": "db",
+      "from": 376,
+      "to": 414,
+      "type": "database"
+    },
+    {
+      "participant": "svc",
+      "from": 460,
+      "to": 526,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 488,
+      "to": 508,
+      "type": "database"
+    }
+  ]
+}

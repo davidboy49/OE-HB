@@ -147,7 +147,7 @@ export default function LogsClient({ initialLogs, currentUser }: LogsClientProps
         <div className="space-y-1">
           <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <History className="w-5 h-5 text-[#05375c] dark:text-sky-400" />
-            <span>Identity & Audit Action Logs</span>
+            <span>Identity & Activity Logs</span>
           </h1>
           <p className="text-xs text-muted-foreground">
             Administrative record of all state mutations and resource creations executed by authenticated users.

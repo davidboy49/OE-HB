@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Generates unique document codes using Option B format: [PREFIX]-[YYYY]-[SEQUENCE]
- * Example: AP-2026-0001
+ * Generates unique, perpetually-incrementing document codes: [PREFIX]-[SEQUENCE]
+ * Example: OEP-0001, OEP-0002, ...
  *
- * Ported from src/lib/codeGenerator.ts. The original had a raw-SQL fallback
- * branch for a dev-mode Next.js hot-reload edge case (stale cached Prisma
- * client) - dropped here since it doesn't apply to Nest's DI lifecycle.
+ * Deliberately not year-scoped: OE Plan codes used to reset to 0001 every
+ * calendar year (AP-2026-0001), which made the number meaningless as a
+ * stable, sortable identifier once a plan spanned a year boundary. The
+ * sequence now lives under a single per-prefix key, starts at 0001, and
+ * never resets.
  */
 @Injectable()
 export class CodeGeneratorService {
@@ -16,49 +18,22 @@ export class CodeGeneratorService {
   /**
    * Generates the next unique document code, incrementing the persisted counter.
    *
-   * @param prefix Document type prefix (e.g., "AP", "ES", "FD", "AR", "DR")
-   * @param year Optional year integer. Defaults to current calendar year.
+   * @param prefix Document type prefix (e.g., "OEP").
    * @param digits Number of zero-padded digits (default 4).
    */
   async generateDocumentCode(
-    prefix: string = 'AP',
-    year?: number,
+    prefix: string = 'OEP',
     digits: number = 4,
   ): Promise<string> {
-    const targetYear = year || new Date().getFullYear();
-    const cleanPrefix = prefix.trim().toUpperCase();
-    const key = `${cleanPrefix}-${targetYear}`;
+    const key = prefix.trim().toUpperCase();
 
     const sequence = await this.prisma.documentSequence.upsert({
       where: { key },
       update: { currentVal: { increment: 1 } },
       create: { key, currentVal: 1 },
     });
-    const currentVal = sequence.currentVal;
 
-    const seqStr = String(currentVal).padStart(digits, '0');
-    return `${key}-${seqStr}`;
-  }
-
-  /**
-   * Previews the next code that will be assigned without incrementing the database counter.
-   */
-  async getNextDocumentCodePreview(
-    prefix: string = 'AP',
-    year?: number,
-    digits: number = 4,
-  ): Promise<string> {
-    const targetYear = year || new Date().getFullYear();
-    const cleanPrefix = prefix.trim().toUpperCase();
-    const key = `${cleanPrefix}-${targetYear}`;
-
-    const seq = await this.prisma.documentSequence.findUnique({
-      where: { key },
-    });
-    const currentVal = seq?.currentVal || 0;
-
-    const nextVal = currentVal + 1;
-    const seqStr = String(nextVal).padStart(digits, '0');
+    const seqStr = String(sequence.currentVal).padStart(digits, '0');
     return `${key}-${seqStr}`;
   }
 }

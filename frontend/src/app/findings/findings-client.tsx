@@ -23,11 +23,12 @@ import {
 } from "lucide-react";
 import type {
   User,
-  AuditProject,
+  OePlan,
+  Project,
   ExecutionSchedule as FindingReport,
   ScheduleRow,
   Department
-} from "@auditdesk/shared";
+} from "@oeportal/shared";
 
 interface FindingRow extends ScheduleRow {
   correctiveActionDate?: string;
@@ -38,7 +39,7 @@ interface FindingRow extends ScheduleRow {
   correctiveFinalDatetime?: string;
   attachments?: any[];
 }
-import { parsePlanItems } from "@auditdesk/shared";
+import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -129,18 +130,20 @@ const formatTimeRange = (from: string, to: string) => {
 interface FindingsClientProps {
   initialSchedules: FindingReport[];
   releasedExecSchedules: FindingReport[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
+  plannedEngagements?: Project[];
   currentUser: User;
 }
 
-export default function FindingsClient({ 
-  initialSchedules, 
+export default function FindingsClient({
+  initialSchedules,
   releasedExecSchedules,
-  projects, 
-  users, 
+  projects,
+  users,
   departments,
+  plannedEngagements = [],
   currentUser 
 }: FindingsClientProps) {
   const [schedules, setSchedules] = useState<FindingReport[]>(initialSchedules);
@@ -161,7 +164,7 @@ export default function FindingsClient({
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("NCN #001/26");
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
   const [leadExecution, setLeadExecution] = useState("");
   const [teamMembers, setTeamMembers] = useState("");
   const [additionalAttendees, setAdditionalAttendees] = useState("");
@@ -169,7 +172,6 @@ export default function FindingsClient({
   const [language, setLanguage] = useState("finding"); // Hidden type flag
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<FindingRow[]>([]);
   const [findingStatus, setFindingStatus] = useState<"DRAFT" | "RELEASED">("DRAFT");
   // Active row index for card editing
@@ -244,10 +246,10 @@ export default function FindingsClient({
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
     if (currentUser.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser.id || proj.leadAuditorId === currentUser.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser.name)) return true;
-    if (proj.auditorIds?.includes(currentUser.id)) return true;
+    if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser.name)) return true;
+    if (proj.memberIds?.includes(currentUser.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser.id) || picList.includes(currentUser.name)) return true;
     return false;
@@ -288,7 +290,7 @@ export default function FindingsClient({
       setTeamMembers("");
       setAdditionalAttendees("");
       setActualVisitDate("");
-      setAuditPeriod("");
+      setOePeriod("");
       setStandards("");
       setObjectives("");
       setScope("");
@@ -309,12 +311,23 @@ export default function FindingsClient({
     setTeamMembers(execSched.teamMembers || "");
     setAdditionalAttendees(execSched.additionalAttendees || "");
     setActualVisitDate(""); // user fills in finding date separately
-    setAuditPeriod(execSched.auditPeriod || "");
+    setOePeriod(execSched.oePeriod || "");
     setStandards(execSched.standards || "");
 
     const proj = projects.find(p => p.id === execSched.projectId);
-    setObjectives(proj?.objectives || "");
-    setScope(proj?.scope || "");
+    // Resolve inherited objectives/scope from the linked Planned Engagement -
+    // OePlan.objectives/scope alone can be empty or stale.
+    if (proj) {
+      const linkedPlannedEngagement = proj.projectId
+        ? plannedEngagements.find(a => a.id === proj.projectId)
+        : null;
+      const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
+      setObjectives(inherited.objectives);
+      setScope(inherited.scope);
+    } else {
+      setObjectives("");
+      setScope("");
+    }
     setRows([]);
   };
 
@@ -326,7 +339,7 @@ export default function FindingsClient({
     setAddress("");
     setVisitNumber("");
     setActualVisitDate("");
-    setAuditPeriod("");
+    setOePeriod("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
@@ -335,7 +348,6 @@ export default function FindingsClient({
     setObjectives("");
     setScope("");
     setRows([]);
-    setAttachments([]);
     setFindingStatus("DRAFT");
     setIsModalOpen(true);
   };
@@ -352,7 +364,7 @@ export default function FindingsClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
+    setOePeriod(sched.oePeriod);
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
     setAdditionalAttendees(sched.additionalAttendees);
@@ -360,7 +372,6 @@ export default function FindingsClient({
     setLanguage(sched.language || "finding");
     setObjectives(sched.objectives);
     setScope(sched.scope);
-    setAttachments(sched.attachments ? JSON.parse(sched.attachments) : []);
     
     try {
       setRows(JSON.parse(sched.scheduleRows));
@@ -409,7 +420,7 @@ export default function FindingsClient({
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
@@ -419,7 +430,6 @@ export default function FindingsClient({
       objectives,
       scope,
       scheduleRows: JSON.stringify(options.customRows || rows),
-      attachments: JSON.stringify(attachments),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name,
     };
@@ -473,10 +483,10 @@ export default function FindingsClient({
 
       showFeedback(
         targetStatus === "RELEASED"
-          ? "Audit findings report released and locked."
+          ? "OE findings report released and locked."
           : modalMode === "create"
-            ? "Audit findings report created successfully."
-            : "Audit findings changes saved."
+            ? "OE findings report created successfully."
+            : "OE findings changes saved."
       );
 
       if (shouldClose) setIsModalOpen(false);
@@ -525,7 +535,7 @@ export default function FindingsClient({
     if (!s) return;
 
     showConfirm(
-      "Delete Audit Findings Report",
+      "Delete OE Findings Report",
       `Are you sure you want to delete the findings report for "${s.projectName}"? This action cannot be undone.`,
       async () => {
         try {
@@ -607,7 +617,7 @@ export default function FindingsClient({
       correctiveActionRemarks: "",
       correctiveFinalDate: "",
       correctiveFinalRemarks: "",
-      auditScope: "",
+      oeScope: "",
       attachments: []
     });
   };
@@ -621,7 +631,7 @@ export default function FindingsClient({
     if (!draftRow) return;
     
     // Validation: Linked OE Scope selection is mandatory!
-    if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
+    if (!draftRow.oeScope || draftRow.oeScope.trim() === "") {
       alert("Please select a Linked OE Scope first.");
       return;
     }
@@ -810,7 +820,7 @@ export default function FindingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">Audit Plan Code</th>
+                  <th className="px-6 py-4">OE Plan Code</th>
                   <th className="px-6 py-4">Project Name</th>
                   <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">Finding Date</th>
@@ -880,7 +890,7 @@ export default function FindingsClient({
         </div>
       </div>
 
-      {/* Audit Findings Report Editor Modal */}
+      {/* OE Findings Report Editor Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 overflow-y-auto p-4 no-print animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-7xl shadow-2xl flex flex-col max-h-[94vh] animate-scale-up">
@@ -1209,9 +1219,9 @@ export default function FindingsClient({
                             </label>
                             <MultiSelect
                               singleSelect={true}
-                              selectedValues={draftRow.auditScope ? [draftRow.auditScope] : []}
-                              onChange={(values) => setDraftRow({ ...draftRow, auditScope: values[0] || "" })}
-                              options={parsePlanItems(scope, "IAP-ISCP").map(obj => ({
+                              selectedValues={draftRow.oeScope ? [draftRow.oeScope] : []}
+                              onChange={(values) => setDraftRow({ ...draftRow, oeScope: values[0] || "" })}
+                              options={parsePlanItems(scope, "IOE-SCP").map(obj => ({
                                 value: obj.id,
                                 label: obj.id,
                                 subLabel: obj.text
@@ -1276,7 +1286,7 @@ export default function FindingsClient({
                                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                     <div className="flex items-center gap-3">
                                       <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
-                                        Corrective Final Date:
+                                        Completed Date:
                                       </span>
                                       <input 
                                         type="date"
@@ -1307,9 +1317,9 @@ export default function FindingsClient({
                                     </div>
                                   </div>
                                 <div className="space-y-1.5">
-                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Remarks</label>
-                                  <RichEditor 
-                                    value={draftRow.correctiveFinalRemarks || ""} 
+                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Corrective Action</label>
+                                  <RichEditor
+                                    value={draftRow.correctiveFinalRemarks || ""}
                                     onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })} 
                                   />
                                 </div>
@@ -1431,9 +1441,9 @@ export default function FindingsClient({
                             <td className="px-4 py-3.5 text-center font-sans text-slate-400 border-r border-slate-200 dark:border-slate-800">{idx + 1}</td>
                             
                             <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 font-sans text-slate-800 dark:text-slate-200 font-semibold">
-                              {row.auditScope ? (
+                              {row.oeScope ? (
                                 <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-200">
-                                  {row.auditScope}
+                                  {row.oeScope}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 italic">—</span>
@@ -1517,67 +1527,6 @@ export default function FindingsClient({
                   </table>
               </div>
 
-              {/* Attachments Section */}
-              <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-sm font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  Attachments
-                </h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    className="block w-full text-xs text-slate-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-xs file:font-semibold
-                      file:bg-[#0066cc]/10 file:text-[#0066cc]
-                      hover:file:bg-[#0066cc]/20
-                    "
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const base64 = event.target?.result;
-                        if (typeof base64 === 'string') {
-                          setAttachments([...attachments, {
-                            id: Date.now().toString(),
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            data: base64
-                          }]);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = ''; // reset input
-                    }}
-                  />
-                  {attachments.length > 0 && (
-                    <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                      {attachments.map((att) => (
-                        <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <div className="flex items-center gap-3">
-                            <FileDown className="w-4 h-4 text-slate-400" />
-                            <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
-                              {att.name}
-                            </a>
-                            <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                          </div>
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={() => setAttachments(attachments.filter(a => a.id !== att.id))}
-                              className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
               </div>
 
             </form>

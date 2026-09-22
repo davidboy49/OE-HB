@@ -37,33 +37,54 @@ import {
   Unlock,
   Link
 } from "lucide-react";
-import type { AuditProject, User, Attachment, ScheduleRow, Department, AnnualPlan, AuditPlan, AuditPlanItem } from "@auditdesk/shared";
-import { parsePlanItems, serializePlanItems } from "@auditdesk/shared";
+import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanItem } from "@oeportal/shared";
+import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
+import CreateOePlanModal from "./create-oe-plan-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
 
+// "Which part need to focus on" used to be a list of coded items (JSON array of
+// { id, text }); it is now free text edited in a RichEditor (HTML). Converts a
+// legacy JSON value to an HTML bullet list so previously saved plans still load;
+// anything that isn't a JSON array is already free text and passes through.
+function focusAreaToHtml(raw?: string): string {
+  if (!raw || !raw.trim()) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return raw;
+    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const lines = parsed
+      .map((item) => (typeof item === "string" ? item : item?.text || item?.description || ""))
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    return lines.length ? `<ul>${lines.map((l) => `<li><p>${escape(l)}</p></li>`).join("")}</ul>` : "";
+  } catch {
+    return raw;
+  }
+}
+
 interface PlanningClientProps {
-  initialProjects: AuditProject[];
+  initialProjects: OePlan[];
   users: User[];
   departments: Department[];
   annualPlans: AnnualPlan[];
-  auditPlans: AuditPlan[];
+  plannedEngagements: Project[];
   currentUser: User;
 }
 
 // Per-plan adjustments layered on top of the Scope inherited from the linked
-// Planned Engagement: which inherited/extra item ids are marked inactive for
+// Project: which inherited/extra item ids are marked inactive for
 // this Individual OE Plan only, plus any extra items added locally. Stored as
-// JSON in AuditProject.scope (unused for free text since Scope moved up to
-// the Planned Engagement level).
+// JSON in OePlan.scope (unused for free text since Scope moved up to
+// the Project level).
 interface ScopeOverride {
   inactiveIds: string[];
-  extraItems: AuditPlanItem[];
+  extraItems: PlanItem[];
 }
 
 const parseScopeOverride = (raw?: string): ScopeOverride => {
@@ -79,8 +100,8 @@ const parseScopeOverride = (raw?: string): ScopeOverride => {
   }
 };
 
-export default function PlanningClient({ initialProjects, users, departments, annualPlans, auditPlans, currentUser }: PlanningClientProps) {
-  const [projects, setProjects] = useState<AuditProject[]>(initialProjects);
+export default function PlanningClient({ initialProjects, users, departments, annualPlans, plannedEngagements, currentUser }: PlanningClientProps) {
+  const [projects, setProjects] = useState<OePlan[]>(initialProjects);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjects[0]?.id || "");
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [isCopying, setIsCopying] = useState<boolean>(false);
@@ -119,19 +140,25 @@ export default function PlanningClient({ initialProjects, users, departments, an
   useEffect(() => {
     if (selectedProject?.id) {
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const scanUrl = `${origin}/meetings/scan/${selectedProject.id}`;
+      // One QR per Annual Plan: it opens the signed-in "my department's meetings" page.
+      const annualPlanToken = annualPlans?.find(a => a.id === selectedProject.annualPlanId)?.qrToken;
+      const scanUrl = annualPlanToken ? `${origin}/scan/${annualPlanToken}` : "";
       const planningUrl = `${origin}/planning?id=${selectedProject.id}`;
 
-      QRCode.toDataURL(scanUrl, {
-        width: 400,
-        margin: 2,
-        color: {
-          dark: "#000000",
-          light: "#FFFFFF"
-        }
-      })
-        .then((url) => setScanQrDataUrl(url))
-        .catch((err) => console.error("Failed to generate scan QR", err));
+      if (scanUrl) {
+        QRCode.toDataURL(scanUrl, {
+          width: 400,
+          margin: 2,
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF"
+          }
+        })
+          .then((url) => setScanQrDataUrl(url))
+          .catch((err) => console.error("Failed to generate scan QR", err));
+      } else {
+        setScanQrDataUrl("");
+      }
 
       QRCode.toDataURL(planningUrl, {
         width: 600,
@@ -147,7 +174,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
       setScanQrDataUrl("");
       setPlanningQrDataUrl("");
     }
-  }, [selectedProject?.id]);
+  }, [selectedProject?.id, selectedProject?.annualPlanId, annualPlans]);
 
   const [editName, setEditName] = useState("");
   const [editStatus, setEditStatus] = useState<any>("PLANNING");
@@ -159,15 +186,14 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   // Additional fields state
   const [editWorkflowStage, setEditWorkflowStage] = useState<any>("DRAFTING");
-  const [editAuditorIds, setEditAuditorIds] = useState<string[]>([]);
+  const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
   const [editDeptPicIds, setEditDeptPicIds] = useState<string[]>([]);
   const [editDepartments, setEditDepartments] = useState<string[]>([]);
   const [editAnnualPlanId, setEditAnnualPlanId] = useState("");
-  const [editAuditPlanId, setEditAuditPlanId] = useState("");
-  const [editAttachments, setEditAttachments] = useState<Attachment[]>([]);
+  const [editPlannedEngagementId, setEditPlannedEngagementId] = useState("");
 
   // Selection Dropdown states
-  const [isAuditorDropdownOpen, setIsAuditorDropdownOpen] = useState(false);
+  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [isPicDropdownOpen, setIsPicDropdownOpen] = useState(false);
 
   // Additional screen-matching properties (session local persistence)
@@ -177,8 +203,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [editOpEx, setEditOpEx] = useState("");
   const [editFieldwork, setEditFieldwork] = useState("");
   const [editOutcome, setEditOutcome] = useState("");
-  const [editDataRequestItems, setEditDataRequestItems] = useState<AuditPlanItem[]>([]);
-  const [editFocusAreaItems, setEditFocusAreaItems] = useState<AuditPlanItem[]>([]);
+  const [editDataRequestItems, setEditDataRequestItems] = useState<PlanItem[]>([]);
+  const [editFocusArea, setEditFocusArea] = useState("");
   
   // Timeline states
   const [editTimelinePresDate, setEditTimelinePresDate] = useState("");
@@ -212,13 +238,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
   };
 
-  const pruneConfirmations = (attendeeNames: string[], confirmations: Record<string, AttendeeConfirmation>) => {
-    return attendeeNames.reduce<Record<string, AttendeeConfirmation>>((next, name) => {
-      if (confirmations[name]) next[name] = confirmations[name];
-      return next;
-    }, {});
-  };
-
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
 
   const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
@@ -229,6 +248,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
     // Find linked meeting schedule if any
     const linkedMeeting = selectedProject.executionSchedules?.find(e => e.language === "meeting");
+    if (!linkedMeeting) return;
 
     if (!canConfirmAttendee(attendeeName)) {
       showFeedback("Only the attendee or an Admin can confirm this attendance.");
@@ -240,37 +260,20 @@ export default function PlanningClient({ initialProjects, users, departments, an
       return;
     }
 
-    const deptPicArray = editDeptPicIds;
-    const nextConfirmations = pruneConfirmations(deptPicArray, {
-      ...attendeeConfirmations,
-      [attendeeName]: {
-        confirmedAt: new Date().toISOString(),
-        confirmedBy: currentUser.name
-      }
-    });
-
     try {
-      if (linkedMeeting) {
-        await clientApi(`/execution-schedules/${linkedMeeting.id}`, {
+      // A single atomic write to just this attendee's key (server-enforced: only the
+      // attendee themself or an Admin may confirm) - never a full read/merge/write of the
+      // whole confirmations blob, which could silently drop someone else's concurrent
+      // confirmation.
+      const updated = await clientApi<{ attendeeConfirmations?: string }>(
+        `/execution-schedules/${linkedMeeting.id}/attendee-confirmation`,
+        {
           method: "PATCH",
-          body: JSON.stringify({
-            attendeeConfirmations: JSON.stringify(nextConfirmations),
-            lastModifiedBy: currentUser.name
-          })
-        });
-      }
-
-      const updatedProj = await clientApi<AuditProject>(`/audit-projects/${selectedProject.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          deptPicConfirmations: JSON.stringify(nextConfirmations)
-        })
-      });
-
-      if (updatedProj) {
-        setAttendeeConfirmations(nextConfirmations);
-        setProjects(projects.map(p => (p.id === selectedProject.id ? updatedProj : p)));
-      }
+          body: JSON.stringify({ attendeeName }),
+        }
+      );
+      setAttendeeConfirmations(parseAttendeeConfirmations(updated.attendeeConfirmations));
+      showFeedback(`${attendeeName} confirmed attendance.`);
     } catch (err: any) {
       console.error(err);
       showFeedback(`Confirmation failed: ${err.message || err.toString()}`);
@@ -304,13 +307,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [completionStatus, setCompletionStatus] = useState("45% Planned");
 
   // New Project Form state
-  const [newCode, setNewCode] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
   const [newLeads, setNewLeads] = useState<string[]>([]);
   const [newDepartments, setNewDepartments] = useState<string[]>([]);
   const [newAnnualPlanId, setNewAnnualPlanId] = useState("");
-  const [newAuditPlanId, setNewAuditPlanId] = useState("");
+  const [newPlannedEngagementId, setNewPlannedEngagementId] = useState("");
 
   const closeNewProjectModal = () => {
     setIsCreating(false);
@@ -327,17 +329,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setNewLeads([]);
     setNewDepartments([]);
     setNewAnnualPlanId("");
-    setNewAuditPlanId("");
-    
-    try {
-      const nextCode = await clientApi<string>("/audit-projects/next-code?prefix=AP");
-      setNewCode(nextCode);
-    } catch (e) {
-      setNewCode("AUTO");
-    }
+    setNewPlannedEngagementId("");
   };
 
-  const openCopyProjectModal = async (proj: AuditProject) => {
+  const openCopyProjectModal = async (proj: OePlan) => {
     setIsCopying(true);
     setIsCreating(true);
     setSelectedProjectId(proj.id);
@@ -345,12 +340,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setNewEnd(proj.endDate);
     
     const initialLeads: string[] = [];
-    if (proj.leadAuditorId) {
-      const matchedUser = users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId);
+    if (proj.leaderId) {
+      const matchedUser = users.find(u => u.id === proj.leaderId || u.name === proj.leaderId);
       if (matchedUser && !initialLeads.includes(matchedUser.id)) initialLeads.push(matchedUser.id);
     }
-    if (proj.auditorNames) {
-      proj.auditorNames.split(",").forEach(n => {
+    if (proj.memberNames) {
+      proj.memberNames.split(",").forEach(n => {
         const clean = n.trim();
         const matched = users.find(u => u.name === clean || u.id === clean);
         if (matched && !initialLeads.includes(matched.id)) initialLeads.push(matched.id);
@@ -358,13 +353,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
     setNewLeads(initialLeads);
     setNewDepartments([]);
-
-    try {
-      const nextCode = await clientApi<string>("/audit-projects/next-code?prefix=AP");
-      setNewCode(nextCode);
-    } catch (e) {
-      setNewCode("AUTO");
-    }
   };
 
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -380,7 +368,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (editName !== selectedProject.name) return true;
     if (editStatus !== selectedProject.status) return true;
     if (editAnnualPlanId !== (selectedProject.annualPlanId || "")) return true;
-    if (editAuditPlanId !== (selectedProject.auditPlanId || "")) return true;
+    if (editPlannedEngagementId !== (selectedProject.projectId || "")) return true;
     
     const prevDepartments = selectedProject.departments ? selectedProject.departments.split(",").map(s => s.trim()).filter(Boolean) : [];
     if (editDepartments.length !== prevDepartments.length || !editDepartments.every(d => prevDepartments.includes(d))) return true;
@@ -388,7 +376,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (editPlanning !== selectedProject.planningDetails) return true;
     if (editStart !== selectedProject.startDate) return true;
     if (editEnd !== selectedProject.endDate) return true;
-    if (editLead !== (selectedProject.leadAuditorId || "")) return true;
+    if (editLead !== (selectedProject.leaderId || "")) return true;
     
     if (editWorkflowStage !== (selectedProject.workflowStage || "DRAFTING")) return true;
     
@@ -410,7 +398,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (editOutcome !== dbOutcome) return true;
 
     if (serializePlanItems(editDataRequestItems) !== (selectedProject.dataRequestType || "")) return true;
-    if (serializePlanItems(editFocusAreaItems) !== (selectedProject.focusArea || "")) return true;
+    if (editFocusArea !== focusAreaToHtml(selectedProject.focusArea)) return true;
     
     const currentTimelineJson = JSON.stringify({
       presentationDate: editTimelinePresDate,
@@ -462,8 +450,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
     if (currentApprovalsJson !== dbApprovalsJson) return true;
     
-    const prevAuditors = selectedProject.auditorNames ? selectedProject.auditorNames.split(",").map(s => s.trim()).filter(Boolean) : [];
-    if (editAuditorIds.length !== prevAuditors.length || !editAuditorIds.every(name => prevAuditors.includes(name))) return true;
+    const prevMembers = selectedProject.memberNames ? selectedProject.memberNames.split(",").map(s => s.trim()).filter(Boolean) : [];
+    if (editMemberIds.length !== prevMembers.length || !editMemberIds.every(name => prevMembers.includes(name))) return true;
     
     const prevPics = selectedProject.deptPicIds ? selectedProject.deptPicIds.split(",").filter(Boolean) : [];
     if (editDeptPicIds.length !== prevPics.length || !editDeptPicIds.every(name => prevPics.includes(name))) return true;
@@ -480,40 +468,39 @@ export default function PlanningClient({ initialProjects, users, departments, an
   };
 
   // Open popup and load project for editing
-  const openProjectEditor = (proj: AuditProject) => {
+  const openProjectEditor = (proj: OePlan) => {
     setSelectedProjectId(proj.id);
-    // Project Name mirrors the linked Planned Engagement's Project Name; fall
+    // Project Name mirrors the linked Project's Project Name; fall
     // back to whatever name is already stored for legacy/unlinked plans.
-    const linkedAp = proj.auditPlanId ? auditPlans?.find(ap => ap.id === proj.auditPlanId) : null;
+    const linkedAp = proj.projectId ? plannedEngagements?.find(ap => ap.id === proj.projectId) : null;
     setEditName(linkedAp?.projectName?.trim() || proj.name);
     setEditStatus(proj.status);
 
     setEditPlanning(proj.planningDetails);
     setEditStart(proj.startDate);
     setEditEnd(proj.endDate);
-    setEditLead(proj.leadAuditorId ? (users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId)?.id || proj.leadAuditorId) : "");
+    setEditLead(proj.leaderId ? (users.find(u => u.id === proj.leaderId || u.name === proj.leaderId)?.id || proj.leaderId) : "");
     setEditScopeOverride(parseScopeOverride(proj.scope));
 
     // Set custom SQLite integrations
     setEditWorkflowStage(proj.workflowStage || "DRAFTING");
     setEditDepartments(proj.departments ? proj.departments.split(",").map(s => s.trim()).filter(Boolean) : []);
-    setEditAuditorIds(proj.auditorNames ? proj.auditorNames.split(",").map(s => s.trim()).filter(Boolean) : []);
+    setEditMemberIds(proj.memberNames ? proj.memberNames.split(",").map(s => s.trim()).filter(Boolean) : []);
     setEditDeptPicIds(proj.deptPicIds ? proj.deptPicIds.split(",").filter(Boolean).map(s => {
       const clean = s.trim();
       const matched = users.find(u => u.name === clean || u.id === clean);
       return matched ? matched.name : clean;
     }) : []);
     setEditAnnualPlanId(proj.annualPlanId || "");
-    setEditAuditPlanId(proj.auditPlanId || "");
-    setEditAttachments(proj.attachments || []);
+    setEditPlannedEngagementId(proj.projectId || "");
 
     // Load scoping values from database fields, with default fallback templates if null/empty
     setEditRiskClass(proj.riskClass || "");
     setEditOpEx(proj.opEx || "");
     setEditFieldwork(proj.fieldwork || "");
     setEditOutcome(proj.outcome || "");
-    setEditDataRequestItems(parsePlanItems(proj.dataRequestType, "AP-DRQ"));
-    setEditFocusAreaItems(parsePlanItems(proj.focusArea, "AP-FCA"));
+    setEditDataRequestItems(parsePlanItems(proj.dataRequestType, "OE-DRQ"));
+    setEditFocusArea(focusAreaToHtml(proj.focusArea));
     
     let timelineObj = {
       presentationDate: "",
@@ -564,7 +551,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setAttendeeConfirmations(initialConfirmations);
     
     // Close dropdown panels
-    setIsAuditorDropdownOpen(false);
+    setIsMemberDropdownOpen(false);
     setIsPicDropdownOpen(false);
     setFeedback(null);
 
@@ -573,10 +560,15 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleSaveEdit = async () => {
     if (!selectedProject) return;
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
+      return;
+    }
     showFeedback("Submitting scoping details...");
 
     try {
-      const updated = await clientApi<AuditProject>(`/audit-projects/${selectedProject.id}`, {
+      const updated = await clientApi<OePlan>(`/oe-plans/${selectedProject.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: editName,
@@ -585,19 +577,19 @@ export default function PlanningClient({ initialProjects, users, departments, an
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
-          leadAuditorId: editLead || null,
+          leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
           departments: editDepartments.join(","),
-          auditorIds: editAuditorIds,
-          auditorNames: editAuditorIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
+          memberIds: editMemberIds,
+          memberNames: editMemberIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -615,7 +607,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          auditPlanId: editAuditPlanId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -633,10 +625,15 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleSaveOnly = async () => {
     if (!selectedProject) return;
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
+      return;
+    }
     showFeedback("Saving draft...");
 
     try {
-      const updated = await clientApi<AuditProject>(`/audit-projects/${selectedProject.id}`, {
+      const updated = await clientApi<OePlan>(`/oe-plans/${selectedProject.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: editName,
@@ -645,19 +642,19 @@ export default function PlanningClient({ initialProjects, users, departments, an
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
-          leadAuditorId: editLead || null,
+          leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
           departments: editDepartments.join(","),
-          auditorIds: editAuditorIds,
-          auditorNames: editAuditorIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
+          memberIds: editMemberIds,
+          memberNames: editMemberIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -675,7 +672,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          auditPlanId: editAuditPlanId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -696,7 +693,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditWorkflowStage(newStage);
     if (!selectedProject) return;
 
-    const updated = await clientApi<AuditProject>(`/audit-projects/${selectedProject.id}`, {
+    const updated = await clientApi<OePlan>(`/oe-plans/${selectedProject.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         workflowStage: newStage
@@ -713,7 +710,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditStatus(newStatus);
     showFeedback(`Updating status to ${newStatus}...`);
     try {
-      const updated = await clientApi<AuditProject>(`/audit-projects/${selectedProject.id}`, {
+      const updated = await clientApi<OePlan>(`/oe-plans/${selectedProject.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: editName,
@@ -722,19 +719,19 @@ export default function PlanningClient({ initialProjects, users, departments, an
           planningDetails: editPlanning,
           startDate: editStart,
           endDate: editEnd,
-          leadAuditorId: editLead || null,
+          leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
           departments: editDepartments.join(","),
-          auditorIds: editAuditorIds,
-          auditorNames: editAuditorIds.join(","),
+          memberIds: editMemberIds,
+          memberNames: editMemberIds.join(","),
           riskProcess: editRiskProcess,
           riskClass: editRiskClass,
           opEx: editOpEx,
           fieldwork: editFieldwork,
           outcome: editOutcome,
           dataRequestType: serializePlanItems(editDataRequestItems),
-          focusArea: serializePlanItems(editFocusAreaItems),
+          focusArea: editFocusArea,
           opExTimeline: JSON.stringify({
             presentationDate: editTimelinePresDate,
             notificationDate: editTimelineNotificationDate,
@@ -752,7 +749,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             approvedDate: editApprovedDate
           }),
           annualPlanId: editAnnualPlanId,
-          auditPlanId: editAuditPlanId
+          projectId: editPlannedEngagementId
         })
       });
 
@@ -777,7 +774,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const getMissingMandatoryFields = (): string[] => {
     const missing: string[] = [];
-    if (!editAuditPlanId) missing.push("Planned Engagement");
+    if (!editPlannedEngagementId) missing.push("Project Name");
     if (editDepartments.length === 0) missing.push("Department");
     if (!editLead) missing.push("OE Leader");
     if (!editStart) missing.push("Start Date");
@@ -792,6 +789,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
       showFeedback(`Cannot submit for approval - missing required info: ${missing.join(", ")}.`);
       return;
     }
+    const dateError = validateDateRange(editStart, editEnd);
+    if (dateError) {
+      showFeedback(`Cannot submit for approval - ${dateError.charAt(0).toLowerCase()}${dateError.slice(1)}`);
+      return;
+    }
     await saveStatusChange("SUBMITTED_FOR_APPROVAL");
     const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
       method: "POST",
@@ -800,7 +802,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "SUBMITTED_FOR_APPROVAL",
-          details: "The audit plan scoping and timelines have been submitted for approval review."
+          details: "The OE plan scoping and timelines have been submitted for approval review."
         }
       })
     });
@@ -819,7 +821,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "RELEASED (APPROVED)",
-          details: "The audit plan has been officially approved and released by the OE Leader."
+          details: "The OE plan has been officially approved and released by the OE Leader."
         }
       })
     });
@@ -838,7 +840,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "REJECTED (REOPENED)",
-          details: "The audit plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
+          details: "The OE plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
         }
       })
     });
@@ -868,7 +870,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleClosePlan = async () => {
     if (!selectedProject) return;
-    if (!window.confirm("Are you sure you want to CLOSE this Audit Plan once and for all?\n\nOnce closed, no new or existing Open Meetings, Execution Schedules, or Audit Findings will be allowed to point to this plan.")) return;
+    if (!window.confirm("Are you sure you want to CLOSE this OE Plan once and for all?\n\nOnce closed, no new or existing Open Meetings, Execution Schedules, or OE Findings will be allowed to point to this plan.")) return;
     await saveStatusChange("CLOSED");
     const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
       method: "POST",
@@ -877,7 +879,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "CLOSED",
-          details: "The audit plan has been officially closed and archived by the OE Leader/Admin."
+          details: "The OE plan has been officially closed and archived by the OE Leader/Admin."
         }
       })
     });
@@ -888,7 +890,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleReopenClosedPlan = async () => {
     if (!selectedProject) return;
-    if (!window.confirm("Are you sure you want to REOPEN this closed Audit Plan?")) return;
+    if (!window.confirm("Are you sure you want to REOPEN this closed OE Plan?")) return;
     await saveStatusChange("RELEASED");
     const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
       method: "POST",
@@ -897,7 +899,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
         projectId: selectedProject.id,
         variables: {
           status: "RELEASED (REOPENED)",
-          details: "The closed audit plan has been reopened by the OE Leader/Admin."
+          details: "The closed OE plan has been reopened by the OE Leader/Admin."
         }
       })
     });
@@ -908,20 +910,25 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAuditPlanId || !newStart || !newEnd) {
-      showFeedback("Error: Planned Engagement, Start Date, and End Date are required.");
+    if (!newPlannedEngagementId || !newStart || !newEnd) {
+      showFeedback("Error: Project Name, Start Date, and End Date are required.");
+      return;
+    }
+    const dateError = validateDateRange(newStart, newEnd);
+    if (dateError) {
+      showFeedback(`Error: ${dateError}`);
       return;
     }
 
-    const leadAuditorIdParam = newLeads[0] || null;
+    const leaderIdParam = newLeads[0] || null;
 
-    const selectedAp = auditPlans?.find(ap => ap.id === newAuditPlanId) || null;
+    const selectedAp = plannedEngagements?.find(ap => ap.id === newPlannedEngagementId) || null;
     const deptVal = selectedAp?.topic || (newDepartments.length > 0 ? newDepartments.join(",") : "");
     // Project Name is no longer typed manually - it's derived from the linked
-    // Planned Engagement so the two stay in sync.
+    // Project so the two stay in sync.
     const derivedName = selectedAp?.projectName?.trim() || `${selectedAp?.topic || "OE"} - ${selectedAp?.version || "V1"}`;
 
-    const newProj = await clientApi<AuditProject>("/audit-projects", {
+    const newProj = await clientApi<OePlan>("/oe-plans", {
       method: "POST",
       body: JSON.stringify({
         name: derivedName,
@@ -931,27 +938,27 @@ export default function PlanningClient({ initialProjects, users, departments, an
         planningDetails: "",
         startDate: newStart,
         endDate: newEnd,
-        leadAuditorId: leadAuditorIdParam,
+        leaderId: leaderIdParam,
         departments: deptVal,
         annualPlanId: newAnnualPlanId || null,
-        auditPlanId: newAuditPlanId || null
+        projectId: newPlannedEngagementId || null
       })
     });
 
     let finalProj = newProj;
 
     // The creator must always end up a project member (isProjectMember checks
-    // leadAuditorId/auditorIds/auditorNames/deptPicIds - there's no separate
+    // leaderId/memberIds/memberNames/deptPicIds - there's no separate
     // "createdBy" field), or they'd be locked out of the very plan they just
     // created whenever they didn't happen to pick themselves in the Lead
-    // Auditor selector above.
+    // OE Member selector above.
     const namesWithCreator = Array.from(new Set([...newLeads, currentUser.name]));
     const idsWithCreator = namesWithCreator.map(l => users.find(u => u.name === l || u.id === l)?.id || l);
 
     if (isCopying && selectedProjectId) {
       const originalProj = projects.find(p => p.id === selectedProjectId);
       if (originalProj) {
-        const baseNames = newLeads.length > 0 ? newLeads : (originalProj.auditorNames ? originalProj.auditorNames.split(",").map(s => s.trim()).filter(Boolean) : []);
+        const baseNames = newLeads.length > 0 ? newLeads : (originalProj.memberNames ? originalProj.memberNames.split(",").map(s => s.trim()).filter(Boolean) : []);
         const finalNames = Array.from(new Set([...baseNames, currentUser.name]));
         const copyPayload = {
           scope: originalProj.scope || "",
@@ -968,10 +975,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
           approvals: originalProj.approvals || "",
           deptPicIds: originalProj.deptPicIds || "",
           departments: originalProj.departments || "",
-          auditorNames: finalNames.join(","),
-          auditorIds: finalNames.map(l => users.find(u => u.name === l || u.id === l)?.id || l)
+          memberNames: finalNames.join(","),
+          memberIds: finalNames.map(l => users.find(u => u.name === l || u.id === l)?.id || l)
         };
-        const updated = await clientApi<AuditProject>(`/audit-projects/${newProj.id}`, {
+        const updated = await clientApi<OePlan>(`/oe-plans/${newProj.id}`, {
           method: "PATCH",
           body: JSON.stringify(copyPayload)
         });
@@ -980,11 +987,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
         }
       }
     } else {
-      const updated = await clientApi<AuditProject>(`/audit-projects/${newProj.id}`, {
+      const updated = await clientApi<OePlan>(`/oe-plans/${newProj.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          auditorNames: namesWithCreator.join(","),
-          auditorIds: idsWithCreator
+          memberNames: namesWithCreator.join(","),
+          memberIds: idsWithCreator
         })
       });
       if (updated) {
@@ -997,7 +1004,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
     openProjectEditor(finalProj);
     
     // Clear form
-    setNewCode("");
     setNewStart("");
     setNewEnd("");
     setNewLeads([]);
@@ -1016,7 +1022,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const addExtraScopeItem = () => {
     setEditScopeOverride(prev => {
-      const newId = `AP-ISCP-EX-${String(prev.extraItems.length + 1).padStart(2, "0")}`;
+      const newId = `OE-SCP-EX-${String(prev.extraItems.length + 1).padStart(2, "0")}`;
       return { ...prev, extraItems: [...prev.extraItems, { id: newId, text: "" }] };
     });
   };
@@ -1039,17 +1045,17 @@ export default function PlanningClient({ initialProjects, users, departments, an
     });
   };
 
-  // Multiple Auditors selection handlers
-  const toggleAuditor = (userId: string) => {
-    if (editAuditorIds.includes(userId)) {
-      setEditAuditorIds(editAuditorIds.filter(id => id !== userId));
+  // Multiple OE Members selection handlers
+  const toggleMember = (userId: string) => {
+    if (editMemberIds.includes(userId)) {
+      setEditMemberIds(editMemberIds.filter(id => id !== userId));
     } else {
-      setEditAuditorIds([...editAuditorIds, userId]);
+      setEditMemberIds([...editMemberIds, userId]);
     }
   };
 
-  const removeAuditor = (userId: string) => {
-    setEditAuditorIds(editAuditorIds.filter(id => id !== userId));
+  const removeMember = (userId: string) => {
+    setEditMemberIds(editMemberIds.filter(id => id !== userId));
   };
 
   // Multiple Department PICs selection handlers
@@ -1065,76 +1071,19 @@ export default function PlanningClient({ initialProjects, users, departments, an
     setEditDeptPicIds(editDeptPicIds.filter(id => id !== userId));
   };
 
-  // Attachments handlers
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedProject || !e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    
-    // Read file data as base64
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64Data = reader.result as string;
-      const newAttachment = await clientApi<Attachment>("/attachments", {
-        method: "POST",
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-          fileData: base64Data
-        })
-      });
-
-      if (newAttachment) {
-        const freshAttachments = [...editAttachments, newAttachment];
-        setEditAttachments(freshAttachments);
-        
-        // Update project state locally
-        setProjects(projects.map(p => (p.id === selectedProject.id ? { ...p, attachments: freshAttachments } : p)));
-      }
-    };
-    reader.readAsDataURL(file);
-    
-    // Reset uploader
-    e.target.value = "";
-  };
-
-  const handleDeleteFile = async (attachmentId: string) => {
-    if (!selectedProject) return;
-    
-    const success = await clientApi<boolean>(`/attachments/${attachmentId}`, { method: "DELETE" });
-    if (success) {
-      const freshAttachments = editAttachments.filter(a => a.id !== attachmentId);
-      setEditAttachments(freshAttachments);
-      
-      // Update project state locally
-      setProjects(projects.map(p => (p.id === selectedProject.id ? { ...p, attachments: freshAttachments } : p)));
-    }
-  };
-
   const handleDeleteProject = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this Audit Plan? This action cannot be undone and will delete all related findings, reports, schedules, and attachments.")) {
+    if (!window.confirm("Are you sure you want to delete this OE Plan? This action cannot be undone and will delete all related findings, reports, and schedules.")) {
       return;
     }
-    const success = await clientApi<boolean>(`/audit-projects/${id}`, { method: "DELETE" });
+    const success = await clientApi<boolean>(`/oe-plans/${id}`, { method: "DELETE" });
     if (success) {
       setProjects(projects.filter(p => p.id !== id));
       if (selectedProjectId === id) {
         setSelectedProjectId("");
       }
     } else {
-      showFeedback("Failed to delete the Audit Plan.");
+      showFeedback("Failed to delete the OE Plan.");
     }
-  };
-
-  const handleDownloadFile = (attachment: Attachment) => {
-    // Reconstruct file data download using Base64 URI anchor tag
-    const link = document.createElement("a");
-    link.href = attachment.fileData;
-    link.download = attachment.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   // Filter project logic
@@ -1145,29 +1094,29 @@ export default function PlanningClient({ initialProjects, users, departments, an
     return matchesSearch && matchesStatus;
   });
 
-  const isProjectMember = (proj: AuditProject | null) => {
+  const isProjectMember = (proj: OePlan | null) => {
     if (!proj) return false;
     if (currentUser.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser.id) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map(s => s.trim()) : [];
-    if (auditorsList.includes(currentUser.name)) return true;
-    if (proj.auditorIds?.includes(currentUser.id)) return true;
+    if (proj.leaderId === currentUser.id) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map(s => s.trim()) : [];
+    if (membersList.includes(currentUser.name)) return true;
+    if (proj.memberIds?.includes(currentUser.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser.id) || picList.includes(currentUser.name)) return true;
     return false;
   };
 
-  const canCreateProject = RBAC.can(currentUser, "audit-projects:create");
-  const canUpdateProject = RBAC.can(currentUser, "audit-projects:update");
-  const canDeleteProject = RBAC.can(currentUser, "audit-projects:delete");
-  const canSubmitProject = RBAC.can(currentUser, "audit-projects:submit");
-  const canApproveProject = RBAC.can(currentUser, "audit-projects:approve");
-  const canCloseProject = RBAC.can(currentUser, "audit-projects:close");
-  const canReopenProject = RBAC.can(currentUser, "audit-projects:reopen");
+  const canCreateProject = RBAC.can(currentUser, "oe-plans:create");
+  const canUpdateProject = RBAC.can(currentUser, "oe-plans:update");
+  const canDeleteProject = RBAC.can(currentUser, "oe-plans:delete");
+  const canSubmitProject = RBAC.can(currentUser, "oe-plans:submit");
+  const canApproveProject = RBAC.can(currentUser, "oe-plans:approve");
+  const canCloseProject = RBAC.can(currentUser, "oe-plans:close");
+  const canReopenProject = RBAC.can(currentUser, "oe-plans:reopen");
   const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
-  const leadAuditors = users.filter(u => u.role === "LEAD_AUDITOR" || u.role === "ADMIN");
-  const linkedAuditPlan = selectedProject?.auditPlanId
-    ? auditPlans?.find(ap => ap.id === selectedProject.auditPlanId)
+  const leaders = users.filter(u => u.role === "OE_LEADER" || u.role === "ADMIN");
+  const linkedPlannedEngagement = selectedProject?.projectId
+    ? plannedEngagements?.find(ap => ap.id === selectedProject.projectId)
     : null;
 
   const statusOptions = [
@@ -1195,185 +1144,24 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
       {/* New Project Creator Modal */}
       {isCreating && (
-        <div 
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm transition-opacity duration-300 animate-in fade-in"
-          onClick={closeNewProjectModal}
-        >
-          <div 
-            className="bg-white dark:bg-slate-950 w-full max-w-2xl rounded-lg shadow-2xl flex flex-col overflow-visible h-fit border border-slate-200 dark:border-slate-855 scoping-modal-container transform scale-100 animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="text-[10px] font-roboto text-slate-400 font-bold uppercase tracking-wider">
-                  Document 1. Individual OE Plan
-                </div>
-                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                  {isCopying ? "Copy Individual OE Plan" : "Create Individual OE Plan"}
-                </h2>
-              </div>
-              
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={closeNewProjectModal}
-                  className="p-2 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-500 rounded cursor-pointer transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Form with Word Document table styling */}
-            <form onSubmit={handleCreateProject} className="p-8 space-y-6">
-              <div className="overflow-visible border border-slate-300 dark:border-slate-800 rounded-md">
-                <table className="w-full border-collapse text-xs">
-                  <tbody>
-                    {/* Row 2: Project Code */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Project Code:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={newCode}
-                          placeholder="N/A"
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-sans font-bold text-slate-700 dark:text-slate-300 cursor-not-allowed select-none"
-                        />
-                      </td>
-                    </tr>
-
-                    {/* Row 3: Start Date + End Date */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Start Date*:
-                      </td>
-                      <td className="w-1/4 px-4 py-2 border-r border-slate-300 dark:border-slate-800/80">
-                        <input
-                          type="date"
-                          required
-                          value={newStart}
-                          onChange={(e) => setNewStart(e.target.value)}
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 cursor-pointer"
-                        />
-                      </td>
-                      <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        End Date*:
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          type="date"
-                          required
-                          value={newEnd}
-                          onChange={(e) => setNewEnd(e.target.value)}
-                          className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 cursor-pointer"
-                        />
-                      </td>
-                    </tr>
-
-                    {/* Row 4: OE Leader */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        OE Leader:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newLeads}
-                            onChange={setNewLeads}
-                            options={users.map((u) => ({
-                              value: u.name,
-                              label: u.name,
-                              subLabel: `${u.role.replace('_', ' ')}${u.departmentName ? ` • ${u.departmentName}` : ''}`
-                            }))}
-                            placeholder="Select OE Leaders..."
-                          />
-                        </div>
-                      </td>
-                    </tr>
-
-
-                    {/* Row 6: Annual Plan Master */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Annual OE Plan:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newAnnualPlanId ? [newAnnualPlanId] : []}
-                            onChange={(values) => {
-                              const chosenVal = values.length > 0 ? values[0] : "";
-                              const match = annualPlans?.find(p => p.id === chosenVal || p.planName === chosenVal);
-                              setNewAnnualPlanId(match ? match.id : chosenVal);
-                              setNewAuditPlanId(""); // Reset audit plan when annual plan changes
-                            }}
-                            singleSelect={true}
-                            options={annualPlans?.filter(plan => plan.status === "APPROVED").map(plan => ({
-                              value: plan.id,
-                              label: `${plan.planName} (${plan.period})`
-                            })) || []}
-                            placeholder="Select Annual OE Plan..."
-                          />
-                        </div>
-                      </td>
-                    </tr>
-
-                    {/* Row 7: Audit Plan */}
-                    <tr className="border-b border-slate-300 dark:border-slate-800/80">
-                      <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                        Planned Engagement*:
-                      </td>
-                      <td colSpan={3} className="px-4 py-2">
-                        <div className="border border-slate-300 dark:border-slate-700 rounded-md">
-                          <MultiSelect
-                            selectedValues={newAuditPlanId ? [newAuditPlanId] : []}
-                            onChange={(values) => {
-                              setNewAuditPlanId(values.length > 0 ? values[0] : "");
-                            }}
-                            singleSelect={true}
-                            disabled={!newAnnualPlanId}
-                            options={(() => {
-                              const filtered = auditPlans?.filter(ap => ap.annualPlanId === newAnnualPlanId) || [];
-                              if (newAuditPlanId && !filtered.some(ap => ap.id === newAuditPlanId)) {
-                                const target = auditPlans?.find(ap => ap.id === newAuditPlanId);
-                                if (target) filtered.push(target);
-                              }
-                              return filtered.map(ap => ({
-                                value: ap.id,
-                                label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
-                              }));
-                            })()}
-                            placeholder={newAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex gap-3 justify-end pt-4 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={closeNewProjectModal}
-                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold rounded cursor-pointer text-slate-700 dark:text-slate-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded cursor-pointer transition-colors flex items-center gap-1.5"
-                >
-                  <Save className="w-3.5 h-3.5" /> {isCopying ? "Create Copy" : "Create Individual Audit Plan"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateOePlanModal
+          isCopying={isCopying}
+          users={users}
+          annualPlans={annualPlans}
+          projects={plannedEngagements}
+          newStart={newStart}
+          setNewStart={setNewStart}
+          newEnd={newEnd}
+          setNewEnd={setNewEnd}
+          newLeads={newLeads}
+          setNewLeads={setNewLeads}
+          newAnnualPlanId={newAnnualPlanId}
+          setNewAnnualPlanId={setNewAnnualPlanId}
+          newProjectId={newPlannedEngagementId}
+          setNewProjectId={setNewPlannedEngagementId}
+          onClose={closeNewProjectModal}
+          onSubmit={handleCreateProject}
+        />
       )}
 
       {/* Main projects grid layout */}
@@ -1413,7 +1201,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
               <tr>
-                <th className="px-6 py-4">Code</th>
+                <th className="px-6 py-4">OE Plan Code</th>
                 <th className="px-6 py-4">Project Name</th>
                 <th className="px-6 py-4">OE Leader</th>
                 <th className="px-6 py-4">Start Date</th>
@@ -1423,7 +1211,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {filteredProjects.map((proj) => (
-                  <tr 
+                  <tr
                     key={proj.id}
                     onClick={() => setSelectedProjectId(proj.id === selectedProjectId ? "" : proj.id)}
                     className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors select-none cursor-pointer ${
@@ -1433,7 +1221,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <td className="px-6 py-4 font-sans text-slate-800 dark:text-slate-200">
                       {proj.code}
                     </td>
-                    <td 
+                    <td
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedProjectId(proj.id);
@@ -1444,7 +1232,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       {proj.name}
                     </td>
                     <td className="px-6 py-4 text-slate-500">
-                      {users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId)?.name || proj.leadAuditorId || "Unassigned"}
+                      {users.find(u => u.id === proj.leaderId || u.name === proj.leaderId)?.name || proj.leaderId || "Unassigned"}
                     </td>
                     <td className="px-6 py-4 text-slate-500">
                       {proj.startDate}
@@ -1496,12 +1284,10 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5 text-[15px] font-roboto text-400 font-bold">
                   <span>Individual OE Plan</span>
-                  <span>&gt;</span>
-                  <span className="text-slate-600 font-roboto dark:text-slate-300">{selectedProject.code}</span>
                 </div>
                 <h1
                   className="text-lg md:text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 w-full pb-0.5"
-                  title="Derived from the linked Planned Engagement's Project Name"
+                  title="Derived from the linked project's name"
                 >
                   {editName}
                 </h1>
@@ -1522,7 +1308,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     <UserIcon className="w-3.5 h-3.5" /> Assigned to {users.find(u => u.id === editLead || u.name === editLead)?.name || "Unassigned"}
                   </span>
                   <span className="flex items-center gap-1 font-roboto">
-                    <Activity className="w-3.5 h-3.5" /> Owner: Sarah Jenkins
+                    <Activity className="w-3.5 h-3.5" /> Owner: {selectedProject.createdBy || "—"}
                   </span>
                   <span className="flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" /> End Date: {editEnd}
@@ -1624,7 +1410,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         type="button"
                         onClick={handleClosePlan}
                         className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded transition-colors cursor-pointer"
-                        title="Close this Audit Plan once and for all"
+                        title="Close this OE Plan once and for all"
                       >
                         <Lock className="w-3.5 h-3.5 text-slate-300" /> Close Plan
                       </button>
@@ -1642,7 +1428,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         type="button"
                         onClick={handleReopenClosedPlan}
                         className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-bold rounded transition-colors cursor-pointer"
-                        title="Reopen this Closed Audit Plan"
+                        title="Reopen this Closed OE Plan"
                       >
                         <Unlock className="w-3.5 h-3.5" /> Reopen Plan
                       </button>
@@ -1668,7 +1454,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
               <div className="bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-lg p-6 space-y-4 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-3">
                   <h3 className="text-xs font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                    Audit Plan Members & Verification
+                    OE Plan Members & Verification
                   </h3>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">
                     Last edited by You 2 hours ago
@@ -1676,7 +1462,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                  {/* Column 1: Audit Plan Link Section */}
+                  {/* Column 1: OE Plan Link Section */}
                   <div className="flex flex-col space-y-4 select-none border-b lg:border-b-0 lg:border-r border-slate-150 dark:border-slate-800 pb-4 lg:pb-0 lg:pr-6 no-print">
                     <div>
                       <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Annual OE Plan</label>
@@ -1687,7 +1473,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             const chosenVal = values.length > 0 ? values[0] : "";
                             const match = annualPlans?.find(p => p.id === chosenVal || p.planName === chosenVal);
                             setEditAnnualPlanId(match ? match.id : chosenVal);
-                            setEditAuditPlanId(""); // Reset audit plan when annual plan changes
+                            setEditPlannedEngagementId(""); // Reset OE plan when annual plan changes
                           }}
                           singleSelect={true}
                           disabled={isReadOnly}
@@ -1708,14 +1494,14 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     </div>
 
                     <div>
-                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Planned Engagement</label>
+                      <label className="text-xs font-sans font-bold uppercase text-slate-500 block mb-2">Project Name</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
-                          selectedValues={editAuditPlanId ? [editAuditPlanId] : []}
+                          selectedValues={editPlannedEngagementId ? [editPlannedEngagementId] : []}
                           onChange={(values) => {
                             const apId = values.length > 0 ? values[0] : "";
-                            setEditAuditPlanId(apId);
-                            const matchedAp = apId ? auditPlans?.find(ap => ap.id === apId) : null;
+                            setEditPlannedEngagementId(apId);
+                            const matchedAp = apId ? plannedEngagements?.find(ap => ap.id === apId) : null;
                             if (matchedAp?.projectName?.trim()) {
                               setEditName(matchedAp.projectName.trim());
                             }
@@ -1723,22 +1509,23 @@ export default function PlanningClient({ initialProjects, users, departments, an
                           singleSelect={true}
                           disabled={isReadOnly || !editAnnualPlanId}
                           options={(() => {
-                            const filtered = auditPlans?.filter(ap => ap.annualPlanId === editAnnualPlanId) || [];
-                            if (editAuditPlanId && !filtered.some(ap => ap.id === editAuditPlanId)) {
-                              const target = auditPlans?.find(ap => ap.id === editAuditPlanId);
+                            const filtered = plannedEngagements?.filter(ap => ap.annualPlanId === editAnnualPlanId && !ap.isUsed) || [];
+                            if (editPlannedEngagementId && !filtered.some(ap => ap.id === editPlannedEngagementId)) {
+                              const target = plannedEngagements?.find(ap => ap.id === editPlannedEngagementId);
                               if (target) filtered.push(target);
                             }
                             return filtered.map(ap => ({
                               value: ap.id,
-                              label: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
+                              label: ap.projectName || ap.topic,
+                              subLabel: `${ap.topic} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`
                             }));
                           })()}
-                          placeholder={editAnnualPlanId ? "Select Planned Engagement..." : "Please select an Annual OE Plan first..."}
+                          placeholder={editAnnualPlanId ? "Select Project Name..." : "Please select an Annual OE Plan first..."}
                         />
                       </div>
                     </div>
                   </div>
-                  {/* Column 2: Lead & Auditors & Departments */}
+                  {/* Column 2: Lead & OE Members & Departments */}
                   <div className="space-y-4">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-sans font-bold uppercase text-slate-500">OE Leader</label>
@@ -1763,23 +1550,23 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     </div>
 
                     <div className="space-y-2 relative">
-                      <label className="text-xs font-sans font-bold uppercase text-slate-500">Auditors</label>
+                      <label className="text-xs font-sans font-bold uppercase text-slate-500">OE Members</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
-                          selectedValues={editAuditorIds.map(s => {
+                          selectedValues={editMemberIds.map(s => {
                             const matched = users.find(u => u.id === s || u.name === s);
                             return matched ? matched.name : s;
                           })}
-                          onChange={(values) => setEditAuditorIds(values)}
+                          onChange={(values) => setEditMemberIds(values)}
                           disabled={isReadOnly}
                           options={users
-                            .filter(u => u.role === "ADMIN" || u.role === "LEAD_AUDITOR" || u.role === "AUDITOR")
+                            .filter(u => u.role === "ADMIN" || u.role === "OE_LEADER" || u.role === "OE_MEMBER")
                             .map(u => ({
                               value: u.name,
                               label: u.name,
                               subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
                             }))}
-                          placeholder="Select Auditors..."
+                          placeholder="Select OE Members..."
                         />
                       </div>
                     </div>
@@ -1804,7 +1591,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   </div>
                 </div>
 
-                {/* Audit Finding Reports Section */}
+                {/* OE Finding Reports Section */}
                 {selectedProject && (() => {
                   const dbFindings = selectedProject.findings || [];
                   const scheduleFindings = selectedProject.executionSchedules?.filter(e => e.language === "finding") || [];
@@ -1813,13 +1600,13 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   return (
                     <div className="pt-4 border-t border-slate-150 dark:border-slate-800 space-y-2.5">
                       <h4 className="text-xs font-sans font-bold uppercase tracking-wider text-slate-850 dark:text-slate-205">
-                        Audit Findings vs Resolve Report 
+                        OE Findings vs Resolve Report 
                       </h4>
                       <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-md bg-white dark:bg-slate-900 shadow-sm">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-sans font-bold uppercase text-[10px] tracking-wider">
                             <tr>
-                              <th className="px-3.5 py-2.5">Audit Findings Name</th>
+                              <th className="px-3.5 py-2.5">OE Findings Name</th>
                               <th className="px-3 py-2.5 text-center text-amber-600 dark:text-amber-400">Pending</th>
                               <th className="px-3 py-2.5 text-center text-emerald-600 dark:text-emerald-400">Corrective</th>
                               <th className="px-3 py-2.5 text-center text-slate-500">Total</th>
@@ -1904,7 +1691,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                         const meetings = selectedProject.openMeetings?.filter(m => !m.isDeleted) || [];
                         if (meetings.length === 0) return null;
                         return meetings.map(m => {
-                          const ap = selectedProject.auditPlanId ? auditPlans?.find(a => a.id === selectedProject.auditPlanId) : null;
+                          const ap = selectedProject.projectId ? plannedEngagements?.find(a => a.id === selectedProject.projectId) : null;
                           const deptDisplay = ap ? `${m.departments} - ${ap.version || "V1"}` : m.departments;
                           return (
                             <div key={m.id} className="flex items-center gap-1.5">
@@ -2054,7 +1841,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       {/* Fallback if nothing is linked */}
                       {(!selectedProject.openMeetings?.filter(m => !m.isDeleted).length && !selectedProject.executionSchedules?.filter(e => e.language !== "meeting" && e.language !== "finding").length && !selectedProject.executionSchedules?.filter(e => e.language === "finding").length && !selectedProject.findings?.length) && (
                         <div className="text-slate-400 italic text-[11px] font-sans">
-                          No linked meetings, schedules, or findings for this Audit Plan.
+                          No linked meetings, schedules, or findings for this OE Plan.
                         </div>
                       )}
                     </div>
@@ -2068,28 +1855,28 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   <h3 className="text-md font-roboto font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
                     I. Objectives & Scope
                   </h3>
-                  {linkedAuditPlan && (
+                  {linkedPlannedEngagement && (
                     <span className="text-[10px] font-sans font-medium text-slate-400 uppercase tracking-wider">
-                      Inherited from Planned Engagement &middot; {linkedAuditPlan.topic} ({linkedAuditPlan.version || "V1"})
+                      Inherited from Project &middot; {linkedPlannedEngagement.topic} ({linkedPlannedEngagement.version || "V1"})
                     </span>
                   )}
                 </div>
 
-                {linkedAuditPlan ? (
+                {linkedPlannedEngagement ? (
                   <PlanItemEditor
                     sectionTitle="1.1 Objectives"
-                    items={parsePlanItems(linkedAuditPlan.objectives, "AP-OBJ")}
+                    items={parsePlanItems(linkedPlannedEngagement.objectives, "OE-OBJ")}
                     onChange={() => {}}
-                    prefix="AP-OBJ"
+                    prefix="OE-OBJ"
                     editable={false}
                   />
                 ) : (
                   <div className="text-slate-400 italic text-xs font-sans">
-                    This Individual OE Plan isn&apos;t linked to a Planned Engagement, so no Objectives are available. Link one under &quot;Planned Engagement&quot; above to inherit its Objectives.
+                    This Individual OE Plan isn&apos;t linked to a Project, so no Objectives are available. Link one under &quot;Project Name&quot; above to inherit its Objectives.
                   </div>
                 )}
 
-                {/* 1.2 OE Scope - inherited items from the Planned Engagement (text locked,
+                {/* 1.2 OE Scope - inherited items from the Project (text locked,
                     but can be toggled inactive per plan), plus extra items owned by this plan */}
                 <div className="border-t border-slate-150 dark:border-slate-800 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
@@ -2108,7 +1895,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   </div>
 
                   <div className="space-y-2.5">
-                    {(linkedAuditPlan ? parsePlanItems(linkedAuditPlan.scope, "AP-ISCP") : []).map((item) => {
+                    {(linkedPlannedEngagement ? parsePlanItems(linkedPlannedEngagement.scope, "OE-SCP") : []).map((item) => {
                       const inactive = editScopeOverride.inactiveIds.includes(item.id);
                       return (
                         <div
@@ -2211,7 +1998,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       );
                     })}
 
-                    {!linkedAuditPlan && editScopeOverride.extraItems.length === 0 && (
+                    {!linkedPlannedEngagement && editScopeOverride.extraItems.length === 0 && (
                       <div className="p-4 rounded-md border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
                         No scope items yet. {!isReadOnly && 'Click "Add Scope Item" to add one.'}
                       </div>
@@ -2265,21 +2052,14 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       sectionTitle="Type of Data/Document to Request for Review & Activities"
                       items={editDataRequestItems}
                       onChange={setEditDataRequestItems}
-                      prefix="AP-DRQ"
+                      prefix="OE-DRQ"
                       editable={!isReadOnly}
                       placeholder="Enter data request item..."
                       addBtnText="Add Data Request Item"
                     />
-                    <div className="border-t border-slate-150 dark:border-slate-800 pt-4">
-                      <PlanItemEditor
-                        sectionTitle="Which part need to focus on"
-                        items={editFocusAreaItems}
-                        onChange={setEditFocusAreaItems}
-                        prefix="AP-FCA"
-                        editable={!isReadOnly}
-                        placeholder="Enter focus area item..."
-                        addBtnText="Add Focus Area Item"
-                      />
+                    <div className="border-t border-slate-150 dark:border-slate-800 pt-4 space-y-1.5">
+                      <label className="text-[15px] font-sans font-bold text-slate-800 uppercase">Which part need to focus on</label>
+                      <RichEditor value={editFocusArea} onChange={setEditFocusArea} editable={!isReadOnly} placeholder="Enter the areas to focus on..." />
                     </div>
                   </div>
                 </div>
@@ -2445,88 +2225,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   </div>
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-2">
-                  <h3 className="flex items-center gap-1.5 text-xs font-sans font-bold uppercase tracking-wider text-slate-400">
-                    <FileText className="w-4 h-4" /> Plan Attachments & Files
-                  </h3>
-                  {!isReadOnly && RBAC.can(currentUser, "attachments:create") && (
-                    <div>
-                      <input
-                        type="file"
-                        id="plan-file-input"
-                        className="hidden"
-                        onChange={handleUploadFile}
-                      />
-                      <label
-                        htmlFor="plan-file-input"
-                        className="flex items-center gap-1 px-2.5 py-1 border border-slate-200 dark:border-slate-850 text-[10px] font-bold rounded text-slate-600 dark:text-slate-300 bg-slate-50 hover:bg-slate-100 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Attach File
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {/* Attachment List */}
-                <div className="space-y-2">
-                  {editAttachments.length === 0 ? (
-                    <div className="text-[11px] text-slate-400 py-2 italic text-center">
-                      No documents attached to this plan yet. Use the button above to upload files.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {editAttachments.map((file) => (
-                        <div 
-                          key={file.id} 
-                          className="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 rounded-md"
-                        >
-                          <div className="flex items-center gap-2.5 overflow-hidden">
-                            <FileText className="w-4.5 h-4.5 text-slate-400 shrink-0" />
-                            <div className="truncate text-left">
-                              <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate" title={file.fileName}>
-                                {file.fileName}
-                              </div>
-                              <div className="text-[9px] font-sans text-slate-400">
-                                {(file.fileSize / 1024).toFixed(1)} KB | {file.fileType.split("/")[1] || "doc"}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0 ml-4">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadFile(file)}
-                              className="p-1 text-slate-500 hover:text-[#0066cc] cursor-pointer"
-                              title="Download Attachment"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            {!isReadOnly && RBAC.can(currentUser, "attachments:delete") && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteFile(file.id)}
-                                className="p-1 text-slate-500 hover:text-red-500 cursor-pointer"
-                                title="Remove Attachment"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
             </div>
 
             {/* Modal Page Footer */}
             <div className="px-8 py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] font-sans text-slate-400 shrink-0">
               <div>
-                <span>Audit ID: {selectedProject.code}-INTERNAL</span>
-                <span className="mx-2">|</span>
                 <span>Last Synced: Just now</span>
               </div>
               <div className="flex gap-4">
@@ -2540,7 +2243,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                   onClick={() => showFeedback("Scoping revision history fetched.")}
                   className="hover:text-slate-700 dark:hover:text-slate-250 transition-colors cursor-pointer flex items-center gap-0.5"
                 >
-                  <History className="w-3 h-3" /> Audit History
+                  <History className="w-3 h-3" /> OE History
                 </button>
                 <button 
                   onClick={() => showFeedback("Redirecting to Compliance Policy Catalog.")}
@@ -2575,15 +2278,15 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 <X className="w-5 h-5" />
               </button>
 
-              {/* Audit Plan Title */}
+              {/* OE Plan Title */}
               <h3 className="text-xs font-bold text-slate-300 uppercase tracking-[0.25em] font-roboto">
-                Audit Plan
+                OE Plan
               </h3>
 
-              {/* Project Code Badge */}
-              <div className="inline-block px-5 py-1.5 rounded-lg bg-[#070c18]/90 border border-[#c79646]/30 shadow-inner">
-                <span className="text-xl font-bold tracking-wider text-[#d9a84e] font-mono">
-                  {selectedProject.code}
+              {/* Project Name Badge */}
+              <div className="inline-block px-5 py-1.5 rounded-lg bg-[#070c18]/90 border border-[#c79646]/30 shadow-inner max-w-[280px]">
+                <span className="text-lg font-bold tracking-wide text-[#d9a84e] truncate block">
+                  {selectedProject.name}
                 </span>
               </div>
             </div>
@@ -2603,12 +2306,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 {scanQrDataUrl ? (
                   <img 
                     src={scanQrDataUrl} 
-                    alt="Audit Plan QR Code" 
+                    alt="OE Plan QR Code" 
                     className="w-[220px] h-[220px] object-contain rounded-xl"
                   />
                 ) : (
                   <div className="w-[220px] h-[220px] flex items-center justify-center text-slate-400 text-sm">
-                    Generating QR...
+                    QR available once the Annual Plan is approved
                   </div>
                 )}
                 {/* Center Hanuman Logo */}
@@ -2625,7 +2328,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
               {/* Remarks Text */}
               <p className="text-[11.5px] text-slate-500 font-roboto font-normal leading-tight px-1">
-                Scan to access your department Open Meetings.
+                Scan (sign-in required) to see your department's Open Meetings.
               </p>
 
               {/* Action Buttons */}
@@ -2654,7 +2357,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                     if (!planningQrDataUrl) return;
                     const a = document.createElement("a");
                     a.href = planningQrDataUrl;
-                    a.download = `QR-${selectedProject.code}.png`;
+                    a.download = `QR-${selectedProject.name.replace(/[^a-z0-9]+/gi, "-")}.png`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
