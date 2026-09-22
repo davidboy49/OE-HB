@@ -3,8 +3,10 @@ import { IsArray, IsOptional, IsString } from 'class-validator';
 
 /**
  * Mirrors the broad `Partial<OePlan>` shape the original dbService.updateProject
- * accepted. Intentionally permissive - the free-form JSON string fields (opExTimeline,
- * approvals) are validated only as strings, matching the original's lack of schema validation.
+ * accepted. Intentionally permissive - most fields are validated only as strings, matching the
+ * original's lack of schema validation. opExTimeline/approvals are validated as strings here
+ * too (the wire format is unchanged), but are stored as real flat columns underneath and
+ * parsed/serialized at the boundary - see OePlansService.
  */
 export class UpdateOePlanDto {
   @ApiPropertyOptional()
