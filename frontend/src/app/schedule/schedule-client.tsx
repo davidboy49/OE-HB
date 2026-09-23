@@ -512,25 +512,33 @@ export default function ScheduleClient({
       setSchedules(fresh.filter((s: any) => s.language !== "finding" && s.language !== "meeting"));
 
       if (targetStatus === "RELEASED") {
-        const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
-          "/notifications/send-email",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              templateId: "schedule",
-              projectId: payload.projectId,
-              variables: {
-                oePeriod: payload.oePeriod,
-                leadExecution: payload.leadExecution,
-                standards: payload.standards
-              }
-            })
+        // Best-effort: the schedule is already released at this point (the PATCH above
+        // succeeded). A caller without notifications:send would otherwise see this 403
+        // bubble into the catch below and be told the save "failed" when it didn't - only
+        // the notification email did.
+        try {
+          const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
+            "/notifications/send-email",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                templateId: "schedule",
+                projectId: payload.projectId,
+                variables: {
+                  oePeriod: payload.oePeriod,
+                  leadExecution: payload.leadExecution,
+                  standards: payload.standards
+                }
+              })
+            }
+          );
+          if (emailResult.success) {
+            for (const alert of emailResult.simulatedAlerts) {
+              window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
+            }
           }
-        );
-        if (emailResult.success) {
-          for (const alert of emailResult.simulatedAlerts) {
-            window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-          }
+        } catch (emailErr) {
+          console.warn("Release succeeded, but the notification email could not be sent:", emailErr);
         }
       }
 

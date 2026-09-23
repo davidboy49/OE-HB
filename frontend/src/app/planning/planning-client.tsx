@@ -772,6 +772,30 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
   };
 
+  /**
+   * Best-effort: called after saveStatusChange has already succeeded, so a caller without
+   * notifications:send shouldn't see this 403 as if the status change itself had failed -
+   * it only means the notification email couldn't be sent.
+   */
+  const sendPlanningEmailAlert = async (status: string, details: string) => {
+    if (!selectedProject) return;
+    try {
+      const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: "planning",
+          projectId: selectedProject.id,
+          variables: { status, details }
+        })
+      });
+      if (emailResult.success) {
+        triggerEmailAlerts(emailResult.simulatedAlerts);
+      }
+    } catch (emailErr) {
+      console.warn("Status change succeeded, but the notification email could not be sent:", emailErr);
+    }
+  };
+
   const getMissingMandatoryFields = (): string[] => {
     const missing: string[] = [];
     if (!editPlannedEngagementId) missing.push("Project Name");
@@ -795,117 +819,57 @@ export default function PlanningClient({ initialProjects, users, departments, an
       return;
     }
     await saveStatusChange("SUBMITTED_FOR_APPROVAL");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "SUBMITTED_FOR_APPROVAL",
-          details: "The OE plan scoping and timelines have been submitted for approval review."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "SUBMITTED_FOR_APPROVAL",
+      "The OE plan scoping and timelines have been submitted for approval review."
+    );
   };
- 
+
   const handleApprovePlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("RELEASED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "RELEASED (APPROVED)",
-          details: "The OE plan has been officially approved and released by the OE Leader."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "RELEASED (APPROVED)",
+      "The OE plan has been officially approved and released by the OE Leader."
+    );
   };
- 
+
   const handleRejectPlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("PLANNING");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "REJECTED (REOPENED)",
-          details: "The OE plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "REJECTED (REOPENED)",
+      "The OE plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
+    );
   };
- 
+
   const handleReopenPlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("PLANNING");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "PLANNING (REOPENED)",
-          details: "The approval submission has been cancelled. The plan is now reopened for further editing."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "PLANNING (REOPENED)",
+      "The approval submission has been cancelled. The plan is now reopened for further editing."
+    );
   };
 
   const handleClosePlan = async () => {
     if (!selectedProject) return;
     if (!window.confirm("Are you sure you want to CLOSE this OE Plan once and for all?\n\nOnce closed, no new or existing Open Meetings, Execution Schedules, or OE Findings will be allowed to point to this plan.")) return;
     await saveStatusChange("CLOSED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "CLOSED",
-          details: "The OE plan has been officially closed and archived by the OE Leader/Admin."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "CLOSED",
+      "The OE plan has been officially closed and archived by the OE Leader/Admin."
+    );
   };
 
   const handleReopenClosedPlan = async () => {
     if (!selectedProject) return;
     if (!window.confirm("Are you sure you want to REOPEN this closed OE Plan?")) return;
     await saveStatusChange("RELEASED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "RELEASED (REOPENED)",
-          details: "The closed OE plan has been reopened by the OE Leader/Admin."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "RELEASED (REOPENED)",
+      "The closed OE plan has been reopened by the OE Leader/Admin."
+    );
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
