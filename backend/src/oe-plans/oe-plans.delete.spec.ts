@@ -99,20 +99,22 @@ describe('OePlansService.findAll', () => {
 describe('OePlansService.update', () => {
   it('throws Not Found instead of editing a soft-deleted plan', async () => {
     const { service } = makeService({ target: { isDeleted: true } });
-    await expect(service.update('p1', { name: 'x' })).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.update('p1', { name: 'x' }, 'Tester'),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('throws Not Found for a plan that no longer exists', async () => {
     const { service } = makeService({ target: null });
-    await expect(service.update('gone', { name: 'x' })).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.update('gone', { name: 'x' }, 'Tester'),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('proceeds normally for a plan that is not deleted', async () => {
     const { service } = makeService({ target: { isDeleted: false } });
-    await expect(service.update('p1', { name: 'x' })).resolves.toBeDefined();
+    await expect(
+      service.update('p1', { name: 'x' }, 'Tester'),
+    ).resolves.toBeDefined();
   });
 });

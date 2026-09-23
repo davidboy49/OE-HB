@@ -243,6 +243,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives: objectivesById.get(p.id) ?? '[]',
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -453,6 +455,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives: inheritedObjectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -532,15 +536,35 @@ export class OePlansService {
     await this.permissionsResolver.requirePermission(user, requiredKey);
   }
 
-  async update(id: string, updates: UpdateOePlanDto): Promise<OePlan | null> {
+  async update(
+    id: string,
+    updates: UpdateOePlanDto,
+    actorName: string,
+  ): Promise<OePlan | null> {
     // A soft-deleted plan is not found, full stop - a plain edit must never resurrect its
     // content by writing to a row that's supposed to be gone.
     const target = await this.prisma.oePlan.findUnique({
       where: { id },
-      select: { isDeleted: true },
+      select: { isDeleted: true, status: true },
     });
     if (!target || target.isDeleted) {
       throw new NotFoundException('Individual OE Plan not found');
+    }
+
+    // Who closed this plan, stamped from the authenticated caller - never trust a
+    // client-supplied value (there isn't one; closedByName/closedDate aren't on
+    // UpdateOePlanDto, so ValidationPipe's whitelist already strips anything sent for them).
+    // Cleared on any transition away from CLOSED so a reclosed plan never shows a stale name.
+    let closedTracking: { closedByName: string; closedDate: string } | undefined;
+    if (updates.status !== undefined && updates.status !== target.status) {
+      if (updates.status === 'CLOSED') {
+        closedTracking = {
+          closedByName: actorName,
+          closedDate: new Date().toISOString().split('T')[0],
+        };
+      } else if (target.status === 'CLOSED') {
+        closedTracking = { closedByName: '', closedDate: '' };
+      }
     }
 
     if (updates.startDate !== undefined || updates.endDate !== undefined) {
@@ -607,6 +631,7 @@ export class OePlansService {
         annualPlanId: updates.annualPlanId,
         projectId: updates.projectId,
         members: memberConnections,
+        ...closedTracking,
       },
       include: {
         members: true,
@@ -682,6 +707,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,

@@ -91,7 +91,7 @@ export class OePlansController {
   ) {
     await this.accessScope.assertVisible('oePlan', id, user.sub);
     await this.oePlansService.assertUpdateAllowed(id, dto, user);
-    return this.oePlansService.update(id, dto);
+    return this.oePlansService.update(id, dto, user.name);
   }
 
   @Delete(':id')

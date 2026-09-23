@@ -115,6 +115,12 @@ model OePlan {
   approvedByName          String @default("")
   approvedByTitle         String @default("")
   approvedDate            String @default("")
+  // Who closed this plan and when, server-stamped from the authenticated caller on the
+  // RELEASED->CLOSED transition (see OePlansService.update) - never client-supplied. Cleared
+  // back to "" on any transition away from CLOSED, so a reopened-then-reclosed plan always
+  // reflects who closed it most recently, never a stale prior value.
+  closedByName            String @default("")
+  closedDate              String @default("")
 
   // Soft delete: this is a real audit record (findings, meeting minutes, schedules, reports
   // all hang off it) - a hard delete would cascade-destroy all of that with no undo. Excluded

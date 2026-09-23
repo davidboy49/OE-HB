@@ -106,6 +106,10 @@ export interface OePlan {
 
   memberIds?: string[]; // Array of selected member user IDs
   memberNames?: string;
+  /** Who closed this plan and when - server-stamped on the RELEASED->CLOSED transition, empty
+   * string when not currently closed (or after a reopen). Never client-supplied. */
+  closedByName?: string;
+  closedDate?: string;
   findings?: {
     id: string;
     title: string;
@@ -251,6 +255,18 @@ export interface Project {
   isApproved?: boolean;
   isUsed?: boolean; // true once an Individual OE Plan (OePlan) has been created from this Project
   individualPlanStatus?: OePlan["status"]; // status of the (latest) Individual OE Plan created from this Project
+  /** Who closed the (latest) Individual OE Plan, and when - only meaningful when
+   * individualPlanStatus is "CLOSED". See OePlan.closedByName/closedDate. */
+  closedByName?: string;
+  closedDate?: string;
+  /** The (latest) Individual OE Plan's most recent OE Findings Report (an ExecutionSchedule
+   * with language "finding"). Present only once such a report exists; findingsCompletedCount/
+   * findingsTotalCount are only populated once that report's own status is "RELEASED" - use
+   * them to derive a Pending ("RELEASED" but not yet completed===total) / Completed
+   * (completed===total, total>0) display state on top of individualPlanStatus. */
+  findingsReportStatus?: string;
+  findingsCompletedCount?: number;
+  findingsTotalCount?: number;
   annualPlanStatus?: string;
   createdAt?: string;
   updatedAt?: string;
