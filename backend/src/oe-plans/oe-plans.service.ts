@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateDateRange } from '@oeportal/shared';
@@ -151,10 +152,11 @@ export class OePlansService {
   async findAll(read?: OePlanReadScope): Promise<OePlan[]> {
     const NOTHING = { id: { in: [] as string[] } };
     const projects = await this.prisma.oePlan.findMany({
-      where: read?.plans,
+      where: { isDeleted: false, ...read?.plans },
       include: {
         members: true,
         executionSchedules: {
+          where: { isDeleted: false },
           include: {
             findings: {
               where: read ? (read.findings ?? NOTHING) : undefined,
@@ -311,6 +313,7 @@ export class OePlansService {
     const existing = await this.prisma.oePlan.findFirst({
       where: {
         projectId,
+        isDeleted: false,
         ...(excludeOePlanId ? { id: { not: excludeOePlanId } } : {}),
       },
     });
@@ -530,6 +533,16 @@ export class OePlansService {
   }
 
   async update(id: string, updates: UpdateOePlanDto): Promise<OePlan | null> {
+    // A soft-deleted plan is not found, full stop - a plain edit must never resurrect its
+    // content by writing to a row that's supposed to be gone.
+    const target = await this.prisma.oePlan.findUnique({
+      where: { id },
+      select: { isDeleted: true },
+    });
+    if (!target || target.isDeleted) {
+      throw new NotFoundException('Individual OE Plan not found');
+    }
+
     if (updates.startDate !== undefined || updates.endDate !== undefined) {
       // Only one side of the range may be changing; resolve the other from the current
       // record so a partial edit can never leave the plan in an inverted date range.
@@ -729,12 +742,19 @@ export class OePlansService {
     };
   }
 
+  /**
+   * Soft delete: this is a real audit record (findings, meeting minutes, schedules, reports
+   * all hang off it via cascade), so a hard delete would silently destroy all of it with no
+   * undo. `isDeleted` rows are excluded from findAll() and treated as not-found everywhere
+   * else in this service - nothing is actually removed from the database.
+   */
   async remove(id: string): Promise<boolean> {
     try {
-      await this.prisma.oePlan.delete({
-        where: { id },
+      const { count } = await this.prisma.oePlan.updateMany({
+        where: { id, isDeleted: false },
+        data: { isDeleted: true },
       });
-      return true;
+      return count > 0;
     } catch (e) {
       console.error('Failed to delete project:', e);
       return false;

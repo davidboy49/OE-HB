@@ -98,6 +98,12 @@ describe('OePlansService.update - date range on a partial edit', () => {
   it('does not check dates at all when neither is part of the update', async () => {
     const { service, prisma } = makeService(existing);
     await service.update('p1', { name: 'Renamed' });
-    expect(prisma.oePlan.findUnique).not.toHaveBeenCalled();
+    // findUnique is still called once, for the soft-delete existence guard - just never with
+    // the date-range-specific select.
+    expect(prisma.oePlan.findUnique).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ startDate: true }),
+      }),
+    );
   });
 });
