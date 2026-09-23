@@ -142,6 +142,8 @@ export interface Finding {
 export interface ScheduleRow {
   day?: string;
   date: string;
+  /** End of the execution date range. Empty/equal to `date` means a single-day slot. */
+  dateTo?: string;
   time: string;
   oeScope?: string;
   activity: string;
