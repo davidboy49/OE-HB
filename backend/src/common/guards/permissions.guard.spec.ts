@@ -39,10 +39,10 @@ describe('PermissionsGuard', () => {
       expect(resolver.getEffectivePermissions).not.toHaveBeenCalled();
     });
 
-    it('refuses an undeclared route even for an ADMIN token', async () => {
+    it('refuses an undeclared route even for a fully-permissioned caller', async () => {
       const { guard } = makeGuard({}, []);
       await expect(
-        guard.canActivate(contextWith({ sub: 'u1', role: 'ADMIN' })),
+        guard.canActivate(contextWith({ sub: 'u1' })),
       ).rejects.toThrow(ForbiddenException);
     });
   });
@@ -116,10 +116,10 @@ describe('PermissionsGuard', () => {
       );
     });
 
-    it('checks the database-fresh grants for the caller, not a role claim', async () => {
+    it('always checks the database-fresh grants for the caller, never a cached claim', async () => {
       const { guard, resolver } = makeGuard(requires('oe-plans:create'), []);
       await expect(
-        guard.canActivate(contextWith({ sub: 'u1', role: 'ADMIN' })),
+        guard.canActivate(contextWith({ sub: 'u1' })),
       ).rejects.toThrow(ForbiddenException);
       expect(resolver.getEffectivePermissions).toHaveBeenCalledWith('u1');
     });

@@ -1,14 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsIn,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
-import type { UserRole } from '@oeportal/shared';
-
-const USER_ROLES: UserRole[] = ['ADMIN', 'OE_LEADER', 'OE_MEMBER', 'DEPT_PIC'];
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateUserDto {
   @ApiProperty()
@@ -19,10 +10,6 @@ export class CreateUserDto {
   @ApiProperty()
   @IsEmail()
   email!: string;
-
-  @ApiProperty({ enum: USER_ROLES })
-  @IsIn(USER_ROLES)
-  role!: UserRole;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()

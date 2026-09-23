@@ -125,7 +125,7 @@ export default function CreateOePlanModal({
                         options={users.map((u) => ({
                           value: u.name,
                           label: u.name,
-                          subLabel: `${u.role.replace('_', ' ')}${u.departmentName ? ` • ${u.departmentName}` : ''}`
+                          subLabel: u.departmentName ?? '',
                         }))}
                         placeholder="Select OE Leaders..."
                       />

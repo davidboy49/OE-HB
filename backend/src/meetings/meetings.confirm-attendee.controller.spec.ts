@@ -9,27 +9,28 @@ const member = {
   sub: 'u1',
   email: 'a@b.c',
   name: 'Dara',
-  role: 'OE_MEMBER' as const,
   departmentId: null,
 };
-const admin = {
+const confirmer = {
   ...member,
   sub: 'u2',
-  name: 'Admin User',
-  role: 'ADMIN' as const,
+  name: 'Confirmer User',
 };
 
-function makeController() {
+function makeController(opts: { granted?: string[] } = {}) {
   const service = {
     confirmAttendee: jest.fn().mockResolvedValue({ id: 'm1' }),
   } as unknown as MeetingsService;
   const accessScope = {
     assertVisible: jest.fn().mockResolvedValue(undefined),
   } as unknown as AccessScopeService;
+  const permissionsResolver = {
+    getEffectivePermissions: jest.fn().mockResolvedValue(opts.granted ?? []),
+  } as unknown as PermissionsResolverService;
   return {
     controller: new MeetingsController(
       service,
-      {} as PermissionsResolverService,
+      permissionsResolver,
       accessScope,
     ),
     service,
@@ -57,10 +58,16 @@ describe('MeetingsController.confirmAttendee - who may confirm', () => {
     expect(service.confirmAttendee).not.toHaveBeenCalled();
   });
 
-  it('lets an ADMIN confirm on behalf of anyone', async () => {
-    const { controller } = makeController();
+  it('lets a user holding meetings:confirm-others confirm on behalf of anyone', async () => {
+    const { controller } = makeController({
+      granted: ['meetings:confirm-others'],
+    });
     await expect(
-      controller.confirmAttendee('m1', { attendeeName: 'Someone Else' }, admin),
+      controller.confirmAttendee(
+        'm1',
+        { attendeeName: 'Someone Else' },
+        confirmer,
+      ),
     ).resolves.toBeDefined();
   });
 });

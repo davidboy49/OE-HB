@@ -40,7 +40,7 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-1.5 px-2.5 py-1.2 bg-[#05375c]/10 dark:bg-accent/10 border border-[#05375c]/20 dark:border-accent/20 rounded text-[#05375c] dark:text-accent text-[10px] font-sans font-semibold self-start md:self-auto">
           <ShieldCheck className="w-3.5 h-3.5" />
-          Active Identity: {user.role}
+          Active Identity: {user.groupName ?? "No Group"}
         </div>
       </div>
 

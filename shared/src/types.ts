@@ -58,13 +58,10 @@ export interface ApiRoutePolicy {
   risks: PermissionRisk[];
 }
 
-export type UserRole = "ADMIN" | "OE_LEADER" | "OE_MEMBER" | "DEPT_PIC";
-
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
   departmentId: string | null;
   groupId: string | null;
   departmentName?: string | null;
@@ -73,7 +70,7 @@ export interface User {
   isActive?: boolean;
   /** true once this account has signed in through Keycloak SSO. Only present on GET /users. */
   ssoLinked?: boolean;
-  /** Effective granular permission keys (see backend/src/common/permissions.ts). Only present on GET /auth/me. */
+  /** Effective granular permission keys (see backend/src/common/permissions.ts). Present on GET /auth/me and GET /users. */
   permissions?: string[];
   /** Same keys, each with how far it reaches (ALL / BU / DEPARTMENT / MEMBER). Only present on GET /auth/me. */
   grants?: Record<string, AccessScope>;
@@ -309,7 +306,6 @@ export interface ScanPayload {
     id: string;
     name: string;
     email: string;
-    role: string;
     departmentId: string | null;
     departmentName: string | null;
     businessUnitName: string | null;

@@ -43,13 +43,12 @@ export class UsersController {
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'CREATE_USER',
-    details: `Created user "${req.body.name}" (${req.body.email}) with role ${req.body.role}`,
+    details: `Created user "${req.body.name}" (${req.body.email})`,
   }))
   create(@Body() dto: CreateUserDto) {
     return this.usersService.create(
       dto.name,
       dto.email,
-      dto.role,
       dto.departmentId ?? null,
       dto.groupId ?? null,
       dto.password,
@@ -61,14 +60,13 @@ export class UsersController {
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'UPDATE_USER',
-    details: `Updated user "${req.body.name}" (${req.body.email}) with role ${req.body.role}`,
+    details: `Updated user "${req.body.name}" (${req.body.email})`,
   }))
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(
       id,
       dto.name,
       dto.email,
-      dto.role,
       dto.departmentId ?? null,
       dto.groupId ?? null,
     );

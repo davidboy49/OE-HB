@@ -21,10 +21,10 @@ import type { AuthenticatedUser } from '../../auth/auth.types';
  * Requires JwtAuthGuard to have already run (reads req.user).
  *
  * Always resolves grants from the DB via PermissionsResolverService rather than trusting
- * req.user.role (the JWT's role claim, signed once at login) - ADMIN is not special-cased
- * here because getEffectivePermissions already returns the full key list for a DB-fresh
- * ADMIN, so a role change, ADMIN promotion/demotion, or group reassignment takes effect on
- * this user's very next request instead of only after they log back in.
+ * anything cached on the caller (e.g. a JWT claim, signed once at login) - there is no
+ * special-cased "admin" bypass here, so a group reassignment (including into or out of the
+ * full-access "Administrators" group) takes effect on this user's very next request instead
+ * of only after they log back in.
  */
 @Injectable()
 export class PermissionsGuard {

@@ -104,7 +104,14 @@ async function main() {
   console.log('Departments seeded.');
 
   // 2. Seed User Groups (groups are pure permission bundles - see grants below;
-  // a group no longer carries or assigns a role to its members)
+  // access is entirely a function of group membership, there is no role field at all)
+  const adminGroup = await prisma.userGroup.create({
+    data: {
+      id: 'group-admin',
+      name: 'Administrators',
+      description: 'Full access to every module.',
+    },
+  });
   const group1 = await prisma.userGroup.create({
     data: {
       id: 'group-1',
@@ -130,7 +137,7 @@ async function main() {
   console.log('User Groups seeded.');
 
   // Seed every known permission key, then grant each existing group a starter
-  // set matching what its name implies (member-tier vs lead-tier access) -
+  // set matching what its name implies (admin/member-tier/lead-tier access) -
   // admins narrow access per group from here via PATCH /user-groups/:id/permissions.
   await prisma.permission.deleteMany();
   await prisma.permission.createMany({ data: PERMISSIONS });
@@ -139,6 +146,7 @@ async function main() {
     keys.map((permissionKey) => ({ groupId, permissionKey, scope: 'ALL' }));
   await prisma.groupPermission.createMany({
     data: [
+      ...grantsFor(adminGroup.id, PERMISSIONS.map((p) => p.key)),
       ...grantsFor(group1.id, MEMBER_TIER_PERMISSIONS),
       ...grantsFor(group2.id, LEAD_TIER_PERMISSIONS),
       ...grantsFor(group3.id, MEMBER_TIER_PERMISSIONS),
@@ -154,7 +162,7 @@ async function main() {
       id: 'user-1',
       email: 'admin@auditdesk.com',
       name: 'Alex Admin',
-      role: 'ADMIN',
+      groupId: adminGroup.id,
       passwordHash: adminPasswordHash,
     },
   });
@@ -163,7 +171,6 @@ async function main() {
       id: 'user-2',
       email: 'sarah.lead@auditdesk.com',
       name: 'Sarah Lead',
-      role: 'OE_LEADER',
       departmentId: dept3.id,
       groupId: group1.id,
     },
@@ -173,7 +180,6 @@ async function main() {
       id: 'user-3',
       email: 'david.member@auditdesk.com',
       name: 'David OE Member',
-      role: 'OE_MEMBER',
       departmentId: dept3.id,
       groupId: group1.id,
     },
@@ -183,19 +189,17 @@ async function main() {
       id: 'user-4',
       email: 'alice.department PIC@auditdesk.com',
       name: 'Alice Department PIC',
-      role: 'DEPT_PIC',
       departmentId: dept2.id,
       groupId: group2.id,
     },
   });
   // Deliberately ungrouped - demonstrates that a user with no group gets zero
-  // permissions (his `role` is not a fallback; see PermissionsResolverService.getGrants).
+  // permissions at all (see PermissionsResolverService.getGrants).
   const user5 = await prisma.user.create({
     data: {
       id: 'user-5',
       email: 'bob.developer@auditdesk.com',
       name: 'Bob Developer',
-      role: 'DEPT_PIC',
       departmentId: dept1.id,
     },
   });

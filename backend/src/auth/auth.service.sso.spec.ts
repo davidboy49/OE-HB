@@ -22,7 +22,6 @@ const account = (over: Record<string, unknown> = {}) => ({
   id: 'u1',
   email: 'dara@corp.com',
   name: 'Dara',
-  role: 'OE_MEMBER',
   departmentId: 'd1',
   keycloakSub: null,
   isActive: true,

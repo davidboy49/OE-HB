@@ -3,10 +3,10 @@
  * key used by @RequirePermission(), seeded into the Permission table, and
  * rendered in the frontend's per-group permission matrix.
  *
- * ADMIN always bypasses these checks (see PermissionsGuard) - this list only
- * matters for non-ADMIN users. A user's effective permissions come entirely from
- * their UserGroup's grants; a user with no group gets none (see
- * PermissionsResolverService.getGrants) - `role` is not a fallback permission source.
+ * A user's effective permissions come entirely from their UserGroup's grants; a
+ * user with no group gets none (see PermissionsResolverService.getGrants). There is
+ * no special-cased "admin" role or bypass - full access is just an ordinary group
+ * (seeded as "Administrators") that happens to hold every key here.
  */
 export interface PermissionDef {
   key: string;
@@ -90,6 +90,10 @@ export const PERMISSIONS: PermissionDef[] = [
     key: 'execution-schedules:delete',
     description: 'Delete execution schedules',
   },
+  {
+    key: 'execution-schedules:confirm-others',
+    description: "Confirm another attendee's attendance on an execution schedule",
+  },
 
   // Meetings
   { key: 'meetings:create', description: 'Create open meetings' },
@@ -102,6 +106,10 @@ export const PERMISSIONS: PermissionDef[] = [
   {
     key: 'meetings:approve',
     description: 'Approve, reject, or reopen a submitted open meeting report',
+  },
+  {
+    key: 'meetings:confirm-others',
+    description: "Confirm another attendee's attendance on an open meeting",
   },
 
   // Findings
