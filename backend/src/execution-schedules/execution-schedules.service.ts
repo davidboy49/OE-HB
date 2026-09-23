@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
@@ -58,6 +59,16 @@ export interface UpdateExecutionScheduleInput {
   lastModifiedBy?: string;
   /** See UpdateExecutionScheduleDto - when given, rejects the write if the schedule has been
    * changed since this timestamp instead of silently overwriting the other change. */
+  expectedUpdatedAt?: string;
+}
+
+export interface ResolveFindingRowInput {
+  correctiveActionDate?: string;
+  correctiveActionRemarks?: string;
+  correctiveFinalDate?: string;
+  correctiveFinalRemarks?: string;
+  attachments?: unknown[];
+  resolve?: boolean;
   expectedUpdatedAt?: string;
 }
 
@@ -274,6 +285,32 @@ export class ExecutionSchedulesService {
   }
 
   /**
+   * Gives every row in a `scheduleRows` JSON array a stable `id` if it doesn't already have
+   * one, so resolveFindingRow (and anything else that needs to target a single row) has
+   * something to match on. Runs on every ordinary save, so rows saved before this field
+   * existed pick up an id the next time anyone touches the report - no migration needed.
+   * Returns the input unchanged (not re-serialized) when nothing needed backfilling.
+   */
+  private backfillRowIds(scheduleRows: string): string {
+    let rows: unknown;
+    try {
+      rows = JSON.parse(scheduleRows);
+    } catch {
+      return scheduleRows;
+    }
+    if (!Array.isArray(rows)) return scheduleRows;
+    let changed = false;
+    const withIds = rows.map((r) => {
+      if (r && typeof r === 'object' && !(r as { id?: string }).id) {
+        changed = true;
+        return { ...r, id: randomUUID() };
+      }
+      return r;
+    });
+    return changed ? JSON.stringify(withIds) : scheduleRows;
+  }
+
+  /**
    * Records a single department's consent decision and fans it out to sibling schedules on
    * the same OE Plan. Each write is a single atomic jsonb_set (see mergeJsonColumn) rather
    * than a parse/mutate/stringify round trip, so two departments consenting at the same
@@ -346,6 +383,85 @@ export class ExecutionSchedulesService {
   }
 
   /**
+   * Merges only the corrective-action fields of ONE finding row, identified by its stable
+   * `id` (see backfillRowIds) rather than array index - the field whitelist here (see
+   * ResolveFindingRowDto) is what lets `execution-schedules:resolve-finding` be granted
+   * without `execution-schedules:update`: a caller with only the former can never reach any
+   * other row, or any other field of this row, through this method.
+   *
+   * Unlike departmentConsents/attendeeConfirmations, `scheduleRows` is a JSON-stringified
+   * ARRAY in a plain String column, not a keyed map - so there's no jsonb_set-on-a-key to
+   * reach for here, and this is a read-modify-write like the generic `update()` below. When
+   * `expectedUpdatedAt` is given, the write is a compare-and-swap so a genuine concurrent
+   * conflict is rejected (409) rather than one side's change silently vanishing.
+   */
+  async resolveFindingRow(
+    scheduleId: string,
+    rowId: string,
+    patch: ResolveFindingRowInput,
+    actorName: string,
+  ): Promise<any> {
+    const target = await this.prisma.executionSchedule.findUnique({
+      where: { id: scheduleId },
+      select: { scheduleRows: true, isDeleted: true },
+    });
+    if (!target || target.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
+    }
+
+    let rows: any[];
+    try {
+      rows = JSON.parse(target.scheduleRows || '[]');
+    } catch {
+      rows = [];
+    }
+    const index = Array.isArray(rows)
+      ? rows.findIndex((r) => r?.id === rowId)
+      : -1;
+    if (index === -1) {
+      throw new NotFoundException(
+        "Finding row not found - if this report hasn't been saved since row-level " +
+          'resolving was added, ask an editor to open and save it once, then try again.',
+      );
+    }
+
+    const row = { ...rows[index] };
+    if (patch.correctiveActionDate !== undefined)
+      row.correctiveActionDate = patch.correctiveActionDate;
+    if (patch.correctiveActionRemarks !== undefined)
+      row.correctiveActionRemarks = patch.correctiveActionRemarks;
+    if (patch.correctiveFinalDate !== undefined)
+      row.correctiveFinalDate = patch.correctiveFinalDate;
+    if (patch.correctiveFinalRemarks !== undefined)
+      row.correctiveFinalRemarks = patch.correctiveFinalRemarks;
+    if (patch.attachments !== undefined) row.attachments = patch.attachments;
+    if (patch.resolve === true) {
+      row.correctiveFinalUser = actorName;
+      row.correctiveFinalDatetime = new Date().toISOString();
+    } else if (patch.resolve === false) {
+      row.correctiveFinalUser = '';
+      row.correctiveFinalDatetime = '';
+    }
+    rows[index] = row;
+    const scheduleRows = JSON.stringify(rows);
+
+    if (patch.expectedUpdatedAt !== undefined) {
+      const { count } = await this.prisma.executionSchedule.updateMany({
+        where: { id: scheduleId, updatedAt: new Date(patch.expectedUpdatedAt) },
+        data: { scheduleRows, lastModifiedBy: actorName },
+      });
+      if (count === 0) throw new ConflictException(CONFLICT_MESSAGE);
+    } else {
+      await this.prisma.executionSchedule.update({
+        where: { id: scheduleId },
+        data: { scheduleRows, lastModifiedBy: actorName },
+      });
+    }
+
+    return this.findOne(scheduleId);
+  }
+
+  /**
    * dbService.updateExecutionSchedule (dbService.ts:1464-1518).
    * NOTE: the source's return shape here deliberately omits qrToken/
    * departmentConsents (unlike findAll/create/findOne) - preserved as-is for parity
@@ -382,6 +498,9 @@ export class ExecutionSchedulesService {
       ...updateData
     } = data;
     delete updateData.ownerName;
+    if (updateData.scheduleRows !== undefined) {
+      updateData.scheduleRows = this.backfillRowIds(updateData.scheduleRows);
+    }
 
     if (expectedUpdatedAt !== undefined) {
       const { count } = await this.prisma.executionSchedule.updateMany({

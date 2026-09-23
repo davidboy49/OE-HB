@@ -17,6 +17,7 @@ import { CreateExecutionScheduleDto } from './dto/create-execution-schedule.dto'
 import { UpdateExecutionScheduleDto } from './dto/update-execution-schedule.dto';
 import { RecordConsentDto } from './dto/record-consent.dto';
 import { ConfirmAttendeeDto } from './dto/confirm-attendee.dto';
+import { ResolveFindingRowDto } from './dto/resolve-finding-row.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -208,6 +209,37 @@ export class ExecutionSchedulesController {
     return this.executionSchedulesService.confirmAttendee(
       id,
       dto.attendeeName,
+      user.name,
+    );
+  }
+
+  /**
+   * Lets a caller who holds ONLY `execution-schedules:resolve-finding` (not
+   * `execution-schedules:update`) fill in one finding row's corrective action and mark it
+   * resolved, without being able to touch anything else on the report - see
+   * ResolveFindingRowDto for the exact field whitelist. `assertVisible` reuses the caller's
+   * `execution-schedules:view` scope, which is what naturally limits a DEPARTMENT-scoped
+   * group to their own department's reports while an ALL-scoped group (e.g. OE Team) can
+   * resolve rows on any department's report - no separate department check needed here.
+   */
+  @Patch(':id/finding-rows/:rowId/resolve')
+  @RequirePermission('execution-schedules:resolve-finding')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'RESOLVE_FINDING_ROW',
+    details: `Resolved finding row ${req.params.rowId} on schedule ID: ${req.params.id}`,
+  }))
+  async resolveFindingRow(
+    @Param('id') id: string,
+    @Param('rowId') rowId: string,
+    @Body() dto: ResolveFindingRowDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
+    return this.executionSchedulesService.resolveFindingRow(
+      id,
+      rowId,
+      dto,
       user.name,
     );
   }

@@ -65,6 +65,12 @@ const formatDateRange = (row: ScheduleRow) => {
   return `${from} - ${formatDateString(row.dateTo)}`;
 };
 
+// Rows saved before per-row ids existed won't have one yet - assign one client-side so every
+// row has a stable identity to work with; the next save persists it (see backend/src/
+// execution-schedules/execution-schedules.service.ts's backfillRowIds for the server-side twin).
+const withRowIds = (rows: ScheduleRow[]): ScheduleRow[] =>
+  rows.map((r) => (r.id ? r : { ...r, id: crypto.randomUUID() }));
+
 // Helpers to parse and format HTML5 time picker values
 const parseTimeRange = (timeStr: string) => {
   if (!timeStr) return { from: "09:00", to: "10:00" };
@@ -414,7 +420,7 @@ export default function ScheduleClient({
     setScope(sched.scope);
     
     try {
-      setRows(JSON.parse(sched.scheduleRows));
+      setRows(withRowIds(JSON.parse(sched.scheduleRows)));
     } catch {
       setRows([]);
     }
@@ -612,7 +618,7 @@ export default function ScheduleClient({
   };
 
   const addRow = () => {
-    const newRow = { day: "", date: new Date().toISOString().split('T')[0], dateTo: "", time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
+    const newRow = { id: crypto.randomUUID(), day: "", date: new Date().toISOString().split('T')[0], dateTo: "", time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
     setRows([...rows, newRow]);
     setActiveRowIndex(rows.length);
     setDraftRow({ ...newRow });

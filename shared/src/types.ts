@@ -140,6 +140,10 @@ export interface Finding {
 }
 
 export interface ScheduleRow {
+  /** Stable per-row id, used to target a single row without touching the rest of the array
+   * (see ResolveFindingRowDto). Optional only for backward compatibility with rows saved
+   * before this field existed - any normal save backfills it. */
+  id?: string;
   day?: string;
   date: string;
   /** End of the execution date range. Empty/equal to `date` means a single-day slot. */

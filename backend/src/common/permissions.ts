@@ -94,6 +94,11 @@ export const PERMISSIONS: PermissionDef[] = [
     key: 'execution-schedules:confirm-others',
     description: "Confirm another attendee's attendance on an execution schedule",
   },
+  {
+    key: 'execution-schedules:resolve-finding',
+    description:
+      "Resolve a finding row's corrective action (completed date, remarks, attachments) without full edit rights on the report",
+  },
 
   // Meetings
   { key: 'meetings:create', description: 'Create open meetings' },
