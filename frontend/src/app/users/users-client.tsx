@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import Link from "next/link";
 import { Users, Plus, Lock, Mail, X, KeyRound, Power, Save, ShieldCheck } from "lucide-react";
-import type { User, Department, UserGroup, UserRole } from "@oeportal/shared";
+import type { User, Department, UserGroup } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
@@ -33,7 +33,6 @@ export default function UsersClient({
 
   // Search/Filter states
   const [searchQuery, setSearchQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("ALL");
 
   // Group create form (Groups tab)
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
@@ -46,7 +45,6 @@ export default function UsersClient({
   const [userModalMode, setUserModalMode] = useState<"create" | "edit">("create");
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
-  const [userRole, setUserRole] = useState<UserRole>("DEPT_PIC");
   const [userDept, setUserDept] = useState("");
   const [userGroup, setUserGroup] = useState("");
   const [userPassword, setUserPassword] = useState("");
@@ -88,7 +86,6 @@ export default function UsersClient({
     setUserModalMode("create");
     setUserName("");
     setUserEmail("");
-    setUserRole("DEPT_PIC");
     setUserDept("");
     setUserGroup("");
     setUserPassword("");
@@ -103,7 +100,6 @@ export default function UsersClient({
     setUserModalMode("edit");
     setUserName(u.name);
     setUserEmail(u.email);
-    setUserRole(u.role);
     setUserDept(u.departmentId || "");
     setUserGroup(u.groupId || "");
     setIsUserModalOpen(true);
@@ -111,7 +107,7 @@ export default function UsersClient({
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userName || !userEmail || !userRole) return;
+    if (!userName || !userEmail) return;
 
     try {
       if (userModalMode === "create") {
@@ -120,7 +116,6 @@ export default function UsersClient({
           body: JSON.stringify({
             name: userName,
             email: userEmail,
-            role: userRole,
             departmentId: userDept || null,
             groupId: userGroup || null,
             password: userPassword || undefined,
@@ -140,7 +135,6 @@ export default function UsersClient({
           body: JSON.stringify({
             name: userName,
             email: userEmail,
-            role: userRole,
             departmentId: userDept || null,
             groupId: userGroup || null,
           }),
@@ -246,21 +240,10 @@ export default function UsersClient({
   };
 
   // Filter logic
-  const filteredUsers = users.filter(u => {
-    const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          u.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === "ALL" || u.role === roleFilter;
-    return matchesSearch && matchesRole;
-  });
-
-  const formatRole = (role: UserRole) => role.replace("_", " ");
-
-  const roleFilterOptions = [
-    { label: "Admin", value: "ADMIN" },
-    { label: "OE Leader", value: "OE_LEADER" },
-    { label: "OE Member", value: "OE_MEMBER" },
-    { label: "Department PIC", value: "DEPT_PIC" }
-  ];
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -315,17 +298,11 @@ export default function UsersClient({
             onDelete={canDeleteUser && selectedUserId ? handleDeleteUser : undefined}
             onRefresh={() => {
               setSearchQuery("");
-              setRoleFilter("ALL");
               setSelectedUserId(null);
             }}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             searchPlaceholder="Search users..."
-            filterLabel="Role"
-            filterValue={roleFilter}
-            setFilterValue={setRoleFilter}
-            filterOptions={roleFilterOptions}
-            activeFilterCountLabel={roleFilter === "ALL" ? "ALL" : "FILTERED"}
           />
 
           {selectedUserId && (canSetPassword || (canEditUser && selectedUserId !== currentUser.id)) && (
@@ -357,7 +334,6 @@ export default function UsersClient({
               <thead className="bg-muted/50 border-b border-border text-muted-foreground uppercase font-sans font-bold">
                 <tr>
                   <th className="px-6 py-4">User Details</th>
-                  <th className="px-6 py-4">System Role</th>
                   <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">Governance Group</th>
                   <th className="px-6 py-4">Status</th>
@@ -377,11 +353,6 @@ export default function UsersClient({
                       <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Mail className="w-3 h-3" /> {u.email}
                       </div>
-                    </td>
-                    <td className="px-6 py-4.5">
-                      <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-muted text-foreground">
-                        {formatRole(u.role)}
-                      </span>
                     </td>
                     <td className="px-6 py-4.5">
                       <span className="font-medium text-foreground">
@@ -431,7 +402,7 @@ export default function UsersClient({
                 ))}
                 {filteredUsers.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-10 text-center text-muted-foreground text-xs italic">
+                    <td colSpan={4} className="px-6 py-10 text-center text-muted-foreground text-xs italic">
                       No users found.
                     </td>
                   </tr>
@@ -447,7 +418,7 @@ export default function UsersClient({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              Each group grants its members a set of API permissions. Members with no group have no permissions at all (except Admins, who always have full access).
+              Each group grants its members a set of API permissions. Members with no group have no permissions at all - access is entirely a function of group membership.
             </p>
             {canCreateGroup && (
               <button
@@ -493,7 +464,7 @@ export default function UsersClient({
                   />
                 </div>
               </div>
-              <p className="text-[9px] leading-relaxed text-muted-foreground">A group grants its members whatever permissions you tick below - it doesn&apos;t affect anyone&apos;s system role. Set permissions after creating the group.</p>
+              <p className="text-[9px] leading-relaxed text-muted-foreground">A group grants its members whatever permissions you tick below. Set permissions after creating the group.</p>
               <div className="flex justify-end gap-2 pt-1">
                 <button
                   type="button"
@@ -581,20 +552,6 @@ export default function UsersClient({
                   placeholder="e.g. michael.chen@company.com"
                   className="w-full bg-muted border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
                 />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-sans text-muted-foreground uppercase font-semibold">System Role</label>
-                <select
-                  value={userRole}
-                  onChange={(e) => setUserRole(e.target.value as UserRole)}
-                  className="w-full bg-muted border border-border rounded-md px-3 py-2 text-xs focus:outline-none cursor-pointer text-foreground"
-                >
-                  <option value="DEPT_PIC">Department PIC</option>
-                  <option value="OE_MEMBER">OE Member</option>
-                  <option value="OE_LEADER">OE Leader</option>
-                  <option value="ADMIN">Administrator</option>
-                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

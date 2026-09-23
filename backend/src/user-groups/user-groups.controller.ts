@@ -140,14 +140,12 @@ export class UserGroupsController {
   }
 
   /**
-   * Can't hand out more than you hold - a non-ADMIN with user-groups:manage-permissions must
+   * Can't hand out more than you hold - a caller with user-groups:manage-permissions must
    * not be able to escalate a group (including their own) beyond their own effective grants,
    * neither by adding a permission they lack nor by widening a scope beyond theirs. Revoking,
    * narrowing and leaving things as they were are always allowed; only new or widened grants
-   * are checked. Always run against DB-fresh grants rather than short-circuiting on
-   * req.user.role (the JWT's role claim): a real, currently-fresh ADMIN already holds every
-   * key at ALL, so this stays a no-op for them without a separate bypass, and a
-   * since-demoted admin can no longer slip through on a stale token.
+   * are checked. Always run against DB-fresh grants: a member of the Administrators group
+   * already holds every key at ALL, so this stays a no-op for them with no separate bypass.
    */
   private async assertMayGrant(
     user: AuthenticatedUser,

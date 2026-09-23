@@ -10,7 +10,6 @@ const user = {
   sub: 'u1',
   email: 'a@b.c',
   name: 'A',
-  role: 'OE_MEMBER' as const,
   departmentId: null,
 };
 

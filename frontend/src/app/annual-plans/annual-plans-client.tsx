@@ -101,6 +101,13 @@ export default function AnnualPlansClient({
   const canCreateChildPlan = RBAC.can(currentUser, "projects:create");
   const canUpdateChildPlan = RBAC.can(currentUser, "projects:update");
   const canDeleteChildPlan = RBAC.can(currentUser, "projects:delete");
+  // Whether the child Project modal's fields may be edited right now - locked once the parent
+  // Annual Plan is approved (existing rule), and also now by whether the viewer actually holds
+  // the permission for the mode they're in, so a projects:view-only caller sees a real
+  // read-only "View Project" instead of fields that look editable but 403 on save.
+  const childCanEdit =
+    statusInput !== "APPROVED" &&
+    (childModalMode === "create" ? canCreateChildPlan : canUpdateChildPlan);
 
   const loadApprovedTopicCounts = () => {
     clientApi<Record<string, number>>("/annual-plans/approved-topic-counts").then(setApprovedTopicCounts).catch(console.error);
@@ -763,7 +770,7 @@ export default function AnnualPlansClient({
                         value={planNameInput}
                         onChange={(e) => setPlanNameInput(e.target.value)}
                         placeholder="e.g. Annual Plan Name"
-                        disabled={statusInput === "APPROVED"}
+                        disabled={statusInput === "APPROVED" || (modalMode === "create" ? !canCreatePlan : !canUpdatePlan)}
                         className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-[#05375c] disabled:opacity-60 disabled:cursor-not-allowed"
                       />
                     </div>
@@ -779,7 +786,7 @@ export default function AnnualPlansClient({
                         onChange={setPeriodInput}
                         placeholder="Select Period..."
                         singleSelect={true}
-                        disabled={statusInput === "APPROVED"}
+                        disabled={statusInput === "APPROVED" || (modalMode === "create" ? !canCreatePlan : !canUpdatePlan)}
                       />
                     </div>
                   </div>
@@ -793,7 +800,7 @@ export default function AnnualPlansClient({
                       value={commentInput}
                       onChange={(e) => setCommentInput(e.target.value)}
                       placeholder="Add any additional comments for this annual plan..."
-                      disabled={statusInput === "APPROVED"}
+                      disabled={statusInput === "APPROVED" || (modalMode === "create" ? !canCreatePlan : !canUpdatePlan)}
                       className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-3 focus:outline-none focus:ring-1 focus:ring-[#05375c] min-h-[100px] resize-y disabled:opacity-60 disabled:cursor-not-allowed"
                     />
                   </div>
@@ -839,7 +846,12 @@ export default function AnnualPlansClient({
                         <tr key={ap.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
                           <td className="px-4 py-3 text-slate-600 font-medium">{ap.no}</td>
                           <td className="px-4 py-3 text-slate-500 font-medium">{ap.type || "OE"}</td>
-                          <td className="px-4 py-3 text-slate-800 dark:text-slate-200 font-medium">{ap.projectName}</td>
+                          <td
+                            onClick={() => openChildEditModal(ap)}
+                            className="px-4 py-3 text-[#0066cc] font-medium hover:underline cursor-pointer"
+                          >
+                            {ap.projectName}
+                          </td>
                           <td className="px-4 py-3 text-slate-800 dark:text-slate-200 font-medium">{ap.topic}</td>
                           <td className="px-4 py-3 text-slate-500 font-medium">{ap.bu}</td>
                           <td className="px-4 py-3 font-mono text-xs">
@@ -942,7 +954,7 @@ export default function AnnualPlansClient({
           <div className="bg-white dark:bg-slate-950 w-full max-w-3xl rounded-lg shadow-xl overflow-hidden border border-slate-200 dark:border-slate-800">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
-                {statusInput === "APPROVED" ? "View Project" : (childModalMode === "create" ? "Add Project" : "Edit Project")}
+                {!childCanEdit ? "View Project" : (childModalMode === "create" ? "Add Project" : "Edit Project")}
               </h2>
               <button onClick={() => setIsChildModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -958,7 +970,7 @@ export default function AnnualPlansClient({
                       selectedValues={apType ? [apType] : []}
                       onChange={(values) => setApType(values.length > 0 ? values[0] : "")}
                       singleSelect={true}
-                      disabled={statusInput === "APPROVED"}
+                      disabled={!childCanEdit}
                       options={[
                         { value: "OE", label: "OE" },
                         { value: "ISO Internal OE", label: "ISO Internal OE" },
@@ -975,7 +987,7 @@ export default function AnnualPlansClient({
                     type="text"
                     value={apProjectName}
                     onChange={(e) => setApProjectName(e.target.value)}
-                    disabled={statusInput === "APPROVED"}
+                    disabled={!childCanEdit}
                     placeholder="Enter project name..."
                     className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#05375c] disabled:opacity-60 disabled:cursor-not-allowed"
                   />
@@ -998,7 +1010,7 @@ export default function AnnualPlansClient({
                         setApBuId(chosen);
                       }}
                       singleSelect={true}
-                      disabled={statusInput === "APPROVED"}
+                      disabled={!childCanEdit}
                       options={businessUnits.map((b) => ({
                         value: b.id,
                         label: b.name,
@@ -1032,7 +1044,7 @@ export default function AnnualPlansClient({
                         }
                       }}
                       singleSelect={true}
-                      disabled={statusInput === "APPROVED" || !apBuId}
+                      disabled={!childCanEdit || !apBuId}
                       options={departments
                         .filter((d) => d.businessUnitId === apBuId)
                         .map((d) => ({
@@ -1066,7 +1078,7 @@ export default function AnnualPlansClient({
                   ]}
                   selectedValues={apRevieweeIds}
                   onChange={setApRevieweeIds}
-                  disabled={statusInput === "APPROVED"}
+                  disabled={!childCanEdit}
                   placeholder="Select Reviewees..."
                 />
               </div>
@@ -1078,7 +1090,7 @@ export default function AnnualPlansClient({
                     type="date"
                     value={apConductDate}
                     onChange={(e) => setApConductDate(e.target.value)}
-                    disabled={statusInput === "APPROVED"}
+                    disabled={!childCanEdit}
                     className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#05375c] disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
@@ -1088,7 +1100,7 @@ export default function AnnualPlansClient({
                     type="date"
                     value={apEndDate}
                     onChange={(e) => setApEndDate(e.target.value)}
-                    disabled={statusInput === "APPROVED"}
+                    disabled={!childCanEdit}
                     className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#05375c] disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
@@ -1099,7 +1111,7 @@ export default function AnnualPlansClient({
                 <textarea
                   value={apPurpose}
                   onChange={(e) => setApPurpose(e.target.value)}
-                  disabled={statusInput === "APPROVED"}
+                  disabled={!childCanEdit}
                   className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#05375c] h-24 resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="Enter purpose..."
                 />
@@ -1111,7 +1123,7 @@ export default function AnnualPlansClient({
                   items={apObjectivesItems}
                   onChange={setApObjectivesItems}
                   prefix="OE-OBJ"
-                  editable={statusInput !== "APPROVED"}
+                  editable={childCanEdit}
                   placeholder="Enter objective item description..."
                   addBtnText="Add Objective"
                 />
@@ -1121,7 +1133,7 @@ export default function AnnualPlansClient({
                   items={apScopeItems}
                   onChange={setApScopeItems}
                   prefix="OE-SCP"
-                  editable={statusInput !== "APPROVED"}
+                  editable={childCanEdit}
                   placeholder="Enter scope item description..."
                   addBtnText="Add Scope Item"
                 />
@@ -1134,9 +1146,9 @@ export default function AnnualPlansClient({
                 onClick={() => setIsChildModalOpen(false)}
                 className="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50"
               >
-                {statusInput === "APPROVED" ? "Close" : "Cancel"}
+                {childCanEdit ? "Cancel" : "Close"}
               </button>
-              {statusInput !== "APPROVED" && (
+              {childCanEdit && (
                 <button
                   type="button"
                   onClick={handleSaveChildPlan}

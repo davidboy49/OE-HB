@@ -17,11 +17,13 @@ import { CreateExecutionScheduleDto } from './dto/create-execution-schedule.dto'
 import { UpdateExecutionScheduleDto } from './dto/update-execution-schedule.dto';
 import { RecordConsentDto } from './dto/record-consent.dto';
 import { ConfirmAttendeeDto } from './dto/confirm-attendee.dto';
+import { ResolveFindingRowDto } from './dto/resolve-finding-row.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { AccessScopeService } from '../common/access-scope.service';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('execution-schedules')
@@ -31,6 +33,7 @@ export class ExecutionSchedulesController {
   constructor(
     private readonly executionSchedulesService: ExecutionSchedulesService,
     private readonly accessScope: AccessScopeService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   @Get()
@@ -175,7 +178,8 @@ export class ExecutionSchedulesController {
    * (see ExecutionSchedulesService.confirmAttendee), unlike the generic PATCH above which
    * replaces the whole record and would silently drop a concurrent confirmation from someone
    * else. Same permission as the generic edit route, plus: you may only confirm your own
-   * attendance unless you're an ADMIN (previously only enforced in the UI).
+   * attendance unless you hold `execution-schedules:confirm-others` (previously only enforced
+   * in the UI).
    */
   @Patch(':id/attendee-confirmation')
   @RequirePermission('execution-schedules:update')
@@ -190,17 +194,52 @@ export class ExecutionSchedulesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     await this.accessScope.assertVisible('schedule', id, user.sub);
-    if (
-      user.role !== 'ADMIN' &&
-      dto.attendeeName.trim().toLowerCase() !== user.name.trim().toLowerCase()
-    ) {
-      throw new ForbiddenException(
-        'Only the attendee or an Admin can confirm this attendance.',
+    const isOwnName =
+      dto.attendeeName.trim().toLowerCase() === user.name.trim().toLowerCase();
+    if (!isOwnName) {
+      const granted = await this.permissionsResolver.getEffectivePermissions(
+        user.sub,
       );
+      if (!granted.includes('execution-schedules:confirm-others')) {
+        throw new ForbiddenException(
+          'Only the attendee or a user with confirm-others permission can confirm this attendance.',
+        );
+      }
     }
     return this.executionSchedulesService.confirmAttendee(
       id,
       dto.attendeeName,
+      user.name,
+    );
+  }
+
+  /**
+   * Lets a caller who holds ONLY `execution-schedules:resolve-finding` (not
+   * `execution-schedules:update`) fill in one finding row's corrective action and mark it
+   * resolved, without being able to touch anything else on the report - see
+   * ResolveFindingRowDto for the exact field whitelist. `assertVisible` reuses the caller's
+   * `execution-schedules:view` scope, which is what naturally limits a DEPARTMENT-scoped
+   * group to their own department's reports while an ALL-scoped group (e.g. OE Team) can
+   * resolve rows on any department's report - no separate department check needed here.
+   */
+  @Patch(':id/finding-rows/:rowId/resolve')
+  @RequirePermission('execution-schedules:resolve-finding')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'RESOLVE_FINDING_ROW',
+    details: `Resolved finding row ${req.params.rowId} on schedule ID: ${req.params.id}`,
+  }))
+  async resolveFindingRow(
+    @Param('id') id: string,
+    @Param('rowId') rowId: string,
+    @Body() dto: ResolveFindingRowDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
+    return this.executionSchedulesService.resolveFindingRow(
+      id,
+      rowId,
+      dto,
       user.name,
     );
   }

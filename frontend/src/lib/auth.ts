@@ -11,38 +11,14 @@ export async function getCurrentUserServer(): Promise<User | null> {
   }
 }
 
-// Role authorization rules (UI-only - the backend's PermissionsGuard is the real enforcement point).
+// Permission check (UI-only - the backend's PermissionsGuard is the real enforcement point).
 export const RBAC = {
   /**
    * Checks a granular permission key (see backend/src/common/permissions.ts) against
-   * the user's effective grants from GET /auth/me. Prefer this over the named
-   * role-based helpers below for anything gating a specific create/update/delete action.
+   * the user's effective grants from GET /auth/me. Access is entirely a function of the
+   * user's UserGroup - there is no role-based fallback of any kind.
    */
   can(user: User | null, permissionKey: string): boolean {
     return user?.permissions?.includes(permissionKey) ?? false;
-  },
-  isAdmin(user: User): boolean {
-    return user.role === "ADMIN";
-  },
-  canManageUsers(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER";
-  },
-  canCreateProject(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER";
-  },
-  canEditScope(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER";
-  },
-  canWriteFinding(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER" || user.role === "OE_MEMBER";
-  },
-  canUploadDocuments(_user: User): boolean {
-    return true;
-  },
-  canApproveReport(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER";
-  },
-  canApproveAnnualPlan(user: User): boolean {
-    return user.role === "ADMIN" || user.role === "OE_LEADER";
   },
 };

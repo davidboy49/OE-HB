@@ -13,7 +13,6 @@ model User {
   id               String            @id @default(uuid())
   email            String            @unique
   name             String
-  role             String // "ADMIN", "OE_LEADER", "OE_MEMBER", "DEPT_PIC"
   passwordHash     String? // bcrypt hash; null until an admin sets a password for this user
   keycloakSub      String?           @unique // Keycloak's permanent user id ("sub"); set the first time this account signs in through SSO
   isActive         Boolean           @default(true) // false = cannot sign in and existing sessions stop working on the next request

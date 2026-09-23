@@ -63,7 +63,6 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       name: user.name,
-      role: user.role as AuthenticatedUser['role'],
       departmentId: user.departmentId,
     };
   }
@@ -82,7 +81,6 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
       departmentId: user.departmentId,
       groupId: user.groupId,
       departmentName: user.department?.name ?? null,
@@ -148,7 +146,6 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       name: user.name,
-      role: user.role as AuthenticatedUser['role'],
       departmentId: user.departmentId,
     };
   }

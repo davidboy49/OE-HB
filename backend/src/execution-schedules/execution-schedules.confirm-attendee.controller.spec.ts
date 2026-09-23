@@ -3,30 +3,36 @@ import { ForbiddenException } from '@nestjs/common';
 import { ExecutionSchedulesController } from './execution-schedules.controller';
 import type { ExecutionSchedulesService } from './execution-schedules.service';
 import type { AccessScopeService } from '../common/access-scope.service';
+import type { PermissionsResolverService } from '../common/permissions-resolver.service';
 
 const member = {
   sub: 'u1',
   email: 'a@b.c',
   name: 'Dara',
-  role: 'OE_MEMBER' as const,
   departmentId: null,
 };
-const admin = {
+const confirmer = {
   ...member,
   sub: 'u2',
-  name: 'Admin User',
-  role: 'ADMIN' as const,
+  name: 'Confirmer User',
 };
 
-function makeController() {
+function makeController(opts: { granted?: string[] } = {}) {
   const service = {
     confirmAttendee: jest.fn().mockResolvedValue({ id: 's1' }),
   } as unknown as ExecutionSchedulesService;
   const accessScope = {
     assertVisible: jest.fn().mockResolvedValue(undefined),
   } as unknown as AccessScopeService;
+  const permissionsResolver = {
+    getEffectivePermissions: jest.fn().mockResolvedValue(opts.granted ?? []),
+  } as unknown as PermissionsResolverService;
   return {
-    controller: new ExecutionSchedulesController(service, accessScope),
+    controller: new ExecutionSchedulesController(
+      service,
+      accessScope,
+      permissionsResolver,
+    ),
     service,
   };
 }
@@ -59,15 +65,21 @@ describe('ExecutionSchedulesController.confirmAttendee - who may confirm', () =>
     expect(service.confirmAttendee).not.toHaveBeenCalled();
   });
 
-  it('lets an ADMIN confirm on behalf of anyone', async () => {
-    const { controller, service } = makeController();
+  it('lets a user holding execution-schedules:confirm-others confirm on behalf of anyone', async () => {
+    const { controller, service } = makeController({
+      granted: ['execution-schedules:confirm-others'],
+    });
     await expect(
-      controller.confirmAttendee('s1', { attendeeName: 'Someone Else' }, admin),
+      controller.confirmAttendee(
+        's1',
+        { attendeeName: 'Someone Else' },
+        confirmer,
+      ),
     ).resolves.toBeDefined();
     expect(service.confirmAttendee).toHaveBeenCalledWith(
       's1',
       'Someone Else',
-      'Admin User',
+      'Confirmer User',
     );
   });
 });

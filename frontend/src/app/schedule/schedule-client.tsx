@@ -58,6 +58,19 @@ const formatDateString = (dateStr: string) => {
   return dateStr;
 };
 
+// Formats a row's date (and, when it spans more than one day, its end date) for display
+const formatDateRange = (row: ScheduleRow) => {
+  const from = formatDateString(row.date);
+  if (!row.dateTo || row.dateTo === row.date) return from;
+  return `${from} - ${formatDateString(row.dateTo)}`;
+};
+
+// Rows saved before per-row ids existed won't have one yet - assign one client-side so every
+// row has a stable identity to work with; the next save persists it (see backend/src/
+// execution-schedules/execution-schedules.service.ts's backfillRowIds for the server-side twin).
+const withRowIds = (rows: ScheduleRow[]): ScheduleRow[] =>
+  rows.map((r) => (r.id ? r : { ...r, id: crypto.randomUUID() }));
+
 // Helpers to parse and format HTML5 time picker values
 const parseTimeRange = (timeStr: string) => {
   if (!timeStr) return { from: "09:00", to: "10:00" };
@@ -244,7 +257,7 @@ export default function ScheduleClient({
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
+    subLabel: u.email ?? "",
   }));
 
   // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
@@ -263,13 +276,13 @@ export default function ScheduleClient({
   const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "OE-DRQ");
   const dataRequestOptions = availableDataRequests.map(d => ({
     value: d.id,
-    label: d.id,
-    subLabel: d.text
+    label: d.text || d.id,
+    subLabel: d.id
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser?.role === "ADMIN") return true;
+    if (currentUser?.grants?.["oe-plans:view"] === "ALL") return true;
     if (proj.leaderId === currentUser?.id || proj.leaderId === currentUser?.name) return true;
     const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
     if (membersList.includes(currentUser?.name)) return true;
@@ -281,7 +294,7 @@ export default function ScheduleClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser?.role === "ADMIN") return true;
+    if (currentUser?.grants?.["execution-schedules:view"] === "ALL") return true;
     if (sched.ownerName === currentUser?.name || sched.lastModifiedBy === currentUser?.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);
@@ -407,7 +420,7 @@ export default function ScheduleClient({
     setScope(sched.scope);
     
     try {
-      setRows(JSON.parse(sched.scheduleRows));
+      setRows(withRowIds(JSON.parse(sched.scheduleRows)));
     } catch {
       setRows([]);
     }
@@ -605,7 +618,7 @@ export default function ScheduleClient({
   };
 
   const addRow = () => {
-    const newRow = { day: "", date: new Date().toISOString().split('T')[0], time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
+    const newRow = { id: crypto.randomUUID(), day: "", date: new Date().toISOString().split('T')[0], dateTo: "", time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
     setRows([...rows, newRow]);
     setActiveRowIndex(rows.length);
     setDraftRow({ ...newRow });
@@ -650,6 +663,7 @@ export default function ScheduleClient({
       const hasChanges = 
         original.day !== draftRow.day ||
         original.date !== draftRow.date ||
+        original.dateTo !== draftRow.dateTo ||
         original.time !== draftRow.time ||
         original.oeScope !== draftRow.oeScope ||
         original.activity !== draftRow.activity ||
@@ -1180,7 +1194,7 @@ export default function ScheduleClient({
                               {row.day || ""}
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                              {formatDateString(row.date)}
+                              {formatDateRange(row)}
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-sans text-[10px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {row.time || "Time not selected"}
@@ -1277,8 +1291,11 @@ export default function ScheduleClient({
                 {/* 2. Nested Schedule Slot Editor Modal (Screen only) */}
                 {activeRowIndex !== null && draftRow !== null && (() => {
                   const timeVals = parseTimeRange(draftRow.time);
-                  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(draftRow.date) 
-                    ? draftRow.date 
+                  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(draftRow.date)
+                    ? draftRow.date
+                    : "";
+                  const validDateTo = draftRow.dateTo && /^\d{4}-\d{2}-\d{2}$/.test(draftRow.dateTo)
+                    ? draftRow.dateTo
                     : "";
                   const conductByArray = draftRow.conductBy
                     ? draftRow.conductBy.split(",").map(name => name.trim()).filter(Boolean)
@@ -1287,18 +1304,16 @@ export default function ScheduleClient({
                     ? draftRow.pIncharge.split(",").map(name => name.trim()).filter(Boolean)
                     : [];
 
-                  const memberOptions = users
-                    .filter(u => u.role === "ADMIN" || u.role === "OE_LEADER" || u.role === "OE_MEMBER")
-                    .map(u => ({
-                      value: u.name,
-                      label: u.name,
-                      subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
-                    }));
+                  const memberOptions = users.map(u => ({
+                    value: u.name,
+                    label: u.name,
+                    subLabel: u.email ?? "",
+                  }));
 
                   const picOptions = users.map(u => ({
                     value: u.name,
                     label: u.name,
-                    subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
+                    subLabel: u.email ?? "",
                   }));
 
                   const availableOeScopes = parsePlanItems(scope, "IOE-SCP");
@@ -1370,12 +1385,27 @@ export default function ScheduleClient({
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                                       Execution Date
                                     </label>
-                                    <input 
-                                      type="date"
-                                      value={validDate}
-                                      onChange={(e) => updateDraftField("date", e.target.value)}
-                                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-                                    />
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
+                                        <input
+                                          type="date"
+                                          value={validDate}
+                                          onChange={(e) => updateDraftField("date", e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] text-slate-400 font-sans uppercase">To</span>
+                                        <input
+                                          type="date"
+                                          value={validDateTo}
+                                          min={validDate || undefined}
+                                          onChange={(e) => updateDraftField("dateTo", e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
+                                        />
+                                      </div>
+                                    </div>
                                   </div>
 
                                   {/* Time Selector */}
@@ -1551,7 +1581,7 @@ export default function ScheduleClient({
                       {rows.map((row, index) => (
                         <tr key={index} className="align-top border-b border-slate-300 dark:border-slate-800">
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">{row.day || ""}</td>
-                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-bold whitespace-pre-wrap">{formatDateString(row.date)}</td>
+                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-bold whitespace-pre-wrap">{formatDateRange(row)}</td>
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-sans text-[10px] whitespace-pre-wrap">{row.time || "Time not selected"}</td>
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800">
                             {(() => {

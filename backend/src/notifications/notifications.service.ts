@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import nodemailer from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import { UpdateSmtpConfigDto } from './dto/update-smtp-config.dto';
 import { FindingAlertItemDto } from './dto/send-findings-alert.dto';
 
@@ -14,13 +15,15 @@ interface MailRecipient {
   id: string;
   name: string;
   email: string;
-  role: string;
   departmentName?: string | null;
 }
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissionsResolver: PermissionsResolverService,
+  ) {}
 
   // ── SMTP config ──────────────────────────────────────────────────────
 
@@ -424,10 +427,15 @@ export class NotificationsService {
           deptUsers.forEach((u) => recipientsMap.set(u.email, u));
         }
 
-        // Final fallback to admins
+        // Final fallback to whoever can act on findings
         if (recipientsMap.size === 0) {
-          const admins = allUsers.filter((u) => u.role === 'ADMIN');
-          admins.forEach((u) => recipientsMap.set(u.email, u));
+          const ownerIds = new Set(
+            await this.permissionsResolver.getActiveUserIdsWithPermission(
+              'findings:update',
+            ),
+          );
+          const owners = allUsers.filter((u) => ownerIds.has(u.id));
+          owners.forEach((u) => recipientsMap.set(u.email, u));
         }
 
         const issueText =
@@ -479,7 +487,6 @@ export class NotificationsService {
       id: u.id,
       name: u.name,
       email: u.email,
-      role: u.role,
       departmentName: u.department?.name ?? null,
     }));
   }

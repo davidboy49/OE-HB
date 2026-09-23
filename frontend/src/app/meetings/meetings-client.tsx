@@ -269,18 +269,18 @@ export default function MeetingsClient({
 
   const confirmedAttendeeCount = additionalAttendeesArray.filter(name => attendeeConfirmations[name]).length;
   const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
-  const canConfirmAttendee = (attendeeName: string) => currentUser.role === "ADMIN" || normalizeAttendeeName(attendeeName) === normalizeAttendeeName(currentUser.name);
+  const canConfirmAttendee = (attendeeName: string) => RBAC.can(currentUser, "meetings:confirm-others") || normalizeAttendeeName(attendeeName) === normalizeAttendeeName(currentUser.name);
 
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
+    subLabel: u.email ?? "",
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["oe-plans:view"] === "ALL") return true;
     if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
     const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
     if (membersList.includes(currentUser.name)) return true;
@@ -292,7 +292,7 @@ export default function MeetingsClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["meetings:view"] === "ALL") return true;
     if (sched.ownerName === currentUser.name || sched.lastModifiedBy === currentUser.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);

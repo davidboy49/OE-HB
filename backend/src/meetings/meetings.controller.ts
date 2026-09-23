@@ -144,7 +144,7 @@ export class MeetingsController {
    * (see MeetingsService.confirmAttendee), unlike the generic PATCH above which replaces the
    * whole record (and would also incorrectly send a RELEASED meeting back to DRAFT). Same
    * permission as the generic edit route, plus: you may only confirm your own attendance
-   * unless you're an ADMIN (previously only enforced in the UI).
+   * unless you hold `meetings:confirm-others` (previously only enforced in the UI).
    */
   @Patch(':id/attendee-confirmation')
   @RequirePermission('meetings:update')
@@ -159,13 +159,17 @@ export class MeetingsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     await this.accessScope.assertVisible('meeting', id, user.sub);
-    if (
-      user.role !== 'ADMIN' &&
-      dto.attendeeName.trim().toLowerCase() !== user.name.trim().toLowerCase()
-    ) {
-      throw new ForbiddenException(
-        'Only the attendee or an Admin can confirm this attendance.',
+    const isOwnName =
+      dto.attendeeName.trim().toLowerCase() === user.name.trim().toLowerCase();
+    if (!isOwnName) {
+      const granted = await this.permissionsResolver.getEffectivePermissions(
+        user.sub,
       );
+      if (!granted.includes('meetings:confirm-others')) {
+        throw new ForbiddenException(
+          'Only the attendee or a user with confirm-others permission can confirm this attendance.',
+        );
+      }
     }
     return this.meetingsService.confirmAttendee(
       id,

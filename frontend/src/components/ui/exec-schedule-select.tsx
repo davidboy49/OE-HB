@@ -2,7 +2,8 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
-import type { ExecutionSchedule as FindingReport, OePlan } from "@oeportal/shared";
+import type { ExecutionSchedule as FindingReport, OePlan, Project, Department } from "@oeportal/shared";
+import { formatOePlanOption } from "./oe-plan-select";
 
 interface ExecScheduleSelectProps {
   schedules: FindingReport[];
@@ -11,6 +12,10 @@ interface ExecScheduleSelectProps {
   onSelect: (scheduleId: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Project lookup by id, used to resolve the BU-Department-Version pill / Project name text. */
+  linkedProjectsById?: Record<string, Project>;
+  /** Department lookup by id, used to resolve the BU segment's short ID (e.g. "HB"). */
+  departmentsById?: Record<string, Department>;
 }
 
 export default function ExecScheduleSelect({
@@ -20,6 +25,8 @@ export default function ExecScheduleSelect({
   onSelect,
   placeholder = "Choose Released Execution Schedule...",
   disabled = false,
+  linkedProjectsById = {},
+  departmentsById = {},
 }: ExecScheduleSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -44,7 +51,10 @@ export default function ExecScheduleSelect({
 
   const filteredSchedules = schedules.filter((s) => {
     const project = projects.find((p) => p.id === s.projectId);
-    const text = `${s.projectCode || ""} ${project?.name || ""} ${s.departments || ""} ${s.actualVisitDate || ""}`.toLowerCase();
+    const { pill, text: name } = project
+      ? formatOePlanOption(project, linkedProjectsById, departmentsById)
+      : { pill: s.projectCode || "", text: "" };
+    const text = `${pill} ${name} ${s.departments || ""} ${s.actualVisitDate || ""}`.toLowerCase();
     return text.includes(search.toLowerCase());
   });
 
@@ -62,17 +72,24 @@ export default function ExecScheduleSelect({
       >
         <div className="flex items-center gap-2 overflow-hidden me-2">
           {selectedSchedule ? (
-            <>
-              <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                {selectedSchedule.projectCode || selectedProject?.code}
-              </span>
-              <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                {selectedProject?.name || "Unknown OE Plan"}
-              </span>
-              <span className="text-slate-550 dark:text-slate-400 shrink-0">
-                — {selectedSchedule.departments} ({selectedSchedule.actualVisitDate})
-              </span>
-            </>
+            (() => {
+              const { pill, text } = selectedProject
+                ? formatOePlanOption(selectedProject, linkedProjectsById, departmentsById)
+                : { pill: selectedSchedule.projectCode || "", text: "Unknown OE Plan" };
+              return (
+                <>
+                  <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
+                    {pill}
+                  </span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
+                    {text}
+                  </span>
+                  <span className="text-slate-550 dark:text-slate-400 shrink-0">
+                    — {selectedSchedule.departments} ({selectedSchedule.actualVisitDate})
+                  </span>
+                </>
+              );
+            })()
           ) : (
             <span className="text-slate-400 font-normal">{placeholder}</span>
           )}
@@ -106,6 +123,9 @@ export default function ExecScheduleSelect({
                 const project = projects.find((p) => p.id === s.projectId);
                 const isSelected = s.id === selectedExecScheduleId;
                 const isClosed = project?.status === "CLOSED";
+                const { pill, text } = project
+                  ? formatOePlanOption(project, linkedProjectsById, departmentsById)
+                  : { pill: s.projectCode || "", text: "Unknown OE Plan" };
                 return (
                   <button
                     key={s.id}
@@ -126,10 +146,10 @@ export default function ExecScheduleSelect({
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                        {s.projectCode || project?.code}
+                        {pill}
                       </span>
                       <span className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">
-                        {project?.name || "Unknown OE Plan"}
+                        {text}
                       </span>
                       <span className="text-slate-550 dark:text-slate-400 truncate font-medium">
                         — {s.departments} ({s.actualVisitDate})

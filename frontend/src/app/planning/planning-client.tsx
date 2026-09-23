@@ -241,7 +241,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
 
   const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
-  const canConfirmAttendee = (attendeeName: string) => currentUser.role === "ADMIN" || normalizeAttendeeName(attendeeName) === normalizeAttendeeName(currentUser.name);
+  const canConfirmAttendee = (attendeeName: string) => RBAC.can(currentUser, "execution-schedules:confirm-others") || normalizeAttendeeName(attendeeName) === normalizeAttendeeName(currentUser.name);
 
   const handleConfirmAttendee = async (attendeeName: string) => {
     if (!selectedProject) return;
@@ -251,7 +251,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
     if (!linkedMeeting) return;
 
     if (!canConfirmAttendee(attendeeName)) {
-      showFeedback("Only the attendee or an Admin can confirm this attendance.");
+      showFeedback("Only the attendee or a user with confirm-others permission can confirm this attendance.");
       return;
     }
 
@@ -1096,7 +1096,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
 
   const isProjectMember = (proj: OePlan | null) => {
     if (!proj) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["oe-plans:view"] === "ALL") return true;
     if (proj.leaderId === currentUser.id) return true;
     const membersList = proj.memberNames ? proj.memberNames.split(",").map(s => s.trim()) : [];
     if (membersList.includes(currentUser.name)) return true;
@@ -1113,8 +1113,8 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const canApproveProject = RBAC.can(currentUser, "oe-plans:approve");
   const canCloseProject = RBAC.can(currentUser, "oe-plans:close");
   const canReopenProject = RBAC.can(currentUser, "oe-plans:reopen");
-  const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
-  const leaders = users.filter(u => u.role === "OE_LEADER" || u.role === "ADMIN");
+  const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null) || !canUpdateProject;
+  const leaders = users.filter(u => RBAC.can(u, "oe-plans:update"));
   const linkedPlannedEngagement = selectedProject?.projectId
     ? plannedEngagements?.find(ap => ap.id === selectedProject.projectId)
     : null;
@@ -1542,7 +1542,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             .map(u => ({
                               value: u.name,
                               label: u.name,
-                              subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
+                              subLabel: u.email ?? "",
                             }))}
                           placeholder="Select OE Leaders..."
                         />
@@ -1560,11 +1560,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
                           onChange={(values) => setEditMemberIds(values)}
                           disabled={isReadOnly}
                           options={users
-                            .filter(u => u.role === "ADMIN" || u.role === "OE_LEADER" || u.role === "OE_MEMBER")
+                            .filter(u => RBAC.can(u, "oe-plans:view"))
                             .map(u => ({
                               value: u.name,
                               label: u.name,
-                              subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
+                              subLabel: u.email ?? "",
                             }))}
                           placeholder="Select OE Members..."
                         />

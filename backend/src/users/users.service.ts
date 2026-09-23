@@ -5,11 +5,15 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import type { User, UserRole } from '@oeportal/shared';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
+import type { User } from '@oeportal/shared';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissionsResolver: PermissionsResolverService,
+  ) {}
 
   async findAll(): Promise<User[]> {
     const users = await this.prisma.user.findMany({
@@ -19,36 +23,42 @@ export class UsersService {
       },
       orderBy: { name: 'asc' },
     });
-    return users.map((u) => ({
+    const permissionsByUser = await Promise.all(
+      users.map((u) => this.permissionsResolver.getEffectivePermissions(u.id)),
+    );
+    return users.map((u, i) => ({
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role as UserRole,
       departmentId: u.departmentId,
       groupId: u.groupId,
       departmentName: u.department?.name || null,
       groupName: u.group?.name || null,
       isActive: u.isActive,
       ssoLinked: u.keycloakSub !== null,
+      permissions: permissionsByUser[i],
     }));
   }
 
   /**
    * Turns an account on or off. A deactivated person cannot sign in and any session they
-   * already have stops working on its next request (see JwtStrategy). The last active admin
-   * can never be switched off, so the system cannot lock itself out.
+   * already have stops working on its next request (see JwtStrategy). The last active user
+   * who can still manage users (`users:update`) can never be switched off, so the system
+   * cannot lock itself out of user management entirely.
    */
   async setActive(userId: string, isActive: boolean): Promise<User> {
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!target) throw new NotFoundException('User not found');
 
-    if (!isActive && target.role === 'ADMIN' && target.isActive) {
-      const otherAdmins = await this.prisma.user.count({
-        where: { role: 'ADMIN', isActive: true, id: { not: userId } },
-      });
-      if (otherAdmins === 0) {
+    if (!isActive && target.isActive) {
+      const managers =
+        await this.permissionsResolver.getActiveUserIdsWithPermission(
+          'users:update',
+        );
+      const otherManagers = managers.filter((id) => id !== userId);
+      if (managers.includes(userId) && otherManagers.length === 0) {
         throw new BadRequestException(
-          'This is the last active admin - at least one admin must stay active.',
+          'This is the last active user who can manage users - at least one must stay active.',
         );
       }
     }
@@ -61,7 +71,6 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role as UserRole,
       departmentId: u.departmentId,
       groupId: u.groupId,
       isActive: u.isActive,
@@ -72,7 +81,6 @@ export class UsersService {
   async create(
     name: string,
     email: string,
-    role: UserRole,
     departmentId: string | null,
     groupId: string | null,
     password?: string,
@@ -82,7 +90,6 @@ export class UsersService {
       data: {
         name,
         email,
-        role,
         departmentId,
         groupId,
         passwordHash,
@@ -92,7 +99,6 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role as UserRole,
       departmentId: u.departmentId,
       groupId: u.groupId,
     };
@@ -102,19 +108,17 @@ export class UsersService {
     userId: string,
     name: string,
     email: string,
-    role: UserRole,
     departmentId: string | null,
     groupId: string | null,
   ): Promise<User | null> {
     const u = await this.prisma.user.update({
       where: { id: userId },
-      data: { name, email, role, departmentId, groupId },
+      data: { name, email, departmentId, groupId },
     });
     return {
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role as UserRole,
       departmentId: u.departmentId,
       groupId: u.groupId,
     };
@@ -133,7 +137,6 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role as UserRole,
       departmentId: u.departmentId,
       groupId: u.groupId,
     };

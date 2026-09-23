@@ -2,18 +2,17 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PermissionsResolverService } from '../common/permissions-resolver.service';
 
-function makeService(opts: { target: unknown; otherActiveAdmins?: number }) {
+function makeService(opts: { target: unknown; managerIds?: string[] }) {
   const prisma = {
     user: {
       findUnique: jest.fn().mockResolvedValue(opts.target),
-      count: jest.fn().mockResolvedValue(opts.otherActiveAdmins ?? 0),
       update: jest.fn().mockImplementation(({ data }: { data: object }) =>
         Promise.resolve({
           id: 'u1',
           email: 'a@b.c',
           name: 'A',
-          role: 'ADMIN',
           departmentId: null,
           groupId: null,
           keycloakSub: null,
@@ -23,19 +22,30 @@ function makeService(opts: { target: unknown; otherActiveAdmins?: number }) {
       ),
     },
   } as unknown as PrismaService;
-  return { service: new UsersService(prisma), prisma };
+  const permissionsResolver = {
+    getActiveUserIdsWithPermission: jest
+      .fn()
+      .mockResolvedValue(opts.managerIds ?? []),
+  } as unknown as PermissionsResolverService;
+  return {
+    service: new UsersService(prisma, permissionsResolver),
+    prisma,
+    permissionsResolver,
+  };
 }
 
 const user = (over: object = {}) => ({
   id: 'u1',
-  role: 'OE_MEMBER',
   isActive: true,
   ...over,
 });
 
 describe('UsersService.setActive', () => {
   it('deactivates and reactivates an ordinary account', async () => {
-    const { service, prisma } = makeService({ target: user() });
+    const { service, prisma } = makeService({
+      target: user(),
+      managerIds: ['someone-else'],
+    });
     await expect(service.setActive('u1', false)).resolves.toMatchObject({
       isActive: false,
     });
@@ -52,10 +62,10 @@ describe('UsersService.setActive', () => {
     );
   });
 
-  it('will not deactivate the last active admin', async () => {
+  it('will not deactivate the last active user who can manage users', async () => {
     const { service, prisma } = makeService({
-      target: user({ role: 'ADMIN' }),
-      otherActiveAdmins: 0,
+      target: user(),
+      managerIds: ['u1'],
     });
     await expect(service.setActive('u1', false)).rejects.toThrow(
       BadRequestException,
@@ -63,10 +73,20 @@ describe('UsersService.setActive', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('deactivates an admin when another active admin remains', async () => {
+  it('deactivates a manager when another active manager remains', async () => {
     const { service } = makeService({
-      target: user({ role: 'ADMIN' }),
-      otherActiveAdmins: 1,
+      target: user(),
+      managerIds: ['u1', 'u2'],
+    });
+    await expect(service.setActive('u1', false)).resolves.toMatchObject({
+      isActive: false,
+    });
+  });
+
+  it('deactivating someone who is not a manager never checks the manager count', async () => {
+    const { service } = makeService({
+      target: user(),
+      managerIds: ['someone-else'],
     });
     await expect(service.setActive('u1', false)).resolves.toMatchObject({
       isActive: false,

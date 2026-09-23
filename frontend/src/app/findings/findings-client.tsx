@@ -46,6 +46,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import ExecScheduleSelect from "@/components/ui/exec-schedule-select";
+import { formatOePlanOption } from "@/components/ui/oe-plan-select";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -71,6 +72,12 @@ const isHtmlEmpty = (html?: string) => {
   const clean = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
   return clean === "";
 };
+
+// Rows saved before per-row ids existed won't have one yet - assign one client-side so a
+// resolve-only user always has an id to target; the next save (by an editor) persists it (see
+// backend/src/execution-schedules/execution-schedules.service.ts's backfillRowIds).
+const withRowIds = (rows: FindingRow[]): FindingRow[] =>
+  rows.map((r) => (r.id ? r : { ...r, id: crypto.randomUUID() }));
 
 const escapeHtml = (value?: string) =>
   (value || "")
@@ -181,6 +188,18 @@ export default function FindingsClient({
 
   const isLocked = findingStatus === "RELEASED";
 
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by ExecScheduleSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
+
   const linkedExecSched = releasedExecSchedules.find(s => s.id === selectedExecScheduleId);
   const linkedRows = useMemo(() => {
     if (!linkedExecSched?.scheduleRows) return [];
@@ -240,12 +259,12 @@ export default function FindingsClient({
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`, 
+    subLabel: u.email ?? "",
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["oe-plans:view"] === "ALL") return true;
     if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
     const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
     if (membersList.includes(currentUser.name)) return true;
@@ -257,13 +276,18 @@ export default function FindingsClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["execution-schedules:view"] === "ALL") return true;
     if (sched.ownerName === currentUser.name || sched.lastModifiedBy === currentUser.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);
   };
 
-  const canManage = RBAC.can(currentUser, "findings:create") || RBAC.can(currentUser, "findings:update");
+  // Matches the real backend gate on the report's save route (PATCH /execution-schedules/:id),
+  // not findings:create/findings:update - those govern an unrelated Finding DB model.
+  const canManage = RBAC.can(currentUser, "execution-schedules:update");
+  // Lets a Department PIC fill in Completed Date/Corrective Action/Resolve/attachments on one
+  // row without full edit rights over the rest of the report (see the resolve-finding-row route).
+  const canResolve = RBAC.can(currentUser, "execution-schedules:resolve-finding");
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
@@ -374,7 +398,7 @@ export default function FindingsClient({
     setScope(sched.scope);
     
     try {
-      setRows(JSON.parse(sched.scheduleRows));
+      setRows(withRowIds(JSON.parse(sched.scheduleRows)));
     } catch {
       setRows([]);
     }
@@ -606,6 +630,7 @@ export default function FindingsClient({
 
     setActiveRowIndex(-1);
     setDraftRow({
+      id: crypto.randomUUID(),
       date: "",
       time: "",
       activity: "",
@@ -671,6 +696,46 @@ export default function FindingsClient({
 
     // Auto-save the draft immediately
     await persistFindingReport("DRAFT", { customRows: updated });
+  };
+
+  /**
+   * Used instead of saveRowEdit by a resolve-only (execution-schedules:resolve-finding, not
+   * execution-schedules:update) caller - PATCHes just this one row's corrective-action fields
+   * via the narrow backend route, never the full report. The backend's DTO whitelist is the
+   * real boundary; this just avoids sending fields the caller was never shown as editable.
+   */
+  const saveResolveOnly = async () => {
+    if (!draftRow || activeRowIndex === null || activeRowIndex === -1 || !selectedScheduleId) return;
+    if (!draftRow.id) {
+      showFeedback("This report needs to be opened and saved once by an editor before rows can be resolved individually.");
+      return;
+    }
+    try {
+      const updatedSchedule = await clientApi<FindingReport>(
+        `/execution-schedules/${selectedScheduleId}/finding-rows/${draftRow.id}/resolve`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            correctiveActionDate: draftRow.correctiveActionDate || undefined,
+            correctiveActionRemarks: draftRow.correctiveActionRemarks,
+            correctiveFinalDate: draftRow.correctiveFinalDate || undefined,
+            correctiveFinalRemarks: draftRow.correctiveFinalRemarks,
+            attachments: draftRow.attachments,
+            resolve: !!draftRow.correctiveFinalUser,
+          }),
+        }
+      );
+      try {
+        setRows(JSON.parse(updatedSchedule.scheduleRows || "[]"));
+      } catch {
+        // Response didn't parse - leave local rows as they were rather than blank them out.
+      }
+      setActiveRowIndex(null);
+      setDraftRow(null);
+      showFeedback("Resolution saved.");
+    } catch (err: any) {
+      showFeedback(`Error: ${err.message || err.toString()}`);
+    }
   };
 
   const deleteRowItem = (index: number) => {
@@ -942,7 +1007,7 @@ export default function FindingsClient({
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {canManage && !isLocked ? (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -950,7 +1015,7 @@ export default function FindingsClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                ) : canManage && isLocked ? (
                   <button
                     type="button"
                     onClick={handleReopenFinding}
@@ -958,8 +1023,8 @@ export default function FindingsClient({
                   >
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
-                )}
-                {!isLocked && (
+                ) : null}
+                {canManage && !isLocked && (
                   <button
                     type="button"
                     onClick={handleReleaseFinding}
@@ -995,6 +1060,9 @@ export default function FindingsClient({
                         selectedExecScheduleId={selectedExecScheduleId}
                         onSelect={handleExecScheduleSelect}
                         placeholder="Choose Released Execution Schedule..."
+                        linkedProjectsById={linkedProjectsById}
+                        departmentsById={departmentsById}
+                        disabled={!canManage}
                       />
                     ) : (
                       <div className="flex items-center gap-2 overflow-hidden">
@@ -1002,13 +1070,16 @@ export default function FindingsClient({
                           const es = releasedExecSchedules.find(s => s.id === selectedExecScheduleId);
                           if (es) {
                             const p = projects.find(proj => proj.id === es.projectId);
+                            const { pill, text } = p
+                              ? formatOePlanOption(p, linkedProjectsById, departmentsById)
+                              : { pill: es.projectCode || "", text: "Unknown OE Plan" };
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {es.projectCode || p?.code}
+                                  {pill}
                                 </span>
                                 <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                                  {p?.name || "Unknown OE Plan"}
+                                  {text}
                                 </span>
                                 <span className="text-slate-550 dark:text-slate-400 shrink-0">
                                   — {es.departments} ({es.actualVisitDate})
@@ -1018,13 +1089,14 @@ export default function FindingsClient({
                           }
                           const proj = projects.find(p => p.id === selectedProjectId);
                           if (proj) {
+                            const { pill, text } = formatOePlanOption(proj, linkedProjectsById, departmentsById);
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {proj.code}
+                                  {pill}
                                 </span>
                                 <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                                  {proj.name}
+                                  {text}
                                 </span>
                               </>
                             );
@@ -1063,27 +1135,30 @@ export default function FindingsClient({
                             <div className="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-[10px] font-bold shrink-0 no-print">
                               <button
                                 type="button"
+                                disabled={!canManage}
                                 onClick={() => setNcnKind("NCN")}
                                 title="Non-Conformance Note"
-                                className={`px-2.5 py-1 transition-colors ${!isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                                className={`px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${!isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
                               >
                                 NCN
                               </button>
                               <button
                                 type="button"
+                                disabled={!canManage}
                                 onClick={() => setNcnKind("CN")}
                                 title="Opportunity for Improvement"
-                                className={`px-2.5 py-1 border-l border-slate-300 dark:border-slate-700 transition-colors ${isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                                className={`px-2.5 py-1 border-l border-slate-300 dark:border-slate-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
                               >
                                 CN
                               </button>
                             </div>
                             <input
                               type="text"
+                              disabled={!canManage}
                               value={visitNumber}
                               onChange={(e) => setVisitNumber(e.target.value)}
                               placeholder="NCN #001/26"
-                              className="flex-1 bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
+                              className="flex-1 bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                             />
                           </div>
                         </td>
@@ -1095,13 +1170,14 @@ export default function FindingsClient({
                           Actual Visit Date
                         </td>
                         <td className="px-6 py-3">
-                          <input 
-                            type="date" 
+                          <input
+                            type="date"
                             required
+                            disabled={!canManage}
                             value={actualVisitDate}
                             onChange={(e) => setActualVisitDate(e.target.value)}
                             placeholder="e.g. 22 April 2026"
-                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-bold text-slate-800 dark:text-slate-100"
+                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-bold text-slate-800 dark:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                           />
                         </td>
                       </tr>
@@ -1117,6 +1193,7 @@ export default function FindingsClient({
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
                             placeholder="Select OE leaders..."
+                            disabled={!canManage}
                           />
                         </td>
                       </tr>
@@ -1132,6 +1209,7 @@ export default function FindingsClient({
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
                             placeholder="Select OE(s)..."
+                            disabled={!canManage}
                           />
                         </td>
                       </tr>
@@ -1147,6 +1225,7 @@ export default function FindingsClient({
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
                             placeholder="Select department reviewees..."
+                            disabled={!canManage}
                           />
                         </td>
                       </tr>
@@ -1191,7 +1270,7 @@ export default function FindingsClient({
                 </div>
                 {activeRowIndex !== null && draftRow && (
                   <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 flex justify-center items-center z-[60] p-4 animate-fade-in no-print">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-4xl md:max-w-5xl h-[90vh] max-h-[850px] rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-slide-up">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-5xl md:max-w-6xl h-[90vh] max-h-[900px] rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-slide-up">
                       <div className="px-6 py-4.5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center shrink-0">
                         <div>
                           <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-[9px] font-sans font-bold text-slate-555 dark:text-slate-400">
@@ -1219,12 +1298,13 @@ export default function FindingsClient({
                             </label>
                             <MultiSelect
                               singleSelect={true}
+                              disabled={!canManage}
                               selectedValues={draftRow.oeScope ? [draftRow.oeScope] : []}
                               onChange={(values) => setDraftRow({ ...draftRow, oeScope: values[0] || "" })}
                               options={parsePlanItems(scope, "IOE-SCP").map(obj => ({
                                 value: obj.id,
-                                label: obj.id,
-                                subLabel: obj.text
+                                label: obj.text || obj.id,
+                                subLabel: obj.id
                               }))}
                               placeholder="Select a linked OE scope..."
                             />
@@ -1232,23 +1312,28 @@ export default function FindingsClient({
 
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Findings & Observation</label>
-                            <RichEditor 
-                              value={draftRow.activity} 
-                              onChange={(html) => setDraftRow({ ...draftRow, activity: html })} 
+                            <RichEditor
+                              value={draftRow.activity}
+                              onChange={(html) => setDraftRow({ ...draftRow, activity: html })}
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Implication</label>
-                            <RichEditor 
-                              value={draftRow.implication || ""} 
-                              onChange={(html) => setDraftRow({ ...draftRow, implication: html })} 
+                            <RichEditor
+                              value={draftRow.implication || ""}
+                              onChange={(html) => setDraftRow({ ...draftRow, implication: html })}
+                              editorClassName="min-h-[280px] max-h-[550px]"
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Recommendation</label>
-                            <RichEditor 
-                              value={draftRow.recommendation || ""} 
-                              onChange={(html) => setDraftRow({ ...draftRow, recommendation: html })} 
+                            <RichEditor
+                              value={draftRow.recommendation || ""}
+                              onChange={(html) => setDraftRow({ ...draftRow, recommendation: html })}
+                              editorClassName="min-h-[280px] max-h-[550px]"
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-4 pt-2">
@@ -1265,19 +1350,21 @@ export default function FindingsClient({
                                   <span className="text-sm  font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
                                     Corrective Action Date:
                                   </span>
-                                  <input 
+                                  <input
                                     type="date"
                                     required
+                                    disabled={!(canManage || canResolve)}
                                     value={draftRow.correctiveActionDate || ""}
                                     onChange={(e) => setDraftRow({ ...draftRow, correctiveActionDate: e.target.value })}
-                                    className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px]"
+                                    className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px] disabled:cursor-not-allowed disabled:opacity-60"
                                   />
                                 </div>
                                 <div className="space-y-3">
                                   <label className="text-sm  font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Remarks</label>
-                                  <RichEditor 
-                                    value={draftRow.correctiveActionRemarks || ""} 
-                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveActionRemarks: html })} 
+                                  <RichEditor
+                                    value={draftRow.correctiveActionRemarks || ""}
+                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveActionRemarks: html })}
+                                    editable={canManage || canResolve}
                                   />
                                 </div>
                               </div>
@@ -1288,12 +1375,13 @@ export default function FindingsClient({
                                       <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
                                         Completed Date:
                                       </span>
-                                      <input 
+                                      <input
                                         type="date"
                                         required
+                                        disabled={!(canManage || canResolve)}
                                         value={draftRow.correctiveFinalDate || ""}
                                         onChange={(e) => setDraftRow({ ...draftRow, correctiveFinalDate: e.target.value })}
-                                        className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px]"
+                                        className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px] disabled:cursor-not-allowed disabled:opacity-60"
                                       />
                                     </div>
                                     <div className="flex items-center gap-3">
@@ -1303,24 +1391,27 @@ export default function FindingsClient({
                                           <span>at {draftRow.correctiveFinalDatetime ? new Date(draftRow.correctiveFinalDatetime).toLocaleString() : ""}</span>
                                         </div>
                                       )}
-                                      <button
-                                        type="button"
-                                        onClick={markDraftRowFinalized}
-                                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors ${
-                                          draftRow.correctiveFinalUser
-                                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15"
-                                            : "bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600"
-                                        }`}
-                                      >
-                                        {draftRow.correctiveFinalUser ? "Resolved" : "Resolve"}
-                                      </button>
+                                      {(canManage || canResolve) && (
+                                        <button
+                                          type="button"
+                                          onClick={markDraftRowFinalized}
+                                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors ${
+                                            draftRow.correctiveFinalUser
+                                              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15"
+                                              : "bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600"
+                                          }`}
+                                        >
+                                          {draftRow.correctiveFinalUser ? "Resolved" : "Resolve"}
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 <div className="space-y-1.5">
                                   <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Corrective Action</label>
                                   <RichEditor
                                     value={draftRow.correctiveFinalRemarks || ""}
-                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })} 
+                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })}
+                                    editable={canManage || canResolve}
                                   />
                                 </div>
                               </div>
@@ -1334,12 +1425,14 @@ export default function FindingsClient({
                             </label>
                             <input
                               type="file"
+                              disabled={!(canManage || canResolve)}
                               className="block w-full text-xs text-slate-500
                                 file:mr-4 file:py-2 file:px-4
                                 file:rounded-full file:border-0
                                 file:text-xs file:font-semibold
                                 file:bg-[#0066cc]/10 file:text-[#0066cc]
                                 hover:file:bg-[#0066cc]/20
+                                disabled:cursor-not-allowed disabled:opacity-60
                               "
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
@@ -1376,18 +1469,20 @@ export default function FindingsClient({
                                       </a>
                                       <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setDraftRow({
-                                          ...draftRow,
-                                          attachments: draftRow.attachments?.filter((a: any) => a.id !== att.id)
-                                        });
-                                      }}
-                                      className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
+                                    {(canManage || canResolve) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDraftRow({
+                                            ...draftRow,
+                                            attachments: draftRow.attachments?.filter((a: any) => a.id !== att.id)
+                                          });
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -1404,13 +1499,23 @@ export default function FindingsClient({
                         >
                           Cancel
                         </button>
-                        <button
-                          type="button"
-                          onClick={saveRowEdit}
-                          className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
-                        >
-                          Apply Changes
-                        </button>
+                        {canManage ? (
+                          <button
+                            type="button"
+                            onClick={saveRowEdit}
+                            className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
+                          >
+                            Apply Changes
+                          </button>
+                        ) : canResolve ? (
+                          <button
+                            type="button"
+                            onClick={saveResolveOnly}
+                            className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
+                          >
+                            Save Resolution
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1425,13 +1530,13 @@ export default function FindingsClient({
                         <th className="px-4 py-3 w-[15%] border-r border-[#0066cc]/30">Implication</th>
                         <th className="px-4 py-3 w-[15%] border-r border-[#0066cc]/30">Recommendation</th>
                         <th className="px-4 py-3 w-[10%] text-center">Status</th>
-                        {canManage && <th className="px-4 py-3 w-20 text-center border-l border-[#0066cc]/30 no-print">Action</th>}
+                        {(canManage || canResolve) && <th className="px-4 py-3 w-20 text-center border-l border-[#0066cc]/30 no-print">Action</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
                       {rows.length === 0 ? (
                         <tr>
-                          <td colSpan={canManage ? 7 : 6} className="px-4 py-8 text-center text-slate-400 italic">
+                          <td colSpan={(canManage || canResolve) ? 7 : 6} className="px-4 py-8 text-center text-slate-400 italic">
                             No finding line items recorded in this report. Click "Add Finding Line" to add one.
                           </td>
                         </tr>
@@ -1500,7 +1605,7 @@ export default function FindingsClient({
                                 </span>
                               )}
                             </td>
-                            {canManage && (
+                            {canManage ? (
                               <td className="px-4 py-3.5 text-center space-x-1 whitespace-nowrap border-l border-slate-200 dark:border-slate-800 no-print">
                                 <button
                                   type="button"
@@ -1519,7 +1624,18 @@ export default function FindingsClient({
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </td>
-                            )}
+                            ) : canResolve ? (
+                              <td className="px-4 py-3.5 text-center space-x-1 whitespace-nowrap border-l border-slate-200 dark:border-slate-800 no-print">
+                                <button
+                                  type="button"
+                                  onClick={() => startEditingRow(idx)}
+                                  className="p-1 text-slate-400 hover:text-emerald-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                  title="Resolve"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            ) : null}
                           </tr>
                         ))
                       )}

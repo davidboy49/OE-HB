@@ -58,13 +58,10 @@ export interface ApiRoutePolicy {
   risks: PermissionRisk[];
 }
 
-export type UserRole = "ADMIN" | "OE_LEADER" | "OE_MEMBER" | "DEPT_PIC";
-
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
   departmentId: string | null;
   groupId: string | null;
   departmentName?: string | null;
@@ -73,7 +70,7 @@ export interface User {
   isActive?: boolean;
   /** true once this account has signed in through Keycloak SSO. Only present on GET /users. */
   ssoLinked?: boolean;
-  /** Effective granular permission keys (see backend/src/common/permissions.ts). Only present on GET /auth/me. */
+  /** Effective granular permission keys (see backend/src/common/permissions.ts). Present on GET /auth/me and GET /users. */
   permissions?: string[];
   /** Same keys, each with how far it reaches (ALL / BU / DEPARTMENT / MEMBER). Only present on GET /auth/me. */
   grants?: Record<string, AccessScope>;
@@ -143,8 +140,14 @@ export interface Finding {
 }
 
 export interface ScheduleRow {
+  /** Stable per-row id, used to target a single row without touching the rest of the array
+   * (see ResolveFindingRowDto). Optional only for backward compatibility with rows saved
+   * before this field existed - any normal save backfills it. */
+  id?: string;
   day?: string;
   date: string;
+  /** End of the execution date range. Empty/equal to `date` means a single-day slot. */
+  dateTo?: string;
   time: string;
   oeScope?: string;
   activity: string;
@@ -309,7 +312,6 @@ export interface ScanPayload {
     id: string;
     name: string;
     email: string;
-    role: string;
     departmentId: string | null;
     departmentName: string | null;
     businessUnitName: string | null;

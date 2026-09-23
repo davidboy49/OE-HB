@@ -235,7 +235,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
             </label>
             <div className="text-center space-y-1">
               <div className="text-xs text-slate-300 font-sans flex items-center justify-center gap-1">
-                <Lock className="w-3 h-3 text-slate-400" /> {currentUser.role}
+                <Lock className="w-3 h-3 text-slate-400" /> {currentUser.groupName ?? "No Group"}
               </div>
               <div className="font-bold text-sm tracking-wide uppercase text-white">
                 {currentUser.name}

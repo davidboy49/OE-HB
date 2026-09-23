@@ -11,7 +11,6 @@ const user: AuthenticatedUser = {
   sub: 'u1',
   email: 'a@b.c',
   name: 'A',
-  role: 'OE_MEMBER',
   departmentId: null,
 };
 

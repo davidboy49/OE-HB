@@ -41,7 +41,6 @@ export interface Viewer {
   id: string;
   name: string;
   email: string;
-  role: string;
   departmentId: string | null;
   departmentName: string | null;
   businessUnitName: string | null;
@@ -82,7 +81,6 @@ export class MeetingResponsesService {
       id: u.id,
       name: u.name,
       email: u.email,
-      role: u.role,
       departmentId: u.departmentId,
       departmentName: u.department?.name ?? null,
       businessUnitName: u.department?.businessUnit?.name ?? null,
@@ -182,7 +180,6 @@ export class MeetingResponsesService {
         id: viewer.id,
         name: viewer.name,
         email: viewer.email,
-        role: viewer.role,
         departmentId: viewer.departmentId,
         departmentName: viewer.departmentName,
         businessUnitName: viewer.businessUnitName,

@@ -8,7 +8,6 @@ const token: AuthenticatedUser = {
   sub: 'u1',
   email: 'old@corp.com',
   name: 'Old Name',
-  role: 'ADMIN',
   departmentId: 'old-dept',
 };
 
@@ -39,16 +38,14 @@ describe('JwtStrategy.validate', () => {
       id: 'u1',
       email: 'new@corp.com',
       name: 'New Name',
-      role: 'OE_MEMBER',
       departmentId: 'new-dept',
       isActive: true,
     });
     await expect(strategy.validate(token)).resolves.toEqual({
       sub: 'u1',
       email: 'new@corp.com',
-      name: 'New Name',
-      role: 'OE_MEMBER', // demoted since the token was signed
-      departmentId: 'new-dept',
+      name: 'New Name', // renamed since the token was signed
+      departmentId: 'new-dept', // moved since the token was signed
     });
   });
 });
