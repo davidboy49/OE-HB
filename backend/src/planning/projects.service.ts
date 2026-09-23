@@ -390,13 +390,24 @@ export class ProjectsService {
 
   async remove(id: string): Promise<boolean> {
     const inUse = await this.prisma.oePlan.findFirst({
-      where: { projectId: id },
+      where: { projectId: id, isDeleted: false },
     });
     if (inUse) {
       throw new ConflictException(
         'This Project is already in use by an Individual OE Plan and cannot be deleted.',
       );
     }
+    // Unlike OePlan/ExecutionSchedule, a Project genuinely hard-deletes here (nothing of audit
+    // value exists on one until an OePlan is created from it, which the guard above already
+    // rules out) - so, unlike those two, its PlanItem rows need explicit cleanup: there's no
+    // DB-level cascade possible on PlanItem's polymorphic ownerId.
+    await this.planItems.deleteAllForOwner(
+      [
+        PLAN_ITEM_OWNER.PROJECT_OBJECTIVE.type,
+        PLAN_ITEM_OWNER.PROJECT_SCOPE.type,
+      ],
+      id,
+    );
     await this.prisma.project.delete({ where: { id } });
     return true;
   }

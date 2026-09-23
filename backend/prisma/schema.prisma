@@ -117,6 +117,12 @@ model OePlan {
   approvedByTitle         String @default("")
   approvedDate            String @default("")
 
+  // Soft delete: this is a real audit record (findings, meeting minutes, schedules, reports
+  // all hang off it) - a hard delete would cascade-destroy all of that with no undo. Excluded
+  // from findAll() and treated as not-found everywhere else; the row and everything under it
+  // survives.
+  isDeleted Boolean @default(false)
+
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   documents          Document[]
@@ -196,6 +202,9 @@ model ExecutionSchedule {
   lastModifiedBy        String    @default("")
   qrToken               String    @default(uuid())
   departmentConsents    String    @default("{}") // JSON serialized: { [deptId]: { status, acceptedByUserId, acceptedByUserName, acceptedByUserEmail, timestamp, comments } }
+  // Soft delete: hard-deleting used to cascade-destroy this schedule's Findings (real audit
+  // records). Excluded from findAll() and treated as not-found everywhere else.
+  isDeleted             Boolean   @default(false)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 }

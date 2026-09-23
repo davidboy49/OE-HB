@@ -163,7 +163,7 @@ export class ExecutionSchedulesService {
     where: Prisma.ExecutionScheduleWhereInput = {},
   ): Promise<any[]> {
     const schedules = await this.prisma.executionSchedule.findMany({
-      where,
+      where: { isDeleted: false, ...where },
       include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -230,7 +230,7 @@ export class ExecutionSchedulesService {
       where: { id },
       include: { oePlan: true },
     });
-    if (!s) return null;
+    if (!s || s.isDeleted) return null;
     const [confirmationMap, objectives, scope] = await Promise.all([
       this.getScheduleAttendeeConfirmations([id]),
       this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
@@ -287,7 +287,9 @@ export class ExecutionSchedulesService {
     const s = await this.prisma.executionSchedule.findUnique({
       where: { id: scheduleId },
     });
-    if (!s) throw new NotFoundException('Execution Schedule not found');
+    if (!s || s.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
+    }
 
     await this.mergeJsonColumn(
       'departmentConsents',
@@ -298,7 +300,11 @@ export class ExecutionSchedulesService {
 
     if (s.oePlanId) {
       const siblings = await this.prisma.executionSchedule.findMany({
-        where: { oePlanId: s.oePlanId, NOT: { id: scheduleId } },
+        where: {
+          oePlanId: s.oePlanId,
+          isDeleted: false,
+          NOT: { id: scheduleId },
+        },
         select: { id: true },
       });
       for (const sib of siblings) {
@@ -357,6 +363,16 @@ export class ExecutionSchedulesService {
     data: UpdateExecutionScheduleInput,
     actorName: string,
   ): Promise<any> {
+    // A soft-deleted schedule is not found, full stop - a plain edit must never resurrect its
+    // content by writing to a row that's supposed to be gone.
+    const target = await this.prisma.executionSchedule.findUnique({
+      where: { id },
+      select: { isDeleted: true },
+    });
+    if (!target || target.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
+    }
+
     // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
     const {
       attendeeConfirmations,
@@ -442,8 +458,16 @@ export class ExecutionSchedulesService {
     };
   }
 
+  /**
+   * Soft delete: hard-deleting used to cascade-destroy this schedule's Findings (real audit
+   * records) with no undo. `isDeleted` rows are excluded from findAll() and treated as
+   * not-found everywhere else in this service - nothing is actually removed from the database.
+   */
   async remove(id: string): Promise<boolean> {
-    await this.prisma.executionSchedule.delete({ where: { id } });
-    return true;
+    const { count } = await this.prisma.executionSchedule.updateMany({
+      where: { id, isDeleted: false },
+      data: { isDeleted: true },
+    });
+    return count > 0;
   }
 }

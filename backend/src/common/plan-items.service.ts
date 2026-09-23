@@ -76,6 +76,21 @@ export class PlanItemsService {
     ]);
   }
 
+  /**
+   * Deletes every PlanItem row for one owner, across as many owner types as it has (e.g. a
+   * Project has both PROJECT_OBJECTIVE and PROJECT_SCOPE rows under the same ownerId). For use
+   * only by a hard-delete path - anything that soft-deletes instead never needs this, since
+   * nothing is actually removed from the database.
+   */
+  async deleteAllForOwner(
+    ownerTypes: string[],
+    ownerId: string,
+  ): Promise<void> {
+    await this.prisma.planItem.deleteMany({
+      where: { ownerType: { in: ownerTypes }, ownerId },
+    });
+  }
+
   /** Wire-format JSON string (`[{id,text},...]`) for a single owner. */
   async readOne(ownerType: string, ownerId: string): Promise<string> {
     return (await this.readMany(ownerType, [ownerId])).get(ownerId) ?? '[]';

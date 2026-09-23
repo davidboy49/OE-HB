@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AnnualPlan } from '@oeportal/shared';
@@ -114,7 +114,22 @@ export class AnnualPlansService {
     };
   }
 
+  /**
+   * Guarded the same way ProjectsService.remove guards a Project: deleting the parent must
+   * not be a back door around that check. Without this, Prisma's ON DELETE CASCADE on
+   * Project.annualPlanId would silently delete every Project under this plan (and, via each
+   * Project's own guard being bypassed, everything reachable from them) the moment someone
+   * deleted the Annual Plan instead of a Project directly.
+   */
   async remove(id: string): Promise<boolean> {
+    const inUse = await this.prisma.project.findFirst({
+      where: { annualPlanId: id },
+    });
+    if (inUse) {
+      throw new ConflictException(
+        'This Annual Plan already has Projects under it and cannot be deleted.',
+      );
+    }
     await this.prisma.annualPlan.delete({ where: { id } });
     return true;
   }

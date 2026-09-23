@@ -10,7 +10,7 @@ export async function assertOePlanNotClosed(
   const plan = await prisma.oePlan.findUnique({
     where: { id: oePlanId },
   });
-  if (plan && plan.status === 'CLOSED') {
+  if (plan && !plan.isDeleted && plan.status === 'CLOSED') {
     throw new BadRequestException(
       'This OE Plan is CLOSED. No modifications or new records can be linked to a closed OE plan.',
     );
@@ -30,7 +30,7 @@ export async function assertOePlanReleased(
   const plan = await prisma.oePlan.findUnique({
     where: { id: oePlanId },
   });
-  if (!plan || plan.status !== 'RELEASED') {
+  if (!plan || plan.isDeleted || plan.status !== 'RELEASED') {
     throw new BadRequestException(
       'This Individual OE Plan must be RELEASED before Open Meetings or Execution Schedules can be created for it.',
     );
