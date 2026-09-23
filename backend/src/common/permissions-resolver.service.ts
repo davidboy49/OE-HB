@@ -4,11 +4,20 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ACCESS_SCOPES, AccessScope, PERMISSIONS, scopesFor } from './permissions';
+import {
+  ACCESS_SCOPES,
+  AccessScope,
+  PERMISSIONS,
+  PERMISSION_KEYS,
+  scopesFor,
+} from './permissions';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 /** permission key -> how far that grant reaches. A key that is absent is not granted. */
 export type Grants = Record<string, AccessScope>;
+
+/** The ordinary UserGroup that's meant to hold every permission key (see topUpFullAccessGroup). */
+const FULL_ACCESS_GROUP_NAME = 'Administrators';
 
 /**
  * Resolves what a user may do. Deliberately re-reads group from the DB on every call instead
@@ -39,6 +48,31 @@ export class PermissionsResolverService implements OnApplicationBootstrap {
   async onApplicationBootstrap() {
     await this.prisma.permission.createMany({
       data: PERMISSIONS,
+      skipDuplicates: true,
+    });
+    await this.topUpFullAccessGroup();
+  }
+
+  /**
+   * Keeps the "Administrators" group's grants complete as new permission keys are added to
+   * PERMISSIONS in code. Without this, a key added after the group was last edited would be
+   * held by nobody at all - not even an admin - and Access Control's own "can't hand out more
+   * than you hold" safeguard would then refuse to let anyone grant it, including to themselves.
+   * A no-op once the group already holds everything (skipDuplicates); does nothing if the group
+   * doesn't exist yet (e.g. a fresh DB before seeding) - creating it isn't this service's job.
+   */
+  private async topUpFullAccessGroup() {
+    const group = await this.prisma.userGroup.findUnique({
+      where: { name: FULL_ACCESS_GROUP_NAME },
+      select: { id: true },
+    });
+    if (!group) return;
+    await this.prisma.groupPermission.createMany({
+      data: PERMISSION_KEYS.map((permissionKey) => ({
+        groupId: group.id,
+        permissionKey,
+        scope: 'ALL',
+      })),
       skipDuplicates: true,
     });
   }
