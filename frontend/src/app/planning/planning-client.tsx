@@ -1113,7 +1113,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const canApproveProject = RBAC.can(currentUser, "oe-plans:approve");
   const canCloseProject = RBAC.can(currentUser, "oe-plans:close");
   const canReopenProject = RBAC.can(currentUser, "oe-plans:reopen");
-  const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null);
+  const isReadOnly = editStatus !== "PLANNING" || !isProjectMember(selectedProject || null) || !canUpdateProject;
   const leaders = users.filter(u => RBAC.can(u, "oe-plans:update"));
   const linkedPlannedEngagement = selectedProject?.projectId
     ? plannedEngagements?.find(ap => ap.id === selectedProject.projectId)
