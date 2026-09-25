@@ -30,6 +30,7 @@ import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 
 interface AnnualPlansClientProps {
@@ -525,6 +526,7 @@ export default function AnnualPlansClient({
       p.period.toLowerCase().includes(query)
     );
   }).sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
+  const pagination = useClientPagination(filteredPlans, "annual-plans-page-size", searchQuery);
 
   const periodOptions = Array.from({ length: 11 }, (_, i) => {
     const year = new Date().getFullYear() - 2 + i;
@@ -578,7 +580,7 @@ export default function AnnualPlansClient({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {filteredPlans.map((plan) => (
+              {pagination.pageItems.map((plan) => (
                 <tr 
                   key={plan.id}
                   onClick={() => setSelectedPlanId(plan.id === selectedPlanId ? null : plan.id)}
@@ -622,6 +624,15 @@ export default function AnnualPlansClient({
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={pagination.page}
+          pageSize={pagination.pageSize}
+          totalItems={pagination.totalItems}
+          totalPages={pagination.totalPages}
+          emptyLabel="No plans found"
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+        />
       </div>
 
       {/* Screen-matching Modal Editor Overlay */}
