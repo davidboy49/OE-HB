@@ -13,9 +13,17 @@ import {
   PlanItemsService,
   PLAN_ITEM_OWNER,
 } from '../common/plan-items.service';
-import type { OePlan } from '@oeportal/shared';
+import type { OePlan, PaginatedResponse } from '@oeportal/shared';
 import type { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import type { Prisma } from '../generated/prisma/client';
+
+interface OePlanListOptions {
+  search?: string;
+  status?: string;
+  skip?: number;
+  take?: number;
+}
 
 /** PLANNING -> SUBMITTED_FOR_APPROVAL -> RELEASED -> CLOSED, plus reject/reopen loops back a step. */
 const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
@@ -34,6 +42,25 @@ const STATUS_TRANSITION_PERMISSIONS: Record<string, string> = {
  */
 /** Only trusts a genuine string from the parsed JSON; anything else (missing, wrong type) is blank. */
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/**
+ * A linked Project's department (its topic) is inherited: always present and listed first.
+ * Whatever else is stored on the plan is a department added on top of it. Merged on read so
+ * a plan can never lose the inherited department, even if a stale client saved without it.
+ */
+export function mergeDepartments(
+  projectTopic: string | null | undefined,
+  stored: string,
+): string {
+  const topic = (projectTopic || '').trim();
+  const list = (stored || '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  if (!topic) return list.join(',');
+  const extras = list.filter((d) => d.toLowerCase() !== topic.toLowerCase());
+  return [topic, ...extras].join(',');
+}
 
 export const BLANK_OPEX_TIMELINE_FIELDS = {
   opExPresentationDate: '',
@@ -149,10 +176,34 @@ export class OePlansService {
    * `read` is the caller's view scope (see AccessScopeService.oePlanReadScope): which plans,
    * and which of each plan's schedules / meetings / findings, they may see.
    */
-  async findAll(read?: OePlanReadScope): Promise<OePlan[]> {
+  private listWhere(
+    read?: OePlanReadScope,
+    options: OePlanListOptions = {},
+  ): Prisma.OePlanWhereInput {
+    return {
+      isDeleted: false,
+      ...read?.plans,
+      ...(options.status && options.status !== 'ALL'
+        ? { status: options.status }
+        : {}),
+      ...(options.search
+        ? {
+            OR: [
+              { name: { contains: options.search, mode: 'insensitive' } },
+              { code: { contains: options.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  async findAll(
+    read?: OePlanReadScope,
+    options: OePlanListOptions = {},
+  ): Promise<OePlan[]> {
     const NOTHING = { id: { in: [] as string[] } };
     const projects = await this.prisma.oePlan.findMany({
-      where: { isDeleted: false, ...read?.plans },
+      where: this.listWhere(read, options),
       include: {
         members: true,
         executionSchedules: {
@@ -175,6 +226,8 @@ export class OePlansService {
         project: true,
       },
       orderBy: { code: 'desc' },
+      skip: options.skip,
+      take: options.take,
       // This DB is remote (~200ms/round-trip); the default "query" strategy issues
       // one round trip per relation (~6 here). "join" fetches it all in one SQL
       // statement instead. Row counts here are small, so the join's duplicated-row
@@ -234,7 +287,7 @@ export class OePlansService {
       workflowStage: p.workflowStage as any,
       createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
-      departments: p.project?.topic || p.departments,
+      departments: mergeDepartments(p.project?.topic, p.departments),
       annualPlanId: p.annualPlanId || undefined,
       projectId: p.projectId || undefined,
       scope: scopeById.get(p.id) ?? '{"inactiveIds":[],"extraItems":[]}',
@@ -243,6 +296,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives: objectivesById.get(p.id) ?? '[]',
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -303,6 +358,31 @@ export class OePlansService {
         lastModifiedBy: m.lastModifiedBy,
       })),
     }));
+  }
+
+  async findPage(
+    read: OePlanReadScope,
+    options: { page: number; pageSize: number; search?: string; status?: string },
+  ): Promise<PaginatedResponse<OePlan>> {
+    const { page, pageSize } = options;
+    const listOptions = {
+      search: options.search,
+      status: options.status,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    };
+    const [items, totalItems] = await Promise.all([
+      this.findAll(read, listOptions),
+      this.prisma.oePlan.count({ where: this.listWhere(read, listOptions) }),
+    ]);
+
+    return {
+      items,
+      page,
+      pageSize,
+      totalItems,
+      totalPages: Math.ceil(totalItems / pageSize),
+    };
   }
 
   /** A Project can back at most one Individual OE Plan. */
@@ -453,6 +533,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives: inheritedObjectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,
@@ -532,15 +614,35 @@ export class OePlansService {
     await this.permissionsResolver.requirePermission(user, requiredKey);
   }
 
-  async update(id: string, updates: UpdateOePlanDto): Promise<OePlan | null> {
+  async update(
+    id: string,
+    updates: UpdateOePlanDto,
+    actorName: string,
+  ): Promise<OePlan | null> {
     // A soft-deleted plan is not found, full stop - a plain edit must never resurrect its
     // content by writing to a row that's supposed to be gone.
     const target = await this.prisma.oePlan.findUnique({
       where: { id },
-      select: { isDeleted: true },
+      select: { isDeleted: true, status: true },
     });
     if (!target || target.isDeleted) {
       throw new NotFoundException('Individual OE Plan not found');
+    }
+
+    // Who closed this plan, stamped from the authenticated caller - never trust a
+    // client-supplied value (there isn't one; closedByName/closedDate aren't on
+    // UpdateOePlanDto, so ValidationPipe's whitelist already strips anything sent for them).
+    // Cleared on any transition away from CLOSED so a reclosed plan never shows a stale name.
+    let closedTracking: { closedByName: string; closedDate: string } | undefined;
+    if (updates.status !== undefined && updates.status !== target.status) {
+      if (updates.status === 'CLOSED') {
+        closedTracking = {
+          closedByName: actorName,
+          closedDate: new Date().toISOString().split('T')[0],
+        };
+      } else if (target.status === 'CLOSED') {
+        closedTracking = { closedByName: '', closedDate: '' };
+      }
     }
 
     if (updates.startDate !== undefined || updates.endDate !== undefined) {
@@ -607,6 +709,7 @@ export class OePlansService {
         annualPlanId: updates.annualPlanId,
         projectId: updates.projectId,
         members: memberConnections,
+        ...closedTracking,
       },
       include: {
         members: true,
@@ -622,6 +725,7 @@ export class OePlansService {
         openMeetings: {
           where: { isDeleted: false },
         },
+        project: { select: { topic: true } },
       },
       relationLoadStrategy: 'join',
     });
@@ -673,7 +777,7 @@ export class OePlansService {
       workflowStage: p.workflowStage as any,
       createdBy: p.createdBy,
       deptPicIds: p.deptPicIds,
-      departments: p.departments,
+      departments: mergeDepartments(p.project?.topic, p.departments),
       annualPlanId: p.annualPlanId || undefined,
       projectId: p.projectId || undefined,
       scope,
@@ -682,6 +786,8 @@ export class OePlansService {
       endDate: p.endDate.toISOString().split('T')[0],
       leaderId: p.leaderId,
       memberNames: p.memberNames,
+      closedByName: p.closedByName,
+      closedDate: p.closedDate,
       objectives,
       riskProcess: p.riskProcess,
       riskClass: p.riskClass,

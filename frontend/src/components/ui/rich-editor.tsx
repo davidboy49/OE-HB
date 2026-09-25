@@ -59,10 +59,12 @@ export default function RichEditor({ value, onChange, placeholder = "Start typin
     },
   });
 
-  // Sync value if changed from outside (e.g. on load)
+  // Sync value if changed from outside (e.g. on load). No update event: Tiptap v3 emits one
+  // by default, which echoes normalized HTML (e.g. "" -> "<p></p>") back through onChange and
+  // makes an untouched form look edited.
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value);
+      editor.commands.setContent(value, { emitUpdate: false });
     }
   }, [value, editor]);
 

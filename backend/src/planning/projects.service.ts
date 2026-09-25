@@ -51,6 +51,9 @@ export class ProjectsService {
                 status: true,
                 departments: true,
                 visitNumber: true,
+                language: true,
+                scheduleRows: true,
+                createdAt: true,
               },
             },
           },
@@ -132,6 +135,39 @@ export class ProjectsService {
       const nextVersion = `V${versionNum + 1}`;
       const isProcessed = processedCount > 0;
 
+      // The single most-recently-created linked OE Plan drives everything about "this
+      // project's current state" - its own status, who closed it (if closed), and which
+      // Findings Report (if any) governs the Pending/Completed derivation below. Matches the
+      // existing individualPlanStatus precedent: always the newest plan, never an aggregate
+      // across all of them.
+      const mostRecentPlan = [...(p.oePlans || [])].sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      )[0];
+
+      // Among that plan's execution schedules, the most-recently-created "finding" language
+      // one is its OE Findings Report. Pending kicks in the moment it's released; Completed
+      // once every row in it has a correctiveFinalUser (the same condition the Findings page
+      // itself uses for its own row/header Completed counts).
+      const mostRecentFindingsReport = [...(mostRecentPlan?.executionSchedules || [])]
+        .filter((e) => e.language === 'finding')
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+      let findingsCompletedCount: number | undefined;
+      let findingsTotalCount: number | undefined;
+      if (mostRecentFindingsReport?.status === 'RELEASED') {
+        try {
+          const rows: Array<{ correctiveFinalUser?: string }> = JSON.parse(
+            mostRecentFindingsReport.scheduleRows || '[]',
+          );
+          findingsTotalCount = rows.length;
+          findingsCompletedCount = rows.filter(
+            (r) => !!r.correctiveFinalUser,
+          ).length;
+        } catch {
+          // Malformed scheduleRows - treat as "no data" rather than crash the whole list.
+        }
+      }
+
       return {
         id: p.id,
         annualPlanId: p.annualPlanId,
@@ -154,9 +190,13 @@ export class ProjectsService {
         isProcessed,
         isApproved,
         isUsed: (p.oePlans || []).length > 0,
-        individualPlanStatus: [...(p.oePlans || [])].sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-        )[0]?.status as ProjectShape['individualPlanStatus'],
+        individualPlanStatus:
+          mostRecentPlan?.status as ProjectShape['individualPlanStatus'],
+        closedByName: mostRecentPlan?.closedByName,
+        closedDate: mostRecentPlan?.closedDate,
+        findingsReportStatus: mostRecentFindingsReport?.status,
+        findingsCompletedCount,
+        findingsTotalCount,
         annualPlanStatus: p.annualPlan?.status || 'DRAFT',
         totalSchedules,
         createdAt: p.createdAt.toISOString(),

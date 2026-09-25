@@ -7,14 +7,19 @@ function makeResolver(opts: {
   user?: { groupId: string | null } | null;
   grants?: { permissionKey: string; scope: string }[];
   usersWithPermission?: { id: string }[];
+  administratorsGroup?: { id: string } | null;
 }) {
   const prisma = {
     user: {
       findUnique: jest.fn().mockResolvedValue(opts.user ?? null),
       findMany: jest.fn().mockResolvedValue(opts.usersWithPermission ?? []),
     },
+    userGroup: {
+      findUnique: jest.fn().mockResolvedValue(opts.administratorsGroup ?? null),
+    },
     groupPermission: {
       findMany: jest.fn().mockResolvedValue(opts.grants ?? []),
+      createMany: jest.fn(),
     },
     permission: { createMany: jest.fn() },
   } as unknown as PrismaService;
@@ -168,5 +173,37 @@ describe('PermissionsResolverService.getActiveUserIdsWithPermission', () => {
     await expect(
       resolver.getActiveUserIdsWithPermission('users:update'),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('PermissionsResolverService.onApplicationBootstrap', () => {
+  it("tops up the Administrators group with every current permission key, so a key added after the group was last edited doesn't end up held by nobody", async () => {
+    const { resolver, prisma } = makeResolver({
+      administratorsGroup: { id: 'admins-group' },
+    });
+
+    await resolver.onApplicationBootstrap();
+
+    expect(prisma.userGroup.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { name: 'Administrators' } }),
+    );
+    expect(prisma.groupPermission.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: PERMISSION_KEYS.map((permissionKey) => ({
+          groupId: 'admins-group',
+          permissionKey,
+          scope: 'ALL',
+        })),
+        skipDuplicates: true,
+      }),
+    );
+  });
+
+  it('does nothing if the Administrators group does not exist yet (e.g. a fresh DB before seeding)', async () => {
+    const { resolver, prisma } = makeResolver({ administratorsGroup: null });
+
+    await resolver.onApplicationBootstrap();
+
+    expect(prisma.groupPermission.createMany).not.toHaveBeenCalled();
   });
 });

@@ -18,7 +18,9 @@ import {
   XCircle,
   Send,
   Layers,
-  ChevronRight
+  ChevronRight,
+  BadgeCheck,
+  Hourglass
 } from "lucide-react";
 import type { User, AnnualPlan, Project, Department, BusinessUnit, PlanItem } from "@oeportal/shared";
 import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
@@ -874,34 +876,73 @@ export default function AnnualPlansClient({
                           <td className="px-4 py-3 text-slate-500">{ap.endDate}</td>
                           <td className="px-4 py-3 text-slate-500">{ap.durationDay}</td>
                           <td className="px-4 py-3">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
-                              {!ap.isUsed ? (
-                                <>
-                                  <Circle className="w-3 h-3 text-slate-400" />
-                                  Available
-                                </>
-                              ) : ap.individualPlanStatus === "RELEASED" ? (
-                                <>
-                                  <CheckCircle2 className="w-3 h-3 text-slate-600 dark:text-slate-400" />
-                                  Released
-                                </>
-                              ) : ap.individualPlanStatus === "CLOSED" ? (
-                                <>
-                                  <CheckCircle className="w-3 h-3 text-slate-500" />
-                                  Closed
-                                </>
-                              ) : ap.individualPlanStatus === "SUBMITTED_FOR_APPROVAL" ? (
-                                <>
-                                  <FileText className="w-3 h-3 text-slate-500" />
-                                  Submitted
-                                </>
-                              ) : (
-                                <>
+                            {(() => {
+                              const isCompleted =
+                                ap.findingsReportStatus === "RELEASED" &&
+                                !!ap.findingsTotalCount &&
+                                ap.findingsCompletedCount === ap.findingsTotalCount;
+                              const isPending =
+                                !isCompleted && ap.findingsReportStatus === "RELEASED";
+                              if (!ap.isUsed) {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                                    <Circle className="w-3 h-3 text-slate-400" />
+                                    Available
+                                  </span>
+                                );
+                              }
+                              if (ap.individualPlanStatus === "CLOSED") {
+                                return (
+                                  <span className="inline-flex flex-col items-start gap-0.5">
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                                      <CheckCircle className="w-3 h-3 text-slate-500" />
+                                      Closed
+                                    </span>
+                                    {ap.closedByName && (
+                                      <span className="text-[9px] text-slate-400 pl-1">by {ap.closedByName}</span>
+                                    )}
+                                  </span>
+                                );
+                              }
+                              if (isCompleted) {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30">
+                                    <BadgeCheck className="w-3 h-3" />
+                                    Completed
+                                  </span>
+                                );
+                              }
+                              if (isPending) {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30">
+                                    <Hourglass className="w-3 h-3" />
+                                    Pending
+                                  </span>
+                                );
+                              }
+                              if (ap.individualPlanStatus === "RELEASED") {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                                    <CheckCircle2 className="w-3 h-3 text-slate-600 dark:text-slate-400" />
+                                    Released
+                                  </span>
+                                );
+                              }
+                              if (ap.individualPlanStatus === "SUBMITTED_FOR_APPROVAL") {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                                    <FileText className="w-3 h-3 text-slate-500" />
+                                    Submitted
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
                                   <Clock className="w-3 h-3 text-slate-400" />
                                   Planning
-                                </>
-                              )}
-                            </span>
+                                </span>
+                              );
+                            })()}
                           </td>
                           {(canUpdateChildPlan || canDeleteChildPlan) && (
                             <td className="px-4 py-3 text-center">

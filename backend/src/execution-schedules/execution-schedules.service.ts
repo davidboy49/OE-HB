@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -63,8 +64,6 @@ export interface UpdateExecutionScheduleInput {
 }
 
 export interface ResolveFindingRowInput {
-  correctiveActionDate?: string;
-  correctiveActionRemarks?: string;
   correctiveFinalDate?: string;
   correctiveFinalRemarks?: string;
   attachments?: unknown[];
@@ -425,11 +424,20 @@ export class ExecutionSchedulesService {
       );
     }
 
+    // Resolve is one-way here: the resolver can't undo it or re-stamp it with a new
+    // user/time. Undoing is an editor action, done through the generic update().
+    if (patch.resolve === false) {
+      throw new BadRequestException(
+        'A resolution can only be undone by a report editor.',
+      );
+    }
+    if (patch.resolve === true && rows[index].correctiveFinalUser) {
+      throw new ConflictException(
+        `This finding row was already resolved by ${rows[index].correctiveFinalUser}.`,
+      );
+    }
+
     const row = { ...rows[index] };
-    if (patch.correctiveActionDate !== undefined)
-      row.correctiveActionDate = patch.correctiveActionDate;
-    if (patch.correctiveActionRemarks !== undefined)
-      row.correctiveActionRemarks = patch.correctiveActionRemarks;
     if (patch.correctiveFinalDate !== undefined)
       row.correctiveFinalDate = patch.correctiveFinalDate;
     if (patch.correctiveFinalRemarks !== undefined)
@@ -438,9 +446,6 @@ export class ExecutionSchedulesService {
     if (patch.resolve === true) {
       row.correctiveFinalUser = actorName;
       row.correctiveFinalDatetime = new Date().toISOString();
-    } else if (patch.resolve === false) {
-      row.correctiveFinalUser = '';
-      row.correctiveFinalDatetime = '';
     }
     rows[index] = row;
     const scheduleRows = JSON.stringify(rows);

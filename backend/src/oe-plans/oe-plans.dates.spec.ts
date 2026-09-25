@@ -77,27 +77,27 @@ describe('OePlansService.update - date range on a partial edit', () => {
   it('rejects moving the start date past the existing end date', async () => {
     const { service } = makeService(existing);
     await expect(
-      service.update('p1', { startDate: '2026-10-10' } as any),
+      service.update('p1', { startDate: '2026-10-10' } as any, 'Tester'),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('rejects moving the end date before the existing start date', async () => {
     const { service } = makeService(existing);
     await expect(
-      service.update('p1', { endDate: '2026-10-01' } as any),
+      service.update('p1', { endDate: '2026-10-01' } as any, 'Tester'),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('accepts a valid change to just one side of the range', async () => {
     const { service } = makeService(existing);
     await expect(
-      service.update('p1', { endDate: '2026-10-20' } as any),
+      service.update('p1', { endDate: '2026-10-20' } as any, 'Tester'),
     ).resolves.toBeDefined();
   });
 
   it('does not check dates at all when neither is part of the update', async () => {
     const { service, prisma } = makeService(existing);
-    await service.update('p1', { name: 'Renamed' });
+    await service.update('p1', { name: 'Renamed' }, 'Tester');
     // findUnique is still called once, for the soft-delete existence guard - just never with
     // the date-range-specific select.
     expect(prisma.oePlan.findUnique).not.toHaveBeenCalledWith(

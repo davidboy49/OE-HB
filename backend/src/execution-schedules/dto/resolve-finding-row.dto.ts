@@ -5,20 +5,11 @@ import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
  * Body for the resolve-finding-row route. Deliberately narrow: this is the whole security
  * boundary for `execution-schedules:resolve-finding` - a caller who holds only this permission
  * (not `execution-schedules:update`) can PATCH nothing on the row or the report beyond what's
- * listed here. Never add a field here that isn't part of "fill in the corrective action and
- * mark it resolved."
+ * listed here: Completed Date, Corrective Action, attachments and the one-way Resolve.
+ * Corrective Action Date/Remarks are deliberately NOT here - they stay editor-only. Never add
+ * a field here that isn't part of "fill in the corrective action and mark it resolved."
  */
 export class ResolveFindingRowDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  correctiveActionDate?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  correctiveActionRemarks?: string;
-
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -39,7 +30,9 @@ export class ResolveFindingRowDto {
   @ApiPropertyOptional({
     description:
       'true = mark resolved (server sets correctiveFinalUser/correctiveFinalDatetime from the ' +
-      'caller and now); false/omitted = leave as-is or clear an existing resolution.',
+      'caller and now); omitted = leave as-is. One-way: resolving an already-resolved row is ' +
+      'rejected (409), and false is rejected (400) - only a report editor ' +
+      '(execution-schedules:update) can undo a resolution, through the generic PATCH.',
   })
   @IsOptional()
   @IsBoolean()

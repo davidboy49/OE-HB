@@ -196,20 +196,20 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
   if (pathname.startsWith("/scan")) return <>{children}</>;
 
   return (
-    <div className="min-h-screen flex bg-slate-100 dark:bg-slate-950 text-foreground transition-colors duration-200">
+    <div className="h-screen overflow-hidden flex bg-slate-100 dark:bg-slate-950 text-foreground transition-colors duration-200">
       
       {/* Sidebar - Solid Deep Blue */}
       <aside 
         className={`${
           sidebarOpen ? "w-64" : "w-0 overflow-hidden"
-        } transition-all duration-300 bg-[#063960] text-white flex flex-col justify-between shrink-0 relative shadow-lg z-20`}
+        } h-screen transition-all duration-300 bg-[#063960] text-white flex flex-col shrink-0 relative shadow-lg z-20`}
       >
         {/* Background H Watermark overlay */}
         <div className="absolute inset-0 opacity-5 pointer-events-none flex items-center justify-center overflow-hidden">
           {/* <div className="text-[280px] font-bold select-none font-sans leading-none">H</div> */}
         </div>
 
-        <div className="z-10">
+        <div className="z-10 flex-1 min-h-0 overflow-y-auto">
           {/* Header - "HE PORTAL" */}
           <div className="h-16 flex items-center justify-between px-5 border-b border-[#042844] shrink-0">
             <span className="font-sans font-extrabold tracking-wider text-base">OE Portal</span>
@@ -299,7 +299,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
         </div>
 
         {/* Sidebar Footer info */}
-        <div className="p-4 border-t border-[#042844] space-y-2 bg-[#042d4c]/30 text-center z-10">
+        <div className="p-4 border-t border-[#042844] space-y-2 bg-[#042d4c]/30 text-center z-10 shrink-0">
           <div className="text-[10px] text-slate-400 font-sans tracking-wider">
             {currentUser.departmentId ? `DEPT: ${currentUser.departmentName || "SECURITY"}` : "GLOBAL ACCESS"}
           </div>
@@ -307,7 +307,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
       </aside>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="h-screen flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         
         {/* Top Header */}
         <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between px-6 z-10 shrink-0 shadow-xs">
@@ -358,7 +358,7 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
         </div>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-8 bg-slate-100 dark:bg-slate-950">
+        <main className="min-h-0 flex-1 overflow-y-auto p-8 bg-slate-100 dark:bg-slate-950">
           {children}
         </main>
       </div>

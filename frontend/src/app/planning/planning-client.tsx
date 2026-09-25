@@ -37,7 +37,7 @@ import {
   Unlock,
   Link
 } from "lucide-react";
-import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanItem } from "@oeportal/shared";
+import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanItem, PaginatedResponse } from "@oeportal/shared";
 import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
@@ -52,6 +52,13 @@ import { clientApi } from "@/lib/apiClient";
 // { id, text }); it is now free text edited in a RichEditor (HTML). Converts a
 // legacy JSON value to an HTML bullet list so previously saved plans still load;
 // anything that isn't a JSON array is already free text and passes through.
+// Rich text compares by content, not markup: an emptied editor leaves "<p></p>" where the
+// stored value was "", which isn't a real change.
+function sameRichText(a?: string, b?: string): boolean {
+  const norm = (s?: string) => (s || "").replace(/<p>(\s|<br\s*\/?>)*<\/p>/g, "").trim();
+  return norm(a) === norm(b);
+}
+
 function focusAreaToHtml(raw?: string): string {
   if (!raw || !raw.trim()) return "";
   try {
@@ -69,7 +76,7 @@ function focusAreaToHtml(raw?: string): string {
 }
 
 interface PlanningClientProps {
-  initialProjects: OePlan[];
+  initialProjectsPage: PaginatedResponse<OePlan>;
   users: User[];
   departments: Department[];
   annualPlans: AnnualPlan[];
@@ -100,9 +107,15 @@ const parseScopeOverride = (raw?: string): ScopeOverride => {
   }
 };
 
-export default function PlanningClient({ initialProjects, users, departments, annualPlans, plannedEngagements, currentUser }: PlanningClientProps) {
-  const [projects, setProjects] = useState<OePlan[]>(initialProjects);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjects[0]?.id || "");
+export default function PlanningClient({ initialProjectsPage, users, departments, annualPlans, plannedEngagements, currentUser }: PlanningClientProps) {
+  const [projects, setProjects] = useState<OePlan[]>(initialProjectsPage.items);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectsPage.items[0]?.id || "");
+  const [page, setPage] = useState(initialProjectsPage.page);
+  const [totalItems, setTotalItems] = useState(initialProjectsPage.totalItems);
+  const [totalPages, setTotalPages] = useState(initialProjectsPage.totalPages);
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [pageSize, setPageSize] = useState(initialProjectsPage.pageSize);
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [isCopying, setIsCopying] = useState<boolean>(false);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -132,6 +145,48 @@ export default function PlanningClient({ initialProjects, users, departments, an
   // Search filter
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+
+  useEffect(() => {
+    const savedPageSize = Number(window.localStorage.getItem("oe-plans-page-size"));
+    if ([10, 25, 50, 100].includes(savedPageSize) && savedPageSize !== pageSize) {
+      setPageSize(savedPageSize);
+      setPage(1);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsLoadingPage(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(pageSize),
+          search: searchQuery.trim(),
+          status: statusFilter,
+        });
+        const result = await clientApi<PaginatedResponse<OePlan>>(`/oe-plans/page?${params}`);
+        if (cancelled) return;
+        setProjects(result.items);
+        setTotalItems(result.totalItems);
+        setTotalPages(result.totalPages);
+        setSelectedProjectId((current) =>
+          result.items.some((project) => project.id === current) ? current : ""
+        );
+      } catch (err: any) {
+        if (!cancelled) {
+          showFeedback(`Unable to load OE Plans: ${err.message || err.toString()}`);
+        }
+      } finally {
+        if (!cancelled) setIsLoadingPage(false);
+      }
+    }, searchQuery ? 300 : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [page, pageSize, searchQuery, statusFilter, reloadKey]);
 
   // Selected project details edit state
   const selectedProject = projects.find(p => p.id === selectedProjectId);
@@ -191,6 +246,16 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const [editDepartments, setEditDepartments] = useState<string[]>([]);
   const [editAnnualPlanId, setEditAnnualPlanId] = useState("");
   const [editPlannedEngagementId, setEditPlannedEngagementId] = useState("");
+
+  // A linked Project's department is inherited and always kept first; the plan can only
+  // add departments on top of it, never replace it. editDepartments may still hold a
+  // previous Project's topic, so everything reads/saves through editDepartmentValues.
+  const editLinkedTopic = (editPlannedEngagementId && plannedEngagements?.find(ap => ap.id === editPlannedEngagementId)?.topic) || "";
+  const isLinkedTopic = (d: string) => !!editLinkedTopic && d.toLowerCase() === editLinkedTopic.toLowerCase();
+  const editDepartmentValues = editLinkedTopic
+    ? [editLinkedTopic, ...editDepartments.filter(d => !isLinkedTopic(d))]
+    : editDepartments;
+  const editAddedDepartments = editLinkedTopic ? editDepartmentValues.slice(1) : [];
 
   // Selection Dropdown states
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
@@ -365,40 +430,32 @@ export default function PlanningClient({ initialProjects, users, departments, an
   const checkIfDirty = () => {
     if (!selectedProject) return false;
     
-    if (editName !== selectedProject.name) return true;
+    if (editName !== initialEditName(selectedProject)) return true;
     if (editStatus !== selectedProject.status) return true;
     if (editAnnualPlanId !== (selectedProject.annualPlanId || "")) return true;
     if (editPlannedEngagementId !== (selectedProject.projectId || "")) return true;
     
     const prevDepartments = selectedProject.departments ? selectedProject.departments.split(",").map(s => s.trim()).filter(Boolean) : [];
-    if (editDepartments.length !== prevDepartments.length || !editDepartments.every(d => prevDepartments.includes(d))) return true;
+    if (editDepartmentValues.length !== prevDepartments.length || !editDepartmentValues.every(d => prevDepartments.includes(d))) return true;
 
     if (editPlanning !== selectedProject.planningDetails) return true;
     if (editStart !== selectedProject.startDate) return true;
     if (editEnd !== selectedProject.endDate) return true;
-    if (editLead !== (selectedProject.leaderId || "")) return true;
+    if (editLead !== initialEditLead(selectedProject)) return true;
     
     if (editWorkflowStage !== (selectedProject.workflowStage || "DRAFTING")) return true;
     
     if (JSON.stringify(editScopeOverride) !== JSON.stringify(parseScopeOverride(selectedProject.scope))) return true;
 
-    const dbRiskProcess = selectedProject.riskProcess || "";
-    if (editRiskProcess !== dbRiskProcess) return true;
+    if (!sameRichText(editRiskProcess, selectedProject.riskProcess)) return true;
+    if (!sameRichText(editRiskClass, selectedProject.riskClass)) return true;
+    if (!sameRichText(editOpEx, selectedProject.opEx)) return true;
+    if (!sameRichText(editFieldwork, selectedProject.fieldwork)) return true;
+    if (!sameRichText(editOutcome, selectedProject.outcome)) return true;
 
-    const dbRiskClass = selectedProject.riskClass || "";
-    if (editRiskClass !== dbRiskClass) return true;
-
-    const dbOpEx = selectedProject.opEx || "";
-    if (editOpEx !== dbOpEx) return true;
-
-    const dbFieldwork = selectedProject.fieldwork || "";
-    if (editFieldwork !== dbFieldwork) return true;
-
-    const dbOutcome = selectedProject.outcome || "";
-    if (editOutcome !== dbOutcome) return true;
-
-    if (serializePlanItems(editDataRequestItems) !== (selectedProject.dataRequestType || "")) return true;
-    if (editFocusArea !== focusAreaToHtml(selectedProject.focusArea)) return true;
+    // parsePlanItems turns an empty list into one blank item, so compare both sides parsed.
+    if (serializePlanItems(editDataRequestItems) !== serializePlanItems(parsePlanItems(selectedProject.dataRequestType, "OE-DRQ"))) return true;
+    if (!sameRichText(editFocusArea, focusAreaToHtml(selectedProject.focusArea))) return true;
     
     const currentTimelineJson = JSON.stringify({
       presentationDate: editTimelinePresDate,
@@ -453,11 +510,28 @@ export default function PlanningClient({ initialProjects, users, departments, an
     const prevMembers = selectedProject.memberNames ? selectedProject.memberNames.split(",").map(s => s.trim()).filter(Boolean) : [];
     if (editMemberIds.length !== prevMembers.length || !editMemberIds.every(name => prevMembers.includes(name))) return true;
     
-    const prevPics = selectedProject.deptPicIds ? selectedProject.deptPicIds.split(",").filter(Boolean) : [];
+    const prevPics = initialEditDeptPics(selectedProject);
     if (editDeptPicIds.length !== prevPics.length || !editDeptPicIds.every(name => prevPics.includes(name))) return true;
 
     return false;
   };
+
+  // Load-time normalizations, shared by openProjectEditor and checkIfDirty so an untouched
+  // plan never compares its normalized edit state against the raw stored value.
+  const initialEditName = (proj: OePlan) => {
+    // Project Name mirrors the linked Project's Project Name; fall
+    // back to whatever name is already stored for legacy/unlinked plans.
+    const linkedAp = proj.projectId ? plannedEngagements?.find(ap => ap.id === proj.projectId) : null;
+    return linkedAp?.projectName?.trim() || proj.name;
+  };
+  const initialEditLead = (proj: OePlan) =>
+    proj.leaderId ? (users.find(u => u.id === proj.leaderId || u.name === proj.leaderId)?.id || proj.leaderId) : "";
+  const initialEditDeptPics = (proj: OePlan) =>
+    proj.deptPicIds ? proj.deptPicIds.split(",").filter(Boolean).map(s => {
+      const clean = s.trim();
+      const matched = users.find(u => u.name === clean || u.id === clean);
+      return matched ? matched.name : clean;
+    }) : [];
 
   const handleCloseEditor = () => {
     if (checkIfDirty()) {
@@ -470,31 +544,25 @@ export default function PlanningClient({ initialProjects, users, departments, an
   // Open popup and load project for editing
   const openProjectEditor = (proj: OePlan) => {
     setSelectedProjectId(proj.id);
-    // Project Name mirrors the linked Project's Project Name; fall
-    // back to whatever name is already stored for legacy/unlinked plans.
-    const linkedAp = proj.projectId ? plannedEngagements?.find(ap => ap.id === proj.projectId) : null;
-    setEditName(linkedAp?.projectName?.trim() || proj.name);
+    setEditName(initialEditName(proj));
     setEditStatus(proj.status);
 
     setEditPlanning(proj.planningDetails);
     setEditStart(proj.startDate);
     setEditEnd(proj.endDate);
-    setEditLead(proj.leaderId ? (users.find(u => u.id === proj.leaderId || u.name === proj.leaderId)?.id || proj.leaderId) : "");
+    setEditLead(initialEditLead(proj));
     setEditScopeOverride(parseScopeOverride(proj.scope));
 
     // Set custom SQLite integrations
     setEditWorkflowStage(proj.workflowStage || "DRAFTING");
     setEditDepartments(proj.departments ? proj.departments.split(",").map(s => s.trim()).filter(Boolean) : []);
     setEditMemberIds(proj.memberNames ? proj.memberNames.split(",").map(s => s.trim()).filter(Boolean) : []);
-    setEditDeptPicIds(proj.deptPicIds ? proj.deptPicIds.split(",").filter(Boolean).map(s => {
-      const clean = s.trim();
-      const matched = users.find(u => u.name === clean || u.id === clean);
-      return matched ? matched.name : clean;
-    }) : []);
+    setEditDeptPicIds(initialEditDeptPics(proj));
     setEditAnnualPlanId(proj.annualPlanId || "");
     setEditPlannedEngagementId(proj.projectId || "");
 
     // Load scoping values from database fields, with default fallback templates if null/empty
+    setEditRiskProcess(proj.riskProcess || "");
     setEditRiskClass(proj.riskClass || "");
     setEditOpEx(proj.opEx || "");
     setEditFieldwork(proj.fieldwork || "");
@@ -580,7 +648,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
-          departments: editDepartments.join(","),
+          departments: editDepartmentValues.join(","),
           memberIds: editMemberIds,
           memberNames: editMemberIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
           riskProcess: editRiskProcess,
@@ -645,7 +713,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
-          departments: editDepartments.join(","),
+          departments: editDepartmentValues.join(","),
           memberIds: editMemberIds,
           memberNames: editMemberIds.map(id => users.find(u => u.id === id)?.name || id).join(","),
           riskProcess: editRiskProcess,
@@ -722,7 +790,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
           leaderId: editLead || null,
           workflowStage: editWorkflowStage,
           deptPicIds: editDeptPicIds.join(","),
-          departments: editDepartments.join(","),
+          departments: editDepartmentValues.join(","),
           memberIds: editMemberIds,
           memberNames: editMemberIds.join(","),
           riskProcess: editRiskProcess,
@@ -772,6 +840,30 @@ export default function PlanningClient({ initialProjects, users, departments, an
     }
   };
 
+  /**
+   * Best-effort: called after saveStatusChange has already succeeded, so a caller without
+   * notifications:send shouldn't see this 403 as if the status change itself had failed -
+   * it only means the notification email couldn't be sent.
+   */
+  const sendPlanningEmailAlert = async (status: string, details: string) => {
+    if (!selectedProject) return;
+    try {
+      const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: "planning",
+          projectId: selectedProject.id,
+          variables: { status, details }
+        })
+      });
+      if (emailResult.success) {
+        triggerEmailAlerts(emailResult.simulatedAlerts);
+      }
+    } catch (emailErr) {
+      console.warn("Status change succeeded, but the notification email could not be sent:", emailErr);
+    }
+  };
+
   const getMissingMandatoryFields = (): string[] => {
     const missing: string[] = [];
     if (!editPlannedEngagementId) missing.push("Project Name");
@@ -795,117 +887,57 @@ export default function PlanningClient({ initialProjects, users, departments, an
       return;
     }
     await saveStatusChange("SUBMITTED_FOR_APPROVAL");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "SUBMITTED_FOR_APPROVAL",
-          details: "The OE plan scoping and timelines have been submitted for approval review."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "SUBMITTED_FOR_APPROVAL",
+      "The OE plan scoping and timelines have been submitted for approval review."
+    );
   };
- 
+
   const handleApprovePlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("RELEASED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "RELEASED (APPROVED)",
-          details: "The OE plan has been officially approved and released by the OE Leader."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "RELEASED (APPROVED)",
+      "The OE plan has been officially approved and released by the OE Leader."
+    );
   };
- 
+
   const handleRejectPlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("PLANNING");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "REJECTED (REOPENED)",
-          details: "The OE plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "REJECTED (REOPENED)",
+      "The OE plan was rejected by the approver. The status has reverted to Planning. Please revise the scoping documents and timelines."
+    );
   };
- 
+
   const handleReopenPlan = async () => {
     if (!selectedProject) return;
     await saveStatusChange("PLANNING");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "PLANNING (REOPENED)",
-          details: "The approval submission has been cancelled. The plan is now reopened for further editing."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "PLANNING (REOPENED)",
+      "The approval submission has been cancelled. The plan is now reopened for further editing."
+    );
   };
 
   const handleClosePlan = async () => {
     if (!selectedProject) return;
     if (!window.confirm("Are you sure you want to CLOSE this OE Plan once and for all?\n\nOnce closed, no new or existing Open Meetings, Execution Schedules, or OE Findings will be allowed to point to this plan.")) return;
     await saveStatusChange("CLOSED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "CLOSED",
-          details: "The OE plan has been officially closed and archived by the OE Leader/Admin."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "CLOSED",
+      "The OE plan has been officially closed and archived by the OE Leader/Admin."
+    );
   };
 
   const handleReopenClosedPlan = async () => {
     if (!selectedProject) return;
     if (!window.confirm("Are you sure you want to REOPEN this closed OE Plan?")) return;
     await saveStatusChange("RELEASED");
-    const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: "planning",
-        projectId: selectedProject.id,
-        variables: {
-          status: "RELEASED (REOPENED)",
-          details: "The closed OE plan has been reopened by the OE Leader/Admin."
-        }
-      })
-    });
-    if (emailResult.success) {
-      triggerEmailAlerts(emailResult.simulatedAlerts);
-    }
+    await sendPlanningEmailAlert(
+      "RELEASED (REOPENED)",
+      "The closed OE plan has been reopened by the OE Leader/Admin."
+    );
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -999,7 +1031,11 @@ export default function PlanningClient({ initialProjects, users, departments, an
       }
     }
 
-    setProjects([...projects, finalProj]);
+    setProjects([finalProj, ...projects].slice(0, pageSize));
+    setTotalItems((count) => count + 1);
+    setTotalPages((count) => Math.max(count, Math.ceil((totalItems + 1) / pageSize)));
+    setPage(1);
+    setReloadKey((key) => key + 1);
     closeNewProjectModal();
     openProjectEditor(finalProj);
     
@@ -1078,6 +1114,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
     const success = await clientApi<boolean>(`/oe-plans/${id}`, { method: "DELETE" });
     if (success) {
       setProjects(projects.filter(p => p.id !== id));
+      setTotalItems((count) => Math.max(0, count - 1));
+      if (projects.length === 1 && page > 1) {
+        setPage((current) => current - 1);
+      } else {
+        setReloadKey((key) => key + 1);
+      }
       if (selectedProjectId === id) {
         setSelectedProjectId("");
       }
@@ -1085,14 +1127,6 @@ export default function PlanningClient({ initialProjects, users, departments, an
       showFeedback("Failed to delete the OE Plan.");
     }
   };
-
-  // Filter project logic
-  const filteredProjects = projects.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.code.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "ALL" || p.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
 
   const isProjectMember = (proj: OePlan | null) => {
     if (!proj) return false;
@@ -1184,14 +1218,22 @@ export default function PlanningClient({ initialProjects, users, departments, an
           onRefresh={() => {
             setSearchQuery("");
             setStatusFilter("ALL");
+            setPage(1);
+            setReloadKey((key) => key + 1);
             setSelectedProjectId("");
           }}
           searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
+          setSearchQuery={(value) => {
+            setSearchQuery(value);
+            setPage(1);
+          }}
           searchPlaceholder="Search projects..."
           filterLabel="Status"
           filterValue={statusFilter}
-          setFilterValue={setStatusFilter}
+          setFilterValue={(value) => {
+            setStatusFilter(value);
+            setPage(1);
+          }}
           filterOptions={statusOptions}
           activeFilterCountLabel={statusFilter === "ALL" ? "ALL" : "FILTERED"}
         />
@@ -1210,7 +1252,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {filteredProjects.map((proj) => (
+              {projects.map((proj) => (
                   <tr
                     key={proj.id}
                     onClick={() => setSelectedProjectId(proj.id === selectedProjectId ? "" : proj.id)}
@@ -1269,6 +1311,57 @@ export default function PlanningClient({ initialProjects, users, departments, an
                 ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+          <span>
+            {totalItems === 0
+              ? "No plans found"
+              : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, totalItems)} of ${totalItems}`}
+          </span>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-slate-600 dark:text-slate-300">Rows</span>
+              <div className="w-16 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xs">
+              <MultiSelect
+                singleSelect={true}
+                compact={true}
+                selectedValues={[String(pageSize)]}
+                options={[10, 25, 50, 100].map((size) => ({
+                  value: String(size),
+                  label: String(size),
+                }))}
+                onChange={(values) => {
+                  const nextSize = Number(values[0]);
+                  if (![10, 25, 50, 100].includes(nextSize)) return;
+                  window.localStorage.setItem("oe-plans-page-size", String(nextSize));
+                  setPageSize(nextSize);
+                  setPage(1);
+                }}
+                placeholder="Rows"
+              />
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={page <= 1 || isLoadingPage}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              className="px-3 py-1.5 rounded border border-slate-200 dark:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              Previous
+            </button>
+            <span className="min-w-24 text-center">
+              Page {totalPages === 0 ? 0 : page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages || isLoadingPage}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              className="px-3 py-1.5 rounded border border-slate-200 dark:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              Next
+            </button>
+          </div>
         </div>
 
       </div>
@@ -1474,6 +1567,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                             const match = annualPlans?.find(p => p.id === chosenVal || p.planName === chosenVal);
                             setEditAnnualPlanId(match ? match.id : chosenVal);
                             setEditPlannedEngagementId(""); // Reset OE plan when annual plan changes
+                            setEditDepartments(prev => prev.filter(d => !isLinkedTopic(d)));
                           }}
                           singleSelect={true}
                           disabled={isReadOnly}
@@ -1501,6 +1595,7 @@ export default function PlanningClient({ initialProjects, users, departments, an
                           onChange={(values) => {
                             const apId = values.length > 0 ? values[0] : "";
                             setEditPlannedEngagementId(apId);
+                            setEditDepartments(prev => prev.filter(d => !isLinkedTopic(d)));
                             const matchedAp = apId ? plannedEngagements?.find(ap => ap.id === apId) : null;
                             if (matchedAp?.projectName?.trim()) {
                               setEditName(matchedAp.projectName.trim());
@@ -1576,9 +1671,12 @@ export default function PlanningClient({ initialProjects, users, departments, an
                       <label className="text-xs font-sans font-bold uppercase text-slate-500">Department</label>
                       <div className="border border-slate-300 dark:border-slate-700 rounded-md">
                         <MultiSelect
-                          selectedValues={editDepartments}
+                          selectedValues={editDepartmentValues}
                           onChange={(values) => setEditDepartments(values)}
-                          singleSelect={true}
+                          singleSelect={!editLinkedTopic}
+                          lockedValues={editLinkedTopic ? [editLinkedTopic] : []}
+                          highlightedValues={editAddedDepartments}
+                          highlightTitle="Added for this plan - not from the Project"
                           disabled={isReadOnly}
                           options={departments.map((d) => ({
                             value: d.name,
