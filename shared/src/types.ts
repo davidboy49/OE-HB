@@ -128,6 +128,14 @@ export interface OePlan {
   projectId?: string | null;
 }
 
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
 export interface Finding {
   id: string;
   title: string;

@@ -285,8 +285,10 @@ export default function FindingsClient({
   // Matches the real backend gate on the report's save route (PATCH /execution-schedules/:id),
   // not findings:create/findings:update - those govern an unrelated Finding DB model.
   const canManage = RBAC.can(currentUser, "execution-schedules:update");
-  // Lets a Department PIC fill in Completed Date/Corrective Action/Resolve/attachments on one
-  // row without full edit rights over the rest of the report (see the resolve-finding-row route).
+  const canDeleteFindingRows = RBAC.can(currentUser, "execution-schedules:delete-finding-row");
+  // Lets a Department PIC fill in Completed Date/Corrective Action/attachments and Resolve (once)
+  // on one row without full edit rights over the rest of the report (see the resolve-finding-row
+  // route). Corrective Action Date/Remarks stay editor-only.
   const canResolve = RBAC.can(currentUser, "execution-schedules:resolve-finding");
 
   const showFeedback = (msg: string) => {
@@ -718,18 +720,19 @@ export default function FindingsClient({
       showFeedback("This report needs to be opened and saved once by an editor before rows can be resolved individually.");
       return;
     }
+    // Resolve is one-way for a resolver: send it only on the first resolve, never to
+    // re-stamp an already-resolved row (the backend rejects that too).
+    const wasResolved = !!rows[activeRowIndex]?.correctiveFinalUser;
     try {
       const updatedSchedule = await clientApi<FindingReport>(
         `/execution-schedules/${selectedScheduleId}/finding-rows/${draftRow.id}/resolve`,
         {
           method: "PATCH",
           body: JSON.stringify({
-            correctiveActionDate: draftRow.correctiveActionDate || undefined,
-            correctiveActionRemarks: draftRow.correctiveActionRemarks,
             correctiveFinalDate: draftRow.correctiveFinalDate || undefined,
             correctiveFinalRemarks: draftRow.correctiveFinalRemarks,
             attachments: draftRow.attachments,
-            resolve: !!draftRow.correctiveFinalUser,
+            resolve: draftRow.correctiveFinalUser && !wasResolved ? true : undefined,
           }),
         }
       );
@@ -771,8 +774,11 @@ export default function FindingsClient({
   const completedFinalRowsCount = rows.filter(row => !!row.correctiveFinalUser).length;
   const pendingFinalRowsCount = rows.filter(row => !row.correctiveFinalUser).length;
 
+  // A resolve-only user clicks Resolve once; only a report editor can toggle it back.
+  const isResolveLocked = !canManage && !!draftRow?.correctiveFinalUser;
+
   const markDraftRowFinalized = () => {
-    if (!draftRow) return;
+    if (!draftRow || isResolveLocked) return;
     
     // If it's already completed, we toggle it back to pending
     if (draftRow.correctiveFinalUser) {
@@ -1361,7 +1367,7 @@ export default function FindingsClient({
                                   <input
                                     type="date"
                                     required
-                                    disabled={!(canManage || canResolve)}
+                                    disabled={!canManage}
                                     value={draftRow.correctiveActionDate || ""}
                                     onChange={(e) => setDraftRow({ ...draftRow, correctiveActionDate: e.target.value })}
                                     className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px] disabled:cursor-not-allowed disabled:opacity-60"
@@ -1372,7 +1378,7 @@ export default function FindingsClient({
                                   <RichEditor
                                     value={draftRow.correctiveActionRemarks || ""}
                                     onChange={(html) => setDraftRow({ ...draftRow, correctiveActionRemarks: html })}
-                                    editable={canManage || canResolve}
+                                    editable={canManage}
                                   />
                                 </div>
                               </div>
@@ -1403,9 +1409,11 @@ export default function FindingsClient({
                                         <button
                                           type="button"
                                           onClick={markDraftRowFinalized}
-                                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors ${
+                                          disabled={isResolveLocked}
+                                          title={isResolveLocked ? "Already resolved - only a report editor can undo this" : undefined}
+                                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors disabled:cursor-not-allowed ${
                                             draftRow.correctiveFinalUser
-                                              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15"
+                                              ? `bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 ${isResolveLocked ? "" : "hover:bg-emerald-500/15"}`
                                               : "bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600"
                                           }`}
                                         >
@@ -1629,14 +1637,16 @@ export default function FindingsClient({
                                 >
                                   <Edit className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteRowItem(idx)}
-                                  className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                  title="Remove Line"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {canDeleteFindingRows && (
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteRowItem(idx)}
+                                    className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                    title="Remove Line"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </td>
                             ) : canResolve ? (
                               <td className="px-4 py-3.5 text-center space-x-1 whitespace-nowrap border-l border-slate-200 dark:border-slate-800 no-print">

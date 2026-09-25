@@ -6,6 +6,8 @@ import {
   Param,
   Patch,
   Post,
+  Query,
+  BadRequestException,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -34,6 +36,40 @@ export class OePlansController {
   async findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.oePlansService.findAll(
       await this.accessScope.oePlanReadScope(user.sub),
+    );
+  }
+
+  @Get('page')
+  @RequirePermission('oe-plans:view')
+  async findPage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('page') pageValue = '1',
+    @Query('pageSize') pageSizeValue = '10',
+    @Query('search') search = '',
+    @Query('status') status = 'ALL',
+  ) {
+    const page = Number(pageValue);
+    const pageSize = Number(pageSizeValue);
+    if (!Number.isInteger(page) || page < 1) {
+      throw new BadRequestException('page must be a positive integer');
+    }
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new BadRequestException('pageSize must be an integer between 1 and 100');
+    }
+    const allowedStatuses = [
+      'ALL',
+      'PLANNING',
+      'SUBMITTED_FOR_APPROVAL',
+      'RELEASED',
+      'CLOSED',
+    ];
+    if (!allowedStatuses.includes(status)) {
+      throw new BadRequestException('status is not valid');
+    }
+
+    return this.oePlansService.findPage(
+      await this.accessScope.oePlanReadScope(user.sub),
+      { page, pageSize, search: search.trim(), status },
     );
   }
 

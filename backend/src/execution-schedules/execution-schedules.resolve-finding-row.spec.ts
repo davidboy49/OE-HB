@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/unbound-method */
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExecutionSchedulesService } from './execution-schedules.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { PlanItemsService } from '../common/plan-items.service';
@@ -46,7 +50,7 @@ describe('ExecutionSchedulesService.resolveFindingRow', () => {
     await service.resolveFindingRow(
       's1',
       'r2',
-      { correctiveActionRemarks: 'Fixed it', resolve: true },
+      { correctiveFinalRemarks: 'Fixed it', resolve: true },
       'Dara',
     );
 
@@ -62,7 +66,7 @@ describe('ExecutionSchedulesService.resolveFindingRow', () => {
       id: 'r2',
       activity: 'Target row',
       implication: 'Do not touch either',
-      correctiveActionRemarks: 'Fixed it',
+      correctiveFinalRemarks: 'Fixed it',
       correctiveFinalUser: 'Dara',
     });
     expect(rows[1].correctiveFinalDatetime).toBeTruthy();
@@ -79,8 +83,13 @@ describe('ExecutionSchedulesService.resolveFindingRow', () => {
     await service.resolveFindingRow(
       's1',
       'r1',
-      // @ts-expect-error - deliberately trying to smuggle in fields the DTO doesn't expose
-      { correctiveFinalUser: 'Someone Else', activity: 'Sneaky edit' },
+      {
+        // @ts-expect-error - deliberately trying to smuggle in fields the DTO doesn't expose
+        correctiveFinalUser: 'Someone Else',
+        activity: 'Sneaky edit',
+        correctiveActionDate: '2026-01-01',
+        correctiveActionRemarks: 'Editor-only field',
+      },
       'Dara',
     );
 
@@ -89,25 +98,63 @@ describe('ExecutionSchedulesService.resolveFindingRow', () => {
     const row = JSON.parse(written)[0];
     expect(row.correctiveFinalUser).toBeUndefined();
     expect(row.activity).toBeUndefined();
+    expect(row.correctiveActionDate).toBeUndefined();
+    expect(row.correctiveActionRemarks).toBeUndefined();
   });
 
-  it('clears the resolution when resolve is explicitly false', async () => {
+  const resolvedRow = {
+    id: 'r1',
+    correctiveFinalUser: 'Dara',
+    correctiveFinalDatetime: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('refuses to undo a resolution (resolve:false) - that is editor-only', async () => {
     const prisma = makePrisma();
     (prisma.executionSchedule.findUnique as jest.Mock).mockResolvedValue({
-      scheduleRows: rowsJson([
-        { id: 'r1', correctiveFinalUser: 'Dara', correctiveFinalDatetime: '2026-01-01T00:00:00.000Z' },
-      ]),
+      scheduleRows: rowsJson([resolvedRow]),
       isDeleted: false,
     });
     const service = new ExecutionSchedulesService(prisma, makePlanItems());
 
-    await service.resolveFindingRow('s1', 'r1', { resolve: false }, 'Dara');
+    await expect(
+      service.resolveFindingRow('s1', 'r1', { resolve: false }, 'Dara'),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.executionSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to resolve an already-resolved row again, keeping the original resolver and time', async () => {
+    const prisma = makePrisma();
+    (prisma.executionSchedule.findUnique as jest.Mock).mockResolvedValue({
+      scheduleRows: rowsJson([resolvedRow]),
+      isDeleted: false,
+    });
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
+
+    await expect(
+      service.resolveFindingRow('s1', 'r1', { resolve: true }, 'Someone Else'),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.executionSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('still lets the resolver update Corrective Action on a resolved row without re-resolving it', async () => {
+    const prisma = makePrisma();
+    (prisma.executionSchedule.findUnique as jest.Mock).mockResolvedValue({
+      scheduleRows: rowsJson([resolvedRow]),
+      isDeleted: false,
+    });
+    const service = new ExecutionSchedulesService(prisma, makePlanItems());
+
+    await service.resolveFindingRow(
+      's1',
+      'r1',
+      { correctiveFinalRemarks: 'Added detail' },
+      'Someone Else',
+    );
 
     const written = (prisma.executionSchedule.update as jest.Mock).mock
       .calls[0][0].data.scheduleRows;
     const row = JSON.parse(written)[0];
-    expect(row.correctiveFinalUser).toBe('');
-    expect(row.correctiveFinalDatetime).toBe('');
+    expect(row).toMatchObject({ ...resolvedRow, correctiveFinalRemarks: 'Added detail' });
   });
 
   it("404s with an actionable message when the row id isn't found (e.g. a legacy row saved before ids existed)", async () => {

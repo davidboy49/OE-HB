@@ -91,6 +91,10 @@ export const PERMISSIONS: PermissionDef[] = [
     description: 'Delete execution schedules',
   },
   {
+    key: 'execution-schedules:delete-finding-row',
+    description: 'Delete finding rows from OE Findings reports',
+  },
+  {
     key: 'execution-schedules:confirm-others',
     description: "Confirm another attendee's attendance on an execution schedule",
   },

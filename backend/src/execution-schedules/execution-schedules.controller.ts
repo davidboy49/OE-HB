@@ -97,6 +97,21 @@ export class ExecutionSchedulesController {
   ) {
     await this.accessScope.assertVisible('schedule', id, user.sub);
     const oldSchedule = await this.executionSchedulesService.findOne(id);
+
+    // Finding rows live inside scheduleRows, so deleting one uses this broad update route.
+    // Require the dedicated capability when a findings report loses a row; otherwise a
+    // caller could bypass the UI permission by sending this PATCH directly.
+    if (
+      oldSchedule?.language === 'finding' &&
+      dto.scheduleRows !== undefined &&
+      this.hasRemovedRows(oldSchedule.scheduleRows, dto.scheduleRows)
+    ) {
+      await this.permissionsResolver.requirePermission(
+        user,
+        'execution-schedules:delete-finding-row',
+      );
+    }
+
     const result = await this.executionSchedulesService.update(
       id,
       dto,
@@ -123,6 +138,20 @@ export class ExecutionSchedulesController {
     (req as any).scheduleUpdateActivityMeta = { action, details };
 
     return result;
+  }
+
+  private hasRemovedRows(previousRows: string, nextRows: string): boolean {
+    try {
+      const previous = JSON.parse(previousRows || '[]');
+      const next = JSON.parse(nextRows || '[]');
+      return (
+        Array.isArray(previous) &&
+        Array.isArray(next) &&
+        next.length < previous.length
+      );
+    } catch {
+      return false;
+    }
   }
 
   @Delete(':id')

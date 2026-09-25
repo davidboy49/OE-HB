@@ -41,6 +41,7 @@ function makeService(
         ),
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(23),
       updateMany: jest
         .fn()
         .mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
@@ -93,6 +94,42 @@ describe('OePlansService.findAll', () => {
         where: expect.objectContaining({ isDeleted: false }),
       }),
     );
+  });
+
+  it('paginates after applying access scope, search, and status filters', async () => {
+    const { service, prisma } = makeService();
+    const result = await service.findPage(
+      {
+        plans: { departments: { contains: 'Finance' } },
+        schedules: {},
+        meetings: {},
+        findings: {},
+      },
+      { page: 2, pageSize: 10, search: 'audit', status: 'RELEASED' },
+    );
+
+    expect(prisma.oePlan.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 10,
+        take: 10,
+        where: expect.objectContaining({
+          isDeleted: false,
+          departments: { contains: 'Finance' },
+          status: 'RELEASED',
+          OR: [
+            { name: { contains: 'audit', mode: 'insensitive' } },
+            { code: { contains: 'audit', mode: 'insensitive' } },
+          ],
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      items: [],
+      page: 2,
+      pageSize: 10,
+      totalItems: 23,
+      totalPages: 3,
+    });
   });
 });
 
