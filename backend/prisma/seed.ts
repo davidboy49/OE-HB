@@ -75,6 +75,7 @@ async function main() {
   const dept1 = await prisma.department.create({
     data: {
       id: 'dept-1',
+      code: 'IT',
       name: 'Information Technology',
       description: 'Core IT infrastructure and software development',
     },
@@ -82,6 +83,7 @@ async function main() {
   const dept2 = await prisma.department.create({
     data: {
       id: 'dept-2',
+      code: 'FIN',
       name: 'Finance & Accounting',
       description: 'Financial reporting, billing, and ledger management',
     },
@@ -89,6 +91,7 @@ async function main() {
   const dept3 = await prisma.department.create({
     data: {
       id: 'dept-3',
+      code: 'INFOSEC',
       name: 'Information Security',
       description: 'Cybersecurity, risk management, and compliance',
     },
@@ -96,6 +99,7 @@ async function main() {
   const dept4 = await prisma.department.create({
     data: {
       id: 'dept-4',
+      code: 'OPS',
       name: 'Operations & HR',
       description: 'Day-to-day facilities, staffing, and onboarding',
     },

@@ -13,6 +13,7 @@ type DepartmentWithBu = Prisma.DepartmentGetPayload<{
 
 const toDto = (d: DepartmentWithBu): Department => ({
   id: d.id,
+  code: d.code,
   name: d.name,
   description: d.description,
   businessUnitId: d.businessUnitId,
@@ -39,7 +40,7 @@ export class DepartmentsService {
   }
 
   async create(
-    id: string,
+    code: string,
     name: string,
     description: string,
     businessUnitId: string,
@@ -47,7 +48,7 @@ export class DepartmentsService {
     await this.assertBusinessUnit(businessUnitId);
     try {
       const d = await this.prisma.department.create({
-        data: { id, name, description, businessUnitId },
+        data: { code, name, description, businessUnitId },
         include: { businessUnit: true },
       });
       return toDto(d);
@@ -100,7 +101,7 @@ export class DepartmentsService {
       e.code === 'P2002'
     ) {
       return new ConflictException(
-        'A department with this name already exists in this Business Unit.',
+        'A department with this code or description already exists in this Business Unit.',
       );
     }
     return e;
