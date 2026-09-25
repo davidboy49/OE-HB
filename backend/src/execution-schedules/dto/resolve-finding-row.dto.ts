@@ -1,11 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 /**
  * Body for the resolve-finding-row route. Deliberately narrow: this is the whole security
  * boundary for `execution-schedules:resolve-finding` - a caller who holds only this permission
  * (not `execution-schedules:update`) can PATCH nothing on the row or the report beyond what's
- * listed here: Completed Date, Corrective Action, attachments and the one-way Resolve.
+ * listed here: Completed Date, Corrective Action and the one-way Resolve. (Attachments have
+ * their own upload/delete routes - see FindingAttachmentsController.)
  * Corrective Action Date/Remarks are deliberately NOT here - they stay editor-only. Never add
  * a field here that isn't part of "fill in the corrective action and mark it resolved."
  */
@@ -19,13 +20,6 @@ export class ResolveFindingRowDto {
   @IsOptional()
   @IsString()
   correctiveFinalRemarks?: string;
-
-  @ApiPropertyOptional({
-    description: 'Row attachments (same {id, name, size, type, data} shape the UI already uses).',
-  })
-  @IsOptional()
-  @IsArray()
-  attachments?: unknown[];
 
   @ApiPropertyOptional({
     description:

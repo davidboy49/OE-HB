@@ -37,8 +37,22 @@ interface FindingRow extends ScheduleRow {
   correctiveFinalRemarks?: string;
   correctiveFinalUser?: string;
   correctiveFinalDatetime?: string;
-  attachments?: any[];
+  /** Metadata only - the files live server-side (FindingAttachment) and download by id. */
+  attachments?: FindingAttachment[];
 }
+
+interface FindingAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+}
+
+/** Matches the backend's per-file cap (FINDING_ATTACHMENT_MAX_BYTES). */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+const formatFileSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
@@ -714,6 +728,59 @@ export default function FindingsClient({
    * via the narrow backend route, never the full report. The backend's DTO whitelist is the
    * real boundary; this just avoids sending fields the caller was never shown as editable.
    */
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const attachmentUrl = (att: FindingAttachment) =>
+    `/api/backend/execution-schedules/${selectedScheduleId}/attachments/${att.id}`;
+
+  /** Files are saved the moment they're added/removed, so the row list and the open editor both update. */
+  const updateRowAttachments = (rowId: string, update: (list: FindingAttachment[]) => FindingAttachment[]) => {
+    setDraftRow(d => (d && d.id === rowId ? { ...d, attachments: update(d.attachments || []) } : d));
+    setRows(rs => rs.map(r => (r.id === rowId ? { ...r, attachments: update(r.attachments || []) } : r)));
+  };
+
+  const uploadAttachments = async (files: File[]) => {
+    if (!draftRow || !selectedScheduleId) return;
+    const rowId = draftRow.id;
+    if (!rowId) {
+      showFeedback("This report needs to be opened and saved once by an editor before files can be attached.");
+      return;
+    }
+    const tooBig = files.filter(f => f.size > MAX_ATTACHMENT_BYTES);
+    if (tooBig.length > 0) {
+      showFeedback(`Not uploaded (over 25 MB): ${tooBig.map(f => f.name).join(", ")}`);
+    }
+    for (const file of files.filter(f => f.size <= MAX_ATTACHMENT_BYTES)) {
+      setUploadingCount(c => c + 1);
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        // Plain fetch, not clientApi: the browser must set the multipart boundary itself.
+        const res = await fetch(`/api/backend/execution-schedules/${selectedScheduleId}/finding-rows/${rowId}/attachments`, {
+          method: "POST",
+          body,
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.message || `Upload failed (${res.status})`);
+        updateRowAttachments(rowId, list => [...list, payload as FindingAttachment]);
+      } catch (err: any) {
+        showFeedback(`Could not upload ${file.name}: ${err.message || err.toString()}`);
+      } finally {
+        setUploadingCount(c => c - 1);
+      }
+    }
+  };
+
+  const removeAttachment = async (att: FindingAttachment) => {
+    if (!draftRow?.id || !selectedScheduleId) return;
+    const rowId = draftRow.id;
+    try {
+      await clientApi(`/execution-schedules/${selectedScheduleId}/attachments/${att.id}`, { method: "DELETE" });
+      updateRowAttachments(rowId, list => list.filter(a => a.id !== att.id));
+    } catch (err: any) {
+      showFeedback(`Could not remove ${att.name}: ${err.message || err.toString()}`);
+    }
+  };
+
   const saveResolveOnly = async () => {
     if (!draftRow || activeRowIndex === null || activeRowIndex === -1 || !selectedScheduleId) return;
     if (!draftRow.id) {
@@ -731,7 +798,6 @@ export default function FindingsClient({
           body: JSON.stringify({
             correctiveFinalDate: draftRow.correctiveFinalDate || undefined,
             correctiveFinalRemarks: draftRow.correctiveFinalRemarks,
-            attachments: draftRow.attachments,
             resolve: draftRow.correctiveFinalUser && !wasResolved ? true : undefined,
           }),
         }
@@ -1439,9 +1505,13 @@ export default function FindingsClient({
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">
                               Row Attachments
                             </label>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Up to 25 MB per file. Files are saved as soon as they are added or removed.
+                            </p>
                             <input
                               type="file"
-                              disabled={!(canManage || canResolve)}
+                              multiple
+                              disabled={!(canManage || canResolve) || uploadingCount > 0}
                               className="block w-full text-xs text-slate-500
                                 file:mr-4 file:py-2 file:px-4
                                 file:rounded-full file:border-0
@@ -1451,49 +1521,30 @@ export default function FindingsClient({
                                 disabled:cursor-not-allowed disabled:opacity-60
                               "
                               onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  const base64 = event.target?.result;
-                                  if (typeof base64 === 'string') {
-                                    const currentAttachments = draftRow.attachments || [];
-                                    setDraftRow({
-                                      ...draftRow,
-                                      attachments: [...currentAttachments, {
-                                        id: Date.now().toString(),
-                                        name: file.name,
-                                        size: file.size,
-                                        type: file.type,
-                                        data: base64
-                                      }]
-                                    });
-                                  }
-                                };
-                                reader.readAsDataURL(file);
+                                const files = Array.from(e.target.files || []);
                                 e.target.value = ''; // reset input
+                                if (files.length > 0) uploadAttachments(files);
                               }}
                             />
+                            {uploadingCount > 0 && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400">Uploading {uploadingCount} file{uploadingCount > 1 ? "s" : ""}...</p>
+                            )}
                             {draftRow.attachments && draftRow.attachments.length > 0 && (
                               <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                                {draftRow.attachments.map((att: any) => (
+                                {draftRow.attachments.map((att) => (
                                   <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
                                     <div className="flex items-center gap-3">
                                       <FileDown className="w-4 h-4 text-slate-400" />
-                                      <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
+                                      <a href={attachmentUrl(att)} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
                                         {att.name}
                                       </a>
-                                      <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
+                                      <span className="text-xs text-slate-500">({formatFileSize(att.size)})</span>
                                     </div>
                                     {(canManage || canResolve) && (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setDraftRow({
-                                            ...draftRow,
-                                            attachments: draftRow.attachments?.filter((a: any) => a.id !== att.id)
-                                          });
-                                        }}
+                                        onClick={() => removeAttachment(att)}
+                                        title="Remove file"
                                         className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                       >
                                         <X className="w-4 h-4" />
@@ -1596,8 +1647,8 @@ export default function FindingsClient({
                                 <div className="rich-text-content text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: row.activity }} />
                                 {row.attachments && row.attachments.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-1">
-                                    {row.attachments.map((att: any) => (
-                                      <a key={att.id} href={att.data} download={att.name} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-[9px]">
+                                    {row.attachments.map((att) => (
+                                      <a key={att.id} href={attachmentUrl(att)} download={att.name} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-[9px]">
                                         <FileDown className="w-3 h-3" />
                                         <span className="truncate max-w-[100px]">{att.name}</span>
                                       </a>
