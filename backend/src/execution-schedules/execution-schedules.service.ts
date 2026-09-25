@@ -2,10 +2,15 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  FindingAttachmentsService,
+  rowIdsOf,
+} from './attachments/finding-attachments.service';
 import { Prisma } from '../generated/prisma/client';
 import { assertOePlanReleased } from '../common/assert-oe-plan-status';
 import {
@@ -66,7 +71,6 @@ export interface UpdateExecutionScheduleInput {
 export interface ResolveFindingRowInput {
   correctiveFinalDate?: string;
   correctiveFinalRemarks?: string;
-  attachments?: unknown[];
   resolve?: boolean;
   expectedUpdatedAt?: string;
 }
@@ -91,7 +95,41 @@ export class ExecutionSchedulesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly planItems: PlanItemsService,
+    // Optional so unit tests that don't exercise attachments can construct the service bare.
+    @Optional() private readonly attachments?: FindingAttachmentsService,
   ) {}
+
+  /**
+   * Finding rows' files live in FindingAttachment, not in scheduleRows. Merges each live file
+   * list into its row as `attachments` (metadata only - downloads go through the attachment
+   * route) for every findings report in `dtos`.
+   */
+  private async withAttachments<
+    T extends { id: string; language?: string; scheduleRows?: string },
+  >(dtos: T[]): Promise<T[]> {
+    const findingIds = dtos
+      .filter((d) => d.language === 'finding')
+      .map((d) => d.id);
+    if (!this.attachments || findingIds.length === 0) return dtos;
+    const bySchedule = await this.attachments.metaBySchedule(findingIds);
+    return dtos.map((d) => {
+      if (d.language !== 'finding') return d;
+      let rows: unknown;
+      try {
+        rows = JSON.parse(d.scheduleRows || '[]');
+      } catch {
+        return d;
+      }
+      if (!Array.isArray(rows)) return d;
+      const byRow = bySchedule.get(d.id);
+      const merged = rows.map((r: { id?: string }) =>
+        r && typeof r === 'object'
+          ? { ...r, attachments: (r.id && byRow?.get(r.id)) || [] }
+          : r,
+      );
+      return { ...d, scheduleRows: JSON.stringify(merged) };
+    });
+  }
 
   /**
    * Postgres-portable rewrite of dbService's module-level `getScheduleAttendeeConfirmations`
@@ -193,13 +231,15 @@ export class ExecutionSchedulesService {
           oePlanIds,
         ),
       ]);
-    return schedules.map((s) =>
-      this.toDto(
-        s,
-        confirmationMap[s.id],
-        objectivesById.get(s.id),
-        scopeById.get(s.id),
-        dataRequestsByPlanId.get(s.oePlanId),
+    return this.withAttachments(
+      schedules.map((s) =>
+        this.toDto(
+          s,
+          confirmationMap[s.id],
+          objectivesById.get(s.id),
+          scopeById.get(s.id),
+          dataRequestsByPlanId.get(s.oePlanId),
+        ),
       ),
     );
   }
@@ -243,7 +283,10 @@ export class ExecutionSchedulesService {
         PLAN_ITEM_OWNER.SCHEDULE_SCOPE.prefix,
       ),
     ]);
-    return this.toDto(s, attendeeConfirmations, objectives, scope);
+    const [dto] = await this.withAttachments([
+      this.toDto(s, attendeeConfirmations, objectives, scope),
+    ]);
+    return dto;
   }
 
   async findOne(id: string): Promise<any | null> {
@@ -262,13 +305,10 @@ export class ExecutionSchedulesService {
           s.oePlanId,
         ),
       ]);
-    return this.toDto(
-      s,
-      confirmationMap[s.id],
-      objectives,
-      scope,
-      dataRequestItems,
-    );
+    const [dto] = await this.withAttachments([
+      this.toDto(s, confirmationMap[s.id], objectives, scope, dataRequestItems),
+    ]);
+    return dto;
   }
 
   /**
@@ -307,7 +347,7 @@ export class ExecutionSchedulesService {
 
   /**
    * Gives every row in a `scheduleRows` JSON array a stable `id` if it doesn't already have
-   * one, so resolveFindingRow (and anything else that needs to target a single row) has
+   * one (and drops any client-sent `attachments` list), so resolveFindingRow (and anything else that needs to target a single row) has
    * something to match on. Runs on every ordinary save, so rows saved before this field
    * existed pick up an id the next time anyone touches the report - no migration needed.
    * Returns the input unchanged (not re-serialized) when nothing needed backfilling.
@@ -322,11 +362,20 @@ export class ExecutionSchedulesService {
     if (!Array.isArray(rows)) return scheduleRows;
     let changed = false;
     const withIds = rows.map((r) => {
-      if (r && typeof r === 'object' && !(r as { id?: string }).id) {
+      if (!r || typeof r !== 'object') return r;
+      let row = r as { id?: string; attachments?: unknown };
+      if (!row.id) {
         changed = true;
-        return { ...r, id: randomUUID() };
+        row = { ...row, id: randomUUID() };
       }
-      return r;
+      // A row's files live in FindingAttachment (see withAttachments); whatever list the
+      // client echoes back is never stored, so it can't resurrect or drop files.
+      if (row.attachments !== undefined) {
+        changed = true;
+        const { attachments: _ignored, ...rest } = row;
+        row = rest;
+      }
+      return row;
     });
     return changed ? JSON.stringify(withIds) : scheduleRows;
   }
@@ -464,7 +513,6 @@ export class ExecutionSchedulesService {
       row.correctiveFinalDate = patch.correctiveFinalDate;
     if (patch.correctiveFinalRemarks !== undefined)
       row.correctiveFinalRemarks = patch.correctiveFinalRemarks;
-    if (patch.attachments !== undefined) row.attachments = patch.attachments;
     if (patch.resolve === true) {
       row.correctiveFinalUser = actorName;
       row.correctiveFinalDatetime = new Date().toISOString();
@@ -510,7 +558,7 @@ export class ExecutionSchedulesService {
     // content by writing to a row that's supposed to be gone.
     const target = await this.prisma.executionSchedule.findUnique({
       where: { id },
-      select: { isDeleted: true },
+      select: { isDeleted: true, language: true, scheduleRows: true },
     });
     if (!target || target.isDeleted) {
       throw new NotFoundException('Execution Schedule not found');
@@ -555,7 +603,16 @@ export class ExecutionSchedulesService {
           data: { ...updateData, lastModifiedBy: actorName },
           include: { oePlan: true },
         }));
+    // Files of finding rows this save removed go with them (soft delete, like the rows'
+    // other audit data). Only rows that existed before - never a row still being drafted.
+    const removedRowIds =
+      target.language === 'finding' && updateData.scheduleRows !== undefined
+        ? [...rowIdsOf(target.scheduleRows)].filter(
+            (rowId) => !rowIdsOf(updateData.scheduleRows).has(rowId),
+          )
+        : [];
     await Promise.all([
+      this.attachments?.removeForRows(id, removedRowIds),
       this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations),
       this.planItems.writeList(
         PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type,
@@ -576,32 +633,35 @@ export class ExecutionSchedulesService {
       this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
       this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
     ]);
-    return {
-      id: s.id,
-      projectId: s.oePlanId,
-      projectName: s.oePlan.name,
-      projectCode: s.oePlan.code,
-      departments: s.departments,
-      address: s.address,
-      visitNumber: s.visitNumber,
-      actualVisitDate: s.actualVisitDate,
-      oePeriod: s.oePeriod,
-      leadExecution: s.leadExecution,
-      teamMembers: s.teamMembers,
-      additionalAttendees: s.additionalAttendees,
-      attendeeConfirmations:
-        attendeeConfirmations ?? s.attendeeConfirmations ?? '{}',
-      standards: s.standards,
-      language: s.language,
-      status: s.status,
-      objectives: finalObjectives,
-      scope: finalScope,
-      scheduleRows: s.scheduleRows,
-      ownerName: s.ownerName,
-      lastModifiedBy: s.lastModifiedBy,
-      createdAt: s.createdAt.toISOString(),
-      updatedAt: s.updatedAt.toISOString(),
-    };
+    const [dto] = await this.withAttachments([
+      {
+        id: s.id,
+        projectId: s.oePlanId,
+        projectName: s.oePlan.name,
+        projectCode: s.oePlan.code,
+        departments: s.departments,
+        address: s.address,
+        visitNumber: s.visitNumber,
+        actualVisitDate: s.actualVisitDate,
+        oePeriod: s.oePeriod,
+        leadExecution: s.leadExecution,
+        teamMembers: s.teamMembers,
+        additionalAttendees: s.additionalAttendees,
+        attendeeConfirmations:
+          attendeeConfirmations ?? s.attendeeConfirmations ?? '{}',
+        standards: s.standards,
+        language: s.language,
+        status: s.status,
+        objectives: finalObjectives,
+        scope: finalScope,
+        scheduleRows: s.scheduleRows,
+        ownerName: s.ownerName,
+        lastModifiedBy: s.lastModifiedBy,
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      },
+    ]);
+    return dto;
   }
 
   /**

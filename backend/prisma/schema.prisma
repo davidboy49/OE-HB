@@ -188,6 +188,7 @@ model ExecutionSchedule {
   oePlanId              String
   oePlan                OePlan    @relation(fields: [oePlanId], references: [id], onDelete: Cascade)
   findings              Finding[]
+  attachments           FindingAttachment[]
   departments           String    @default("")
   address               String
   visitNumber           String    @default("01")
@@ -212,6 +213,38 @@ model ExecutionSchedule {
   isDeleted             Boolean   @default(false)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+}
+
+/// A file attached to one finding row (scheduleRows[].id) of an OE Findings report.
+/// This table is the source of truth for a row's files - scheduleRows no longer carries them;
+/// the API merges this list into each row on read. The bytes live wherever `storage` says
+/// (see AttachmentStorage): "postgres" = FindingAttachmentBlob, later e.g. "disk"/"s3" via
+/// `storageKey`, so moving storage never touches this metadata's shape.
+model FindingAttachment {
+  id         String                 @id @default(uuid())
+  scheduleId String
+  schedule   ExecutionSchedule      @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  rowId      String
+  name       String
+  mimeType   String                 @default("application/octet-stream")
+  size       Int
+  storage    String                 @default("postgres")
+  storageKey String                 @default("")
+  uploadedBy String                 @default("")
+  // Soft delete, like the other audit records: a removed file stays recoverable.
+  isDeleted  Boolean                @default(false)
+  createdAt  DateTime               @default(now())
+  blob       FindingAttachmentBlob?
+
+  @@index([scheduleId, rowId])
+}
+
+/// File bytes for the "postgres" storage driver. Kept out of FindingAttachment so listing a
+/// report's files never loads them.
+model FindingAttachmentBlob {
+  attachmentId String            @id
+  attachment   FindingAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  data         Bytes
 }
 
 model OpenMeeting {

@@ -94,9 +94,11 @@ describe('route inventory / access audit', () => {
       .map((r) => `${r.method} ${r.path}`)
       .sort();
     expect(dynamic).toEqual([
+      'DELETE /execution-schedules/:id/attachments/:attachmentId',
       'PATCH /annual-plans/:id/status',
       'PATCH /meetings/:id/status',
       'PATCH /oe-plans/:id',
+      'POST /execution-schedules/:id/finding-rows/:rowId/attachments',
     ]);
   });
 });
