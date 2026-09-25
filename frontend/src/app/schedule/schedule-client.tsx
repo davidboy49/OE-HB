@@ -273,7 +273,10 @@ export default function ScheduleClient({
   );
 
   const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
-  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "OE-DRQ");
+  const selectedScheduleObj = schedules.find(s => s.id === selectedScheduleId);
+  // Rows store Data Request ids only. A viewer without oe-plans:view has no OE Plan to look the
+  // text up in, so fall back to the copy the schedule API carries (dataRequestItems).
+  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || selectedScheduleObj?.dataRequestItems || "", "OE-DRQ");
   const dataRequestOptions = availableDataRequests.map(d => ({
     value: d.id,
     label: d.text || d.id,
@@ -301,6 +304,13 @@ export default function ScheduleClient({
   };
 
   const canManage = RBAC.can(currentUser, "execution-schedules:create") || RBAC.can(currentUser, "execution-schedules:update") || RBAC.can(currentUser, "execution-schedules:delete");
+  const canEditSchedule = modalMode === "create"
+    ? RBAC.can(currentUser, "execution-schedules:create")
+    : RBAC.can(currentUser, "execution-schedules:update");
+  // Reopen goes through the update route, so it needs both keys (backend enforces the same).
+  const canReopenSchedule = RBAC.can(currentUser, "execution-schedules:reopen") && RBAC.can(currentUser, "execution-schedules:update");
+  // Released schedules are locked for everyone; without edit rights the form is view-only.
+  const isReadOnly = isLocked || !canEditSchedule;
 
   const showFeedback = (msg: string, type: "success" | "error" = "success") => {
     setFeedback(msg);
@@ -885,7 +895,7 @@ export default function ScheduleClient({
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {!isReadOnly && (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -893,7 +903,8 @@ export default function ScheduleClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                )}
+                {isLocked && canReopenSchedule && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -902,7 +913,7 @@ export default function ScheduleClient({
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
                 )}
-                {!isLocked && (
+                {!isReadOnly && (
                   <button
                     type="button"
                     onClick={handleReleaseSchedule}
@@ -922,7 +933,7 @@ export default function ScheduleClient({
             </div>
 
             {/* Modal Scrollable Body */}
-            <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
+            <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
               
               {/* OE Plan selection */}
               <div className="flex flex-col md:flex-row gap-4 items-center no-print">
@@ -953,7 +964,7 @@ export default function ScheduleClient({
                           Project name:
                         </td>
                         <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
-                          {selectedProjectObj?.name || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive project name</span>}
+                          {selectedProjectObj?.name || selectedScheduleObj?.projectName || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive project name</span>}
                         </td>
                       </tr>
 
@@ -973,7 +984,8 @@ export default function ScheduleClient({
                           Address:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="text" 
                             value={address}
                             onChange={(e) => setAddress(e.target.value)}
@@ -997,7 +1009,8 @@ export default function ScheduleClient({
                           Actual Visit Date:
                         </td>
                         <td className="w-1/4 px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="date"
                             value={actualVisitDate}
                             onChange={(e) => setActualVisitDate(e.target.value)}
@@ -1013,14 +1026,16 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <div className="flex items-center gap-2 max-w-sm">
-                            <input 
+                            <input
+                              disabled={isReadOnly}
                               type="date"
                               value={oePeriodStart}
                               onChange={(e) => handleOePeriodStartChange(e.target.value)}
                               className="w-1/2 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
                             />
                             <span className="text-slate-400 font-bold text-xs">to</span>
-                            <input 
+                            <input
+                              disabled={isReadOnly}
                               type="date"
                               value={oePeriodEnd}
                               onChange={(e) => handleOePeriodEndChange(e.target.value)}
@@ -1037,6 +1052,8 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
@@ -1053,6 +1070,8 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
@@ -1069,6 +1088,8 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={additionalAttendeesArray}
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
@@ -1084,7 +1105,8 @@ export default function ScheduleClient({
                           Standard(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="text" 
                             value={standards}
                             onChange={(e) => setStandards(e.target.value)}
@@ -1100,6 +1122,8 @@ export default function ScheduleClient({
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             options={[
                               { value: "Khmer", label: "Khmer" },
                               { value: "English", label: "English" },
@@ -1160,13 +1184,15 @@ export default function ScheduleClient({
                   <h3 className="text-xs font-sans font-bold uppercase tracking-wider text-[#05375c] dark:text-accent">
                     Execution Schedule Rows
                   </h3>
-                  <button
-                    type="button"
-                    onClick={addRow}
-                    className="flex items-center gap-1 px-3 py-1 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/20 text-[#0066cc] dark:text-sky-400 text-xs font-semibold rounded cursor-pointer no-print"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add Day/Slot
-                  </button>
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={addRow}
+                      className="flex items-center gap-1 px-3 py-1 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/20 text-[#0066cc] dark:text-sky-400 text-xs font-semibold rounded cursor-pointer no-print"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Day/Slot
+                    </button>
+                  )}
                 </div>
 
                 {/* 1. Interactive Table Editor View (Screen only) */}
@@ -1275,18 +1301,20 @@ export default function ScheduleClient({
                                   type="button"
                                   onClick={() => startEditingRow(index)}
                                   className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 cursor-pointer"
-                                  title="Edit Slot"
+                                  title={isReadOnly ? "View Slot" : "Edit Slot"}
                                 >
                                   <Edit className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => removeRow(index)}
-                                  className="p-1.5 hover:bg-red-500/10 rounded text-red-500 cursor-pointer"
-                                  title="Delete Slot"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {!isReadOnly && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRow(index)}
+                                    className="p-1.5 hover:bg-red-500/10 rounded text-red-500 cursor-pointer"
+                                    title="Delete Slot"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1379,7 +1407,8 @@ export default function ScheduleClient({
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                                       Day
                                     </label>
-                                    <input 
+                                    <input
+                                      disabled={isReadOnly}
                                       type="text"
                                       value={draftRow.day || ""}
                                       onChange={(e) => updateDraftField("day", e.target.value)}
@@ -1397,6 +1426,7 @@ export default function ScheduleClient({
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
                                         <input
+                                          disabled={isReadOnly}
                                           type="date"
                                           value={validDate}
                                           onChange={(e) => updateDraftField("date", e.target.value)}
@@ -1406,6 +1436,7 @@ export default function ScheduleClient({
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">To</span>
                                         <input
+                                          disabled={isReadOnly}
                                           type="date"
                                           value={validDateTo}
                                           min={validDate || undefined}
@@ -1422,7 +1453,8 @@ export default function ScheduleClient({
                                     <div className="grid grid-cols-2 gap-2">
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
-                                        <input 
+                                        <input
+                                          disabled={isReadOnly}
                                           type="time" 
                                           value={timeVals.from} 
                                           onChange={(e) => {
@@ -1434,7 +1466,8 @@ export default function ScheduleClient({
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">To</span>
-                                        <input 
+                                        <input
+                                          disabled={isReadOnly}
                                           type="time" 
                                           value={timeVals.to} 
                                           onChange={(e) => {
@@ -1453,6 +1486,8 @@ export default function ScheduleClient({
                                   <div className="space-y-1">
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Conducted By (OE Members)</label>
                                     <MultiSelect
+                                      disabled={isReadOnly}
+                                      plainWhenDisabled
                                       selectedValues={conductByArray}
                                       onChange={(values) => updateDraftField("conductBy", values.join(", "))}
                                       options={memberOptions}
@@ -1464,6 +1499,8 @@ export default function ScheduleClient({
                                   <div className="space-y-1">
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Person in Charge (PIC)</label>
                                     <MultiSelect
+                                      disabled={isReadOnly}
+                                      plainWhenDisabled
                                       selectedValues={pInchargeArray}
                                       onChange={(values) => updateDraftField("pIncharge", values.join(", "))}
                                       options={picOptions}
@@ -1481,6 +1518,8 @@ export default function ScheduleClient({
                             <div className="space-y-1">
                               <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">OE Scope</label>
                               <MultiSelect
+                                disabled={isReadOnly}
+                                plainWhenDisabled
                                 selectedValues={draftRow.oeScope ? draftRow.oeScope.split(",").map(s => s.trim()).filter(Boolean) : []}
                                 onChange={(values) => updateDraftField("oeScope", values.join(", "))}
                                 options={oeScopeOptions}
@@ -1515,6 +1554,8 @@ export default function ScheduleClient({
                             <div className="space-y-1">
                               <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Type(s) of data to request</label>
                               <MultiSelect
+                                disabled={isReadOnly}
+                                plainWhenDisabled
                                 selectedValues={draftRow.dataRequest ? draftRow.dataRequest.split(",").map(s => s.trim()).filter(Boolean) : []}
                                 onChange={(values) => updateDraftField("dataRequest", values.join(", "))}
                                 options={dataRequestOptions}
@@ -1555,15 +1596,17 @@ export default function ScheduleClient({
                             onClick={cancelDraftRow}
                             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                           >
-                            Discard
+                            {isReadOnly ? "Close" : "Discard"}
                           </button>
-                          <button
-                            type="button"
-                            onClick={saveDraftRow}
-                            className="px-5 py-2 bg-[#0066cc] hover:bg-[#0052a3] text-white text-xs font-bold rounded cursor-pointer"
-                          >
-                            Save
-                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={saveDraftRow}
+                              className="px-5 py-2 bg-[#0066cc] hover:bg-[#0052a3] text-white text-xs font-bold rounded cursor-pointer"
+                            >
+                              Save
+                            </button>
+                          )}
                         </div>
 
                       </div>

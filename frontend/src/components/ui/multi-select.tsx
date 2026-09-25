@@ -22,6 +22,8 @@ interface MultiSelectProps {
   /** Values whose pill carries an "added" indicator, with `highlightTitle` as its tooltip. */
   highlightedValues?: string[];
   highlightTitle?: string;
+  /** Read-only without the faded look: when disabled, pills keep their normal colors. */
+  plainWhenDisabled?: boolean;
 }
 
 export default function MultiSelect({
@@ -35,7 +37,9 @@ export default function MultiSelect({
   lockedValues = [],
   highlightedValues = [],
   highlightTitle,
+  plainWhenDisabled = false,
 }: MultiSelectProps) {
+  const muted = disabled && !plainWhenDisabled;
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,8 +108,8 @@ export default function MultiSelect({
         className={`w-full flex items-center rounded-md transition-colors ${
           compact ? "h-8 justify-between gap-2 px-2.5" : "flex-wrap gap-1.5 px-2 py-1.5"
         } ${
-          disabled 
-            ? "cursor-not-allowed opacity-60" 
+          disabled
+            ? (muted ? "cursor-not-allowed opacity-60" : "cursor-default")
             : "hover:bg-slate-100/80 dark:hover:bg-slate-800/60 focus-within:bg-slate-100/80 dark:focus-within:bg-slate-800/60 cursor-text"
         }`}
       >
@@ -121,7 +125,7 @@ export default function MultiSelect({
             key={val}
             title={isHighlighted(val) ? highlightTitle : undefined}
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold select-none border ${
-              disabled
+              muted
                 ? "bg-slate-200/40 dark:bg-slate-800/40 text-slate-550 dark:text-slate-400 border-slate-300/35 dark:border-slate-700/30"
                 : isHighlighted(val)
                   ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800"
