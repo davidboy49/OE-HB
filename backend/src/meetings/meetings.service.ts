@@ -67,7 +67,8 @@ export interface UpdateOpenMeetingInput {
 /**
  * Open Meeting approval flow. A submitted meeting has to be approved (released) by
  * someone holding meetings:approve - an OE Leader - before it counts; nothing can
- * jump straight to RELEASED. Any content edit puts the meeting back to DRAFT.
+ * jump straight to RELEASED. Content can only be edited while DRAFT: a submitted or
+ * released meeting is locked until it is rejected/reopened back to DRAFT.
  */
 export const ALLOWED_MEETING_STATUS_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['SUBMITTED_FOR_APPROVAL'],
@@ -242,6 +243,23 @@ export class MeetingsService {
     data: UpdateOpenMeetingInput,
     actorName: string,
   ): Promise<any> {
+    // Submitted/released meetings are locked. This used to silently send them back to DRAFT
+    // (voiding the approval); now the edit is refused until someone rejects/reopens it.
+    const current = await this.prisma.openMeeting.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (
+      current?.status === 'RELEASED' ||
+      current?.status === 'SUBMITTED_FOR_APPROVAL'
+    ) {
+      throw new BadRequestException(
+        current.status === 'RELEASED'
+          ? 'This Open Meeting is released and locked. Reopen it before making changes.'
+          : 'This Open Meeting is awaiting approval and locked. It must be rejected back to Draft before making changes.',
+      );
+    }
+
     const updateData: Prisma.OpenMeetingUpdateInput = {
       address: data.address,
       visitNumber: data.visitNumber,
@@ -252,8 +270,8 @@ export class MeetingsService {
       additionalAttendees: data.additionalAttendees,
       attendeeConfirmations: data.attendeeConfirmations,
       standards: data.standards,
-      // An edit always sends the meeting back to DRAFT so it must be submitted and
-      // approved again; a client-supplied status is never trusted.
+      // Only DRAFT meetings reach here (see the lock above); a client-supplied status is
+      // never trusted - status changes go through updateStatus().
       status: 'DRAFT',
       scheduleRows: data.scheduleRows,
       lastModifiedBy: actorName,
