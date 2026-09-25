@@ -135,6 +135,7 @@ export class ExecutionSchedulesService {
     attendeeConfirmationsOverride?: string,
     objectivesOverride?: string,
     scopeOverride?: string,
+    dataRequestItems?: string,
   ): any {
     return {
       id: s.id,
@@ -156,6 +157,9 @@ export class ExecutionSchedulesService {
       status: s.status,
       objectives: objectivesOverride ?? '[]',
       scope: scopeOverride ?? '[]',
+      // The parent OE Plan's Data Request list. scheduleRows[].dataRequest only holds ids into
+      // it, and a schedule viewer may not hold oe-plans:view to look the text up themselves.
+      dataRequestItems: dataRequestItems ?? '[]',
       scheduleRows: s.scheduleRows,
       ownerName: s.ownerName,
       lastModifiedBy: s.lastModifiedBy,
@@ -178,17 +182,24 @@ export class ExecutionSchedulesService {
       orderBy: { createdAt: 'desc' },
     });
     const ids = schedules.map((s) => s.id);
-    const [confirmationMap, objectivesById, scopeById] = await Promise.all([
-      this.getScheduleAttendeeConfirmations(ids),
-      this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, ids),
-      this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, ids),
-    ]);
+    const oePlanIds = [...new Set(schedules.map((s) => s.oePlanId))];
+    const [confirmationMap, objectivesById, scopeById, dataRequestsByPlanId] =
+      await Promise.all([
+        this.getScheduleAttendeeConfirmations(ids),
+        this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, ids),
+        this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, ids),
+        this.planItems.readMany(
+          PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+          oePlanIds,
+        ),
+      ]);
     return schedules.map((s) =>
       this.toDto(
         s,
         confirmationMap[s.id],
         objectivesById.get(s.id),
         scopeById.get(s.id),
+        dataRequestsByPlanId.get(s.oePlanId),
       ),
     );
   }
@@ -241,12 +252,23 @@ export class ExecutionSchedulesService {
       include: { oePlan: true },
     });
     if (!s || s.isDeleted) return null;
-    const [confirmationMap, objectives, scope] = await Promise.all([
-      this.getScheduleAttendeeConfirmations([id]),
-      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
-      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
-    ]);
-    return this.toDto(s, confirmationMap[s.id], objectives, scope);
+    const [confirmationMap, objectives, scope, dataRequestItems] =
+      await Promise.all([
+        this.getScheduleAttendeeConfirmations([id]),
+        this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
+        this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
+        this.planItems.readOne(
+          PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+          s.oePlanId,
+        ),
+      ]);
+    return this.toDto(
+      s,
+      confirmationMap[s.id],
+      objectives,
+      scope,
+      dataRequestItems,
+    );
   }
 
   /**

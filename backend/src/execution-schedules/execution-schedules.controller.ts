@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -98,6 +99,8 @@ export class ExecutionSchedulesController {
     await this.accessScope.assertVisible('schedule', id, user.sub);
     const oldSchedule = await this.executionSchedulesService.findOne(id);
 
+    await this.assertReleasedScheduleLock(oldSchedule, dto, user);
+
     // Finding rows live inside scheduleRows, so deleting one uses this broad update route.
     // Require the dedicated capability when a findings report loses a row; otherwise a
     // caller could bypass the UI permission by sending this PATCH directly.
@@ -138,6 +141,42 @@ export class ExecutionSchedulesController {
     (req as any).scheduleUpdateActivityMeta = { action, details };
 
     return result;
+  }
+
+  /**
+   * A RELEASED Execution Schedule (Document 2 - not a findings report or meeting, which share
+   * this table but have their own post-release flows) is locked: the only change it accepts
+   * through this route is a bare reopen back to DRAFT, which needs its own permission.
+   * Attendee confirmations and department consents have their own routes and aren't affected.
+   */
+  private async assertReleasedScheduleLock(
+    oldSchedule: { language?: string; status?: string } | null,
+    dto: UpdateExecutionScheduleDto,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    if (
+      !oldSchedule ||
+      oldSchedule.status !== 'RELEASED' ||
+      oldSchedule.language === 'finding' ||
+      oldSchedule.language === 'meeting'
+    ) {
+      return;
+    }
+    const REOPEN_KEYS = ['status', 'lastModifiedBy', 'expectedUpdatedAt'];
+    const isBareReopen =
+      dto.status === 'DRAFT' &&
+      Object.entries(dto).every(
+        ([key, value]) => value === undefined || REOPEN_KEYS.includes(key),
+      );
+    if (!isBareReopen) {
+      throw new BadRequestException(
+        'This Execution Schedule is released and locked. Reopen it before making changes.',
+      );
+    }
+    await this.permissionsResolver.requirePermission(
+      user,
+      'execution-schedules:reopen',
+    );
   }
 
   private hasRemovedRows(previousRows: string, nextRows: string): boolean {

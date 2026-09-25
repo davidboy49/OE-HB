@@ -195,6 +195,8 @@ export interface ExecutionSchedule {
   status: "DRAFT" | "RELEASED";
   objectives: string;
   scope: string;
+  /** The parent OE Plan's Data Request items (JSON); scheduleRows[].dataRequest holds ids into it. */
+  dataRequestItems?: string;
   scheduleRows: string; // JSON
   ownerName?: string;
   lastModifiedBy?: string;
