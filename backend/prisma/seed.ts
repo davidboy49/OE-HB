@@ -18,6 +18,7 @@ const MEMBER_TIER_PERMISSIONS = [
   'meetings:view',
   'execution-schedules:view',
   'findings:view',
+  'findings-alerts:view',
   'departments:view',
   'business-units:view',
   'users:view',

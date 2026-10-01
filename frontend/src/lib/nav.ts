@@ -24,7 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { name: "Execution Schedule", href: "/schedule", requires: ["execution-schedules:view"] },
   // Finding reports are stored as execution schedules, so both are needed.
   { name: "OE Findings", href: "/findings", requires: ["findings:view", "execution-schedules:view"] },
-  { name: "Findings Alerts", href: "/findings-alerts", requires: ["findings:view", "execution-schedules:view"] },
+  { name: "Findings Alerts", href: "/findings-alerts", requires: ["findings-alerts:view", "execution-schedules:view"] },
   { name: "Department Responses", href: "/meeting-responses", requires: ["meeting-responses:view-all"] },
   { name: "User Groups", href: "/users", anyOf: ["users:view", "user-groups:view"] },
   { name: "Access Control", href: "/access-control", requires: ["user-groups:view"] },
