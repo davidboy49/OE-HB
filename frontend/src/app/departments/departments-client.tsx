@@ -65,7 +65,7 @@ export default function DepartmentsClient({
     if (!dept) return;
 
     setModalMode("edit");
-    setDeptIdInput(dept.id);
+    setDeptIdInput(dept.code);
     setDeptDescInput(dept.description || "");
     setDeptBuInput(dept.businessUnitId || "");
     setIsModalOpen(true);
@@ -79,25 +79,25 @@ export default function DepartmentsClient({
       return;
     }
 
-    const formattedId = deptIdInput.trim().toUpperCase();
+    const formattedCode = deptIdInput.trim().toUpperCase();
     const description = deptDescInput.trim();
 
     try {
       if (modalMode === "create") {
-        // Check for duplicates
-        if (departments.some(d => d.id === formattedId)) {
-          showFeedback(`Error: Department with ID "${formattedId}" already exists.`);
+        // Codes only need to be unique within a Business Unit
+        if (departments.some(d => d.code === formattedCode && d.businessUnitId === deptBuInput)) {
+          showFeedback(`Error: Department "${formattedCode}" already exists in this Business Unit.`);
           return;
         }
         const newDept = await clientApi<Department>("/departments", {
           method: "POST",
-          body: JSON.stringify({ id: formattedId, name: description, description, businessUnitId: deptBuInput }),
+          body: JSON.stringify({ code: formattedCode, name: description, description, businessUnitId: deptBuInput }),
         });
         if (newDept) {
           setDepartments([...departments, newDept]);
           setIsModalOpen(false);
           setSelectedDeptId(newDept.id);
-          showFeedback(`Department "${formattedId}" created successfully.`);
+          showFeedback(`Department "${formattedCode}" created successfully.`);
         }
       } else {
         if (!selectedDeptId) return;
@@ -108,7 +108,7 @@ export default function DepartmentsClient({
         if (updated) {
           setDepartments(departments.map(d => d.id === selectedDeptId ? updated : d));
           setIsModalOpen(false);
-          showFeedback(`Department "${selectedDeptId}" updated successfully.`);
+          showFeedback(`Department "${updated.code}" updated successfully.`);
         }
       }
     } catch (err: any) {
@@ -122,7 +122,7 @@ export default function DepartmentsClient({
     const dept = departments.find(d => d.id === selectedDeptId);
     if (!dept) return;
 
-    const confirmDel = window.confirm(`Are you sure you want to delete department "${dept.id}"? This will unassign all users currently mapped to this department.`);
+    const confirmDel = window.confirm(`Are you sure you want to delete department "${dept.code}"? This will unassign all users currently mapped to this department.`);
     if (!confirmDel) return;
 
     try {
@@ -130,7 +130,7 @@ export default function DepartmentsClient({
       if (success) {
         setDepartments(departments.filter(d => d.id !== selectedDeptId));
         setSelectedDeptId(null);
-        showFeedback(`Department "${dept.id}" has been deleted.`);
+        showFeedback(`Department "${dept.code}" has been deleted.`);
       }
     } catch (err: any) {
       console.error(err);
@@ -145,7 +145,7 @@ export default function DepartmentsClient({
 
   // Filter logic
   const filteredDepartments = departments.filter(d => {
-    const matchesSearch = d.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = d.code.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (d.description && d.description.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesSearch;
   });
@@ -201,7 +201,7 @@ export default function DepartmentsClient({
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-700 uppercase font-sans font-bold">
               <tr>
-                <th className="px-12 py-4 w-1/5">ID</th>
+                <th className="px-12 py-4 w-1/5">Code</th>
                 <th className="px-12 py-4 w-1/4">Business Unit</th>
                 <th className="px-12 py-4 w-1/2">Description</th>
               </tr>
@@ -217,7 +217,7 @@ export default function DepartmentsClient({
                     }`}
                   >
                     <td className="px-12 py-5 font-semibold text-slate-800 dark:text-slate-200">
-                      {dept.id}
+                      {dept.code}
                     </td>
                     <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
                       {dept.businessUnitName || <span className="italic text-amber-600">Not assigned</span>}
@@ -264,7 +264,7 @@ export default function DepartmentsClient({
             {/* Modal Form */}
             <form onSubmit={handleSaveDepartment} className="p-6 space-y-6">
               <div className="space-y-2">
-                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">ID</label>
+                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">Code</label>
                 <input
                   type="text"
                   required

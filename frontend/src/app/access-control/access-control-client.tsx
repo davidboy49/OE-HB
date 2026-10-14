@@ -66,6 +66,7 @@ const RISK_STYLE: Record<PermissionRisk, string> = {
 /** Permissions that only make sense together (findings are stored as execution schedules). */
 const COMPANIONS: Record<string, string[]> = {
   "findings:view": ["execution-schedules:view"],
+  "findings-alerts:view": ["execution-schedules:view"],
 };
 
 const chip = "inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-semibold leading-none";

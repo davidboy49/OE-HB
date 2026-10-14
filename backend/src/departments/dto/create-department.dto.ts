@@ -2,10 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateDepartmentDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Short code, e.g. "FIN"; unique within the Business Unit' })
   @IsString()
   @IsNotEmpty()
-  id!: string;
+  code!: string;
 
   @ApiProperty()
   @IsString()

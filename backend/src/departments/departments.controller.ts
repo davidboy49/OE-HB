@@ -33,11 +33,11 @@ export class DepartmentsController {
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
     action: 'CREATE_DEPARTMENT',
-    details: `Created department "${req.body.id}" (${req.body.name})`,
+    details: `Created department "${req.body.code}" (${req.body.name})`,
   }))
   create(@Body() dto: CreateDepartmentDto) {
     return this.departmentsService.create(
-      dto.id,
+      dto.code,
       dto.name,
       dto.description ?? '',
       dto.businessUnitId,

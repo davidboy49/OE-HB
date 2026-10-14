@@ -43,6 +43,7 @@ import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination from "@/components/ui/table-pagination";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 import CreateOePlanModal from "./create-oe-plan-modal";
 import QRCode from "qrcode";
@@ -1313,56 +1314,20 @@ export default function PlanningClient({ initialProjectsPage, users, departments
           </table>
         </div>
 
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
-          <span>
-            {totalItems === 0
-              ? "No plans found"
-              : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, totalItems)} of ${totalItems}`}
-          </span>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-slate-600 dark:text-slate-300">Rows</span>
-              <div className="w-16 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xs">
-              <MultiSelect
-                singleSelect={true}
-                compact={true}
-                selectedValues={[String(pageSize)]}
-                options={[10, 25, 50, 100].map((size) => ({
-                  value: String(size),
-                  label: String(size),
-                }))}
-                onChange={(values) => {
-                  const nextSize = Number(values[0]);
-                  if (![10, 25, 50, 100].includes(nextSize)) return;
-                  window.localStorage.setItem("oe-plans-page-size", String(nextSize));
-                  setPageSize(nextSize);
-                  setPage(1);
-                }}
-                placeholder="Rows"
-              />
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={page <= 1 || isLoadingPage}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              className="px-3 py-1.5 rounded border border-slate-200 dark:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              Previous
-            </button>
-            <span className="min-w-24 text-center">
-              Page {totalPages === 0 ? 0 : page} of {totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={page >= totalPages || isLoadingPage}
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              className="px-3 py-1.5 rounded border border-slate-200 dark:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          totalPages={totalPages}
+          disabled={isLoadingPage}
+          emptyLabel="No plans found"
+          onPageChange={setPage}
+          onPageSizeChange={(nextSize) => {
+            window.localStorage.setItem("oe-plans-page-size", String(nextSize));
+            setPageSize(nextSize);
+            setPage(1);
+          }}
+        />
 
       </div>
       </div>

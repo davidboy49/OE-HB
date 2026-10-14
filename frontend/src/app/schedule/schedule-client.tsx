@@ -35,6 +35,7 @@ import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
 import OePlanSelect from "@/components/ui/oe-plan-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
@@ -716,6 +717,7 @@ export default function ScheduleClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
+  const pagination = useClientPagination(filteredSchedules, "execution-schedules-page-size", `${searchQuery}|${projectFilter}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -799,7 +801,7 @@ export default function ScheduleClient({
                     </td>
                   </tr>
                 ) : (
-                  filteredSchedules.map((s) => (
+                  pagination.pageItems.map((s) => (
                     <tr 
                       key={s.id} 
                       onClick={() => setSelectedScheduleId(s.id === selectedScheduleId ? null : s.id)}
@@ -853,6 +855,15 @@ export default function ScheduleClient({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            emptyLabel="No schedules found"
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
         </div>
       </div>
 

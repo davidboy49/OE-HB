@@ -1,5 +1,6 @@
 export interface Department {
   id: string;
+  code: string; // Short code shown to users (e.g. "FIN"); unique within a Business Unit only
   name: string;
   description: string | null;
   businessUnitId?: string | null; // Each Business Unit has its own departments

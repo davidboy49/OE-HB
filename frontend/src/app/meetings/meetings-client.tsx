@@ -37,6 +37,7 @@ import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
@@ -701,6 +702,7 @@ export default function MeetingsClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
+  const pagination = useClientPagination(filteredSchedules, "meetings-page-size", `${searchQuery}|${projectFilter}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -784,7 +786,7 @@ export default function MeetingsClient({
                     </td>
                   </tr>
                 ) : (
-                  filteredSchedules.map((s) => (
+                  pagination.pageItems.map((s) => (
                     <tr 
                       key={s.id} 
                       onClick={() => setSelectedScheduleId(s.id === selectedScheduleId ? null : s.id)}
@@ -840,6 +842,15 @@ export default function MeetingsClient({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            emptyLabel="No meetings found"
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
         </div>
       </div>
 

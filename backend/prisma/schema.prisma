@@ -31,6 +31,7 @@ model User {
 
 model Department {
   id                 String              @id @default(uuid())
+  code               String // Short code the admin types (e.g. "FIN"); unique within a Business Unit, not globally
   name               String
   description        String?
   businessUnitId     String? // Each Business Unit has its own departments; required by the UI, nullable for legacy rows
@@ -43,6 +44,7 @@ model Department {
   updatedAt          DateTime            @updatedAt
 
   @@unique([businessUnitId, name])
+  @@unique([businessUnitId, code])
 }
 
 model BusinessUnit {
