@@ -30,10 +30,13 @@ import type {
   OpenMeeting,
   ScheduleRow,
   Department,
-  Project
+  Project,
+  PlanItem
 } from "@oeportal/shared";
 import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import SessionPrintDocument, { type SessionPrintData } from "@/components/print/session-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
@@ -311,6 +314,39 @@ export default function MeetingsClient({
   const canManage = RBAC.can(currentUser, "meetings:create") || RBAC.can(currentUser, "meetings:update") || RBAC.can(currentUser, "meetings:delete");
   const canSubmitMeeting = RBAC.can(currentUser, "meetings:submit");
   const canApproveMeeting = RBAC.can(currentUser, "meetings:approve");
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): SessionPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const project = projects.find(p => p.id === selectedProjectId);
+    const code = project?.code ?? selectedMeetingObj?.projectCode ?? "";
+    const name = project?.name ?? selectedMeetingObj?.projectName ?? "";
+    const dash = (v: string) => v || "—";
+    return {
+      kind: "Open Meeting",
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: meetingStatus === "RELEASED" ? "Released" : meetingStatus === "SUBMITTED_FOR_APPROVAL" ? "Submitted for approval" : "Draft",
+      figures: [
+        ["Visit", dash(visitNumber)],
+        ["Actual visit date", dash(actualVisitDate ? formatDateString(actualVisitDate) : "")],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Attendees", String(additionalAttendeesArray.length)],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Standards", dash(standards)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(parsePlanItems(scope, "IOE-SCP")),
+      attendees: additionalAttendeesArray.map(a => {
+        const c = attendeeConfirmations[a];
+        return { name: a, status: c ? `Confirmed ${c.confirmedAt ? formatDateString(c.confirmedAt.slice(0, 10)) : ""}${c.confirmedBy ? ` by ${c.confirmedBy}` : ""}`.trim() : "Pending" };
+      }),
+    };
+  };
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
@@ -866,7 +902,7 @@ export default function MeetingsClient({
       {/* Edit/Create Popup Modal Styled Like Word Document */}
       {isModalOpen && (
         <div id="scoping-modal-root" className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center z-50 overflow-y-auto p-4 md:p-8 animate-fade-in no-print-backdrop">
-          <div className="bg-white dark:bg-slate-955 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
+          <div className="plan-screen bg-white dark:bg-slate-955 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
             
             {/* Modal Header */}
             <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1182,6 +1218,11 @@ export default function MeetingsClient({
                 {isLocked && <span className="not-italic text-amber-600 dark:text-amber-300">This record is released and locked. Use Reopen to edit.</span>}
               </div>
             </form>
+          </div>
+
+          {/* Print-only report: what Export PDF prints instead of the editor above */}
+          <div className="plan-print-root">
+            <SessionPrintDocument data={buildPrintData()} />
           </div>
         </div>
       )}

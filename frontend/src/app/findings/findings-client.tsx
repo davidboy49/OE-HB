@@ -27,7 +27,8 @@ import type {
   Project,
   ExecutionSchedule as FindingReport,
   ScheduleRow,
-  Department
+  Department,
+  PlanItem
 } from "@oeportal/shared";
 
 interface FindingRow extends ScheduleRow {
@@ -56,6 +57,8 @@ const formatFileSize = (bytes: number) =>
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import FindingPrintDocument, { type FindingPrintData } from "@/components/print/finding-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
@@ -306,6 +309,57 @@ export default function FindingsClient({
   // on one row without full edit rights over the rest of the report (see the resolve-finding-row
   // route). Corrective Action Date/Remarks stay editor-only.
   const canResolve = RBAC.can(currentUser, "execution-schedules:resolve-finding");
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): FindingPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const scopeItems = parsePlanItems(scope, "IOE-SCP");
+    const dash = (v: string) => v || "—";
+    const code = selectedProjectObj?.code ?? linkedExecSched?.projectCode ?? activeSchedule?.projectCode ?? "";
+    const name = selectedProjectObj?.name ?? linkedExecSched?.projectName ?? activeSchedule?.projectName ?? "";
+    const statusOf = (r: FindingRow) =>
+      r.correctiveFinalUser ? "Completed" : r.correctiveFinalDate && r.correctiveFinalDate.trim() !== "" ? "In progress" : "Pending";
+    const count = (s: string) => String(rows.filter(r => statusOf(r) === s).length);
+    return {
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: findingStatus === "RELEASED" ? "Released" : "Draft",
+      figures: [
+        ["Findings", String(rows.length)],
+        ["Pending", count("Pending")],
+        ["In progress", count("In progress")],
+        ["Completed", count("Completed")],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Finding no.", dash(visitNumber)],
+        ["Actual visit date", dash(printFmt(actualVisitDate) || actualVisitDate)],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Additional attendees", dash(additionalAttendees)],
+        ["Standards", dash(standards)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(scopeItems),
+      lines: rows.map((r, i) => {
+        const matched = r.oeScope ? scopeItems.find(o => o.id === r.oeScope) : undefined;
+        return {
+          no: i + 1,
+          scope: r.oeScope ? { id: r.oeScope, text: matched?.text ?? "" } : null,
+          severity: r.time ?? "",
+          date: r.date ?? "",
+          reportedBy: r.conductBy ?? "",
+          finding: r.activity ?? "",
+          implication: r.implication ?? "",
+          recommendation: r.recommendation ?? "",
+          status: statusOf(r),
+          due: r.correctiveFinalDate ?? "",
+          attachments: (r.attachments ?? []).map(a => a.name),
+        };
+      }),
+    };
+  };
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
@@ -1052,6 +1106,7 @@ export default function FindingsClient({
 
       {/* OE Findings Report Editor Modal */}
       {isModalOpen && (
+        <>
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 overflow-y-auto p-4 no-print animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-7xl shadow-2xl flex flex-col max-h-[94vh] animate-scale-up">
             
@@ -1738,6 +1793,14 @@ export default function FindingsClient({
             </form>
           </div>
         </div>
+
+        {/* Print-only report: what Export PDF prints (the editor above is hidden in print) */}
+        <div id="scoping-modal-root">
+          <div className="plan-print-root">
+            <FindingPrintDocument data={buildPrintData()} />
+          </div>
+        </div>
+        </>
       )}
 
     </div>

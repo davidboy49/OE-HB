@@ -28,10 +28,13 @@ import type {
   Project,
   User,
   Department,
-  ScheduleRow
+  ScheduleRow,
+  PlanItem
 } from "@oeportal/shared";
 import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import SessionPrintDocument, { type SessionPrintData } from "@/components/print/session-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
@@ -313,6 +316,49 @@ export default function ScheduleClient({
   const canReopenSchedule = RBAC.can(currentUser, "execution-schedules:reopen") && RBAC.can(currentUser, "execution-schedules:update");
   // Released schedules are locked for everyone; without edit rights the form is view-only.
   const isReadOnly = isLocked || !canEditSchedule;
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): SessionPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const scopeItems = parsePlanItems(scope, "IOE-SCP");
+    const ids = (csv?: string) => (csv || "").split(",").map(x => x.trim()).filter(Boolean);
+    const code = selectedProjectObj?.code ?? selectedScheduleObj?.projectCode ?? "";
+    const name = selectedProjectObj?.name ?? selectedScheduleObj?.projectName ?? "";
+    const dash = (v: string) => v || "—";
+    return {
+      kind: "Execution Schedule",
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: scheduleStatus === "RELEASED" ? "Released" : "Draft",
+      figures: [
+        ["Visit", dash(visitNumber)],
+        ["Actual visit date", dash(actualVisitDate ? formatDateString(actualVisitDate) : "")],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Schedule rows", String(rows.length)],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Additional attendees", dash(additionalAttendees)],
+        ["Standards", dash(standards)],
+        ["Language", dash(language)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(scopeItems),
+      rowsHeading: "Execution schedule",
+      rows: rows.map(r => ({
+        day: r.day ?? "",
+        date: formatDateRange(r),
+        time: r.time ?? "",
+        scope: ids(r.oeScope).map(id => ({ id, text: scopeItems.find(o => o.id === id)?.text ?? "" })),
+        dataRequests: ids(r.dataRequest).map(id => ({ id, text: availableDataRequests.find(d => d.id === id)?.text ?? "" })),
+        activity: r.activity,
+        conductBy: r.conductBy,
+        pIncharge: r.pIncharge,
+      })),
+    };
+  };
 
   const showFeedback = (msg: string, type: "success" | "error" = "success") => {
     setFeedback(msg);
@@ -875,7 +921,7 @@ export default function ScheduleClient({
       {/* Edit/Create Popup Modal Styled Like "2. Schedule.doc" Document */}
       {isModalOpen && (
         <div id="scoping-modal-root" className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center z-50 overflow-y-auto p-4 md:p-8 animate-fade-in no-print-backdrop">
-          <div className="bg-white dark:bg-slate-950 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
+          <div className="plan-screen bg-white dark:bg-slate-950 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
             
             {/* Modal Header */}
             <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1736,6 +1782,11 @@ export default function ScheduleClient({
                 Note: The operational excellence execution schedule is subject to refinement based on real-time field risk discoveries.
               </div>
             </form>
+          </div>
+
+          {/* Print-only report: what Export PDF prints instead of the editor above */}
+          <div className="plan-print-root">
+            <SessionPrintDocument data={buildPrintData()} />
           </div>
         </div>
       )}

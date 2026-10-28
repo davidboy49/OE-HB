@@ -1,8 +1,24 @@
 "use client";
 
-import { Fragment } from "react";
 import type { PlanItem } from "@oeportal/shared";
-import RichTextView from "@/components/ui/rich-text-view";
+import {
+  MUTED,
+  LINE,
+  fmt,
+  fmtShort,
+  dash,
+  cell,
+  th,
+  Section,
+  SubHeading,
+  ItemTable,
+  Rich,
+  ReportHeader,
+  FigureRow,
+  DetailsTable,
+  PrintFooterLabel,
+  usePrintFileName,
+} from "@/components/print/print-kit";
 
 export interface PlanPrintData {
   code: string;
@@ -37,16 +53,6 @@ export interface PlanPrintData {
   approvedBy: { name: string; title: string; date: string };
 }
 
-const INK = "#1a1a1a";
-const MUTED = "#666666";
-const LINE = "#d0d0d0";
-
-const fmt = (d?: string | null) =>
-  d && !isNaN(new Date(d).getTime())
-    ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
-    : "";
-const fmtShort = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-
 // Same arithmetic as the editor so the printed dates match the screen.
 const addDays = (base: string, days: number) => {
   if (!base) return "";
@@ -56,72 +62,8 @@ const addDays = (base: string, days: number) => {
   return d.toISOString().split("T")[0];
 };
 
-const hasText = (html: string) => !!html && html.replace(/<[^>]*>/g, "").trim().length > 0;
-const dash = (v: string) => v || "—";
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section style={{ marginTop: 18 }}>
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: INK,
-          borderBottom: `1px solid ${INK}`,
-          paddingBottom: 3,
-          margin: "0 0 8px",
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 style={{ fontSize: 10.5, fontWeight: 700, margin: "10px 0 4px", color: "#1a1a1a" }}>{children}</h3>;
-}
-
-function Empty() {
-  return <p style={{ margin: 0, color: MUTED, fontStyle: "italic" }}>Not provided.</p>;
-}
-
-const cell: React.CSSProperties = { border: `0.5px solid ${LINE}`, padding: "4px 7px", verticalAlign: "top", textAlign: "left" };
-const th: React.CSSProperties = { ...cell, fontWeight: 600 };
-
-function ItemTable({ idHeader, textHeader, rows }: { idHeader: string; textHeader: string; rows: { id: string; text: string; note?: string }[] }) {
-  if (rows.length === 0) return <Empty />;
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <thead>
-        <tr>
-          <th style={{ ...th, width: "16%" }}>{idHeader}</th>
-          <th style={th}>{textHeader}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.id}>
-            <td style={{ ...cell, fontFamily: "var(--font-mono, monospace)", fontSize: 9.5 }}>{r.id}</td>
-            <td style={cell}>
-              {r.text || <span style={{ color: MUTED, fontStyle: "italic" }}>No content entered.</span>}
-              {r.note && <div style={{ color: MUTED, fontSize: 9, marginTop: 2 }}>{r.note}</div>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function Rich({ html }: { html: string }) {
-  return hasText(html) ? <RichTextView value={html} /> : <Empty />;
-}
-
 export default function PlanPrintDocument({ data }: { data: PlanPrintData }) {
+  usePrintFileName([data.code, data.name, "Individual OE Plan"]);
   const t = data.timeline;
   const findingReport = t.fieldWorkEnd ? addDays(t.fieldWorkEnd, t.findingReportOffset) : "";
   const finalReport = findingReport ? addDays(findingReport, t.finalReportOffset) : "";
@@ -177,44 +119,17 @@ export default function PlanPrintDocument({ data }: { data: PlanPrintData }) {
 
   return (
     <div className="plan-print-document" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: `2px solid ${INK}`, paddingBottom: 8 }}>
-        <div>
-          <div style={{ fontSize: 9.5, letterSpacing: "0.1em", color: MUTED, textTransform: "uppercase" }}>Operational Excellence Plan</div>
-          <div style={{ fontSize: 19, fontWeight: 600, marginTop: 2 }}>
-            {data.code} · {data.name}
-          </div>
-        </div>
-        <div style={{ textAlign: "right", fontSize: 9.5, color: MUTED }}>
-          Status: {data.statusLabel}
-          <br />
-          Printed {fmt(new Date().toISOString())}
-        </div>
-      </div>
+      <PrintFooterLabel label="Individual OE Plan" />
+      <ReportHeader
+        eyebrow="Operational Excellence Plan"
+        title={`${data.code} · ${data.name}`}
+        meta={[`Status: ${data.statusLabel}`, `Printed ${fmt(new Date().toISOString())}`]}
+      />
 
-      <div style={{ display: "flex", gap: 8, margin: "12px 0 0" }} className="print-keep">
-        {keyFigures.map(([label, value]) => (
-          <div key={label} style={{ flex: "1 1 0", border: `0.5px solid ${LINE}`, padding: "7px 10px", minWidth: 0 }}>
-            <div style={{ fontSize: 9, color: MUTED }}>{label}</div>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{value}</div>
-          </div>
-        ))}
-      </div>
+      <FigureRow figures={keyFigures} />
 
       <Section title="Plan details">
-        <table className="print-keep" style={{ width: "100%", borderCollapse: "collapse" }}>
-          <tbody>
-            {Array.from({ length: Math.ceil(details.length / 2) }, (_, i) => details.slice(i * 2, i * 2 + 2)).map((pair, i) => (
-              <tr key={i}>
-                {pair.map(([label, value]) => (
-                  <Fragment key={label}>
-                    <th style={{ ...th, width: "17%" }}>{label}</th>
-                    <td style={{ ...cell, width: "33%" }}>{value}</td>
-                  </Fragment>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DetailsTable pairs={details} />
       </Section>
 
       <Section title="I. Objectives and scope">
