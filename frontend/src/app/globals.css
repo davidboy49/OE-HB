@@ -273,6 +273,68 @@ body {
     height: auto !important;
     overflow: visible !important;
   }
+
+  /* Page setup: fixed paper size, so the output doesn't depend on the printer settings */
+  @page {
+    size: A4;
+    margin: 14mm 12mm 16mm;
+
+    @bottom-left {
+      content: "OE-HB · Individual OE Plan";
+      font-size: 8pt;
+      color: #667085;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #667085;
+    }
+  }
+
+  /* Export PDF prints the report document, not the editor */
+  html,
+  body {
+    background: #fff !important;
+  }
+  .plan-screen {
+    display: none !important;
+  }
+  .plan-print-root {
+    display: block !important;
+  }
+
+  /* Every wrapper around the report (the app shell has a tinted background and a fixed screen
+     height with hidden overflow): plain white, as tall as the content, so it prints as a
+     white page that flows over as many sheets as it needs */
+  :has(> .plan-print-root),
+  :has(.plan-print-root) {
+    background: #fff !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* Keep a heading with the content that follows it */
+  h1, h2, h3, h4 {
+    break-after: avoid;
+  }
+
+  /* Cards, chart and figures stay on one page; tables may split, but rows stay whole */
+  .print-keep,
+  tr,
+  img,
+  svg {
+    break-inside: avoid;
+  }
+
+  /* Prose shouldn't leave one or two stray lines at a page edge */
+  p,
+  li,
+  .rich-text-content {
+    orphans: 3;
+    widows: 3;
+  }
 }
 
 /* Custom rich text rendering classes */
@@ -305,4 +367,44 @@ body {
 .rich-text-content p {
   margin-top: 0.25rem !important;
   margin-bottom: 0.25rem !important;
+}
+
+/* The plan report only exists for printing */
+.plan-print-root {
+  display: none;
+}
+.plan-print-document .rich-text-view {
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.plan-print-document .rich-text-view p {
+  margin: 0 0 4px;
+}
+.plan-print-document .rich-text-view ul {
+  list-style: disc;
+  margin: 2px 0 4px 18px;
+  padding: 0;
+}
+.plan-print-document .rich-text-view ol {
+  list-style: decimal;
+  margin: 2px 0 4px 18px;
+  padding: 0;
+}
+.plan-print-document .rich-text-view li p {
+  margin: 0;
+}
+.plan-print-document .rich-text-view table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+.plan-print-document .rich-text-view th,
+.plan-print-document .rich-text-view td {
+  border: 0.5px solid #d0d0d0;
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.plan-print-document .rich-text-view th {
+  font-weight: 600;
 }

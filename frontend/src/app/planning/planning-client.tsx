@@ -41,6 +41,7 @@ import type { OePlan, User, ScheduleRow, Department, AnnualPlan, Project, PlanIt
 import { parsePlanItems, serializePlanItems, validateDateRange } from "@oeportal/shared";
 import { RBAC } from "@/lib/auth";
 import RichEditor from "@/components/ui/rich-editor";
+import PlanPrintDocument, { type PlanPrintData } from "./plan-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
 import TablePagination from "@/components/ui/table-pagination";
@@ -1157,6 +1158,49 @@ export default function PlanningClient({ initialProjectsPage, users, departments
     ? plannedEngagements?.find(ap => ap.id === selectedProject.projectId)
     : null;
 
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to names.
+  const buildPrintData = (): PlanPrintData => {
+    const userName = (idOrName: string) => users.find(u => u.id === idOrName || u.name === idOrName)?.name || idOrName;
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const annualPlan = annualPlans?.find(a => a.id === editAnnualPlanId);
+    const inherited = linkedPlannedEngagement ? filled(parsePlanItems(linkedPlannedEngagement.scope, "OE-SCP")) : [];
+    return {
+      code: selectedProject?.code ?? "",
+      name: editName,
+      statusLabel: editStatus === "CLOSED" ? "Closed" : editStatus === "PLANNING" ? "Planning" : editStatus === "SUBMITTED_FOR_APPROVAL" ? "Submitted for approval" : editStatus === "RELEASED" ? "Released" : String(editStatus),
+      businessUnit: linkedPlannedEngagement?.bu ?? "",
+      departments: editDepartmentValues,
+      leader: editLead ? userName(editLead) : "",
+      members: editMemberIds.map(userName),
+      deptPics: editDeptPicIds.map(userName),
+      annualPlan: annualPlan ? `${annualPlan.planName}${annualPlan.period ? ` (${annualPlan.period})` : ""}` : "",
+      project: linkedPlannedEngagement?.projectName || linkedPlannedEngagement?.topic || "",
+      startDate: editStart,
+      endDate: editEnd,
+      objectives: linkedPlannedEngagement ? filled(parsePlanItems(linkedPlannedEngagement.objectives, "OE-OBJ")) : [],
+      scopeItems: [
+        ...inherited.filter(i => !editScopeOverride.inactiveIds.includes(i.id)).map(item => ({ item, addedForPlan: false })),
+        ...filled(editScopeOverride.extraItems).filter(i => !editScopeOverride.inactiveIds.includes(i.id)).map(item => ({ item, addedForPlan: true })),
+      ],
+      riskProcess: editRiskProcess,
+      riskClass: editRiskClass,
+      opEx: editOpEx,
+      dataRequestItems: filled(editDataRequestItems),
+      focusArea: editFocusArea,
+      timeline: {
+        presentation: editTimelinePresDate,
+        notification: editTimelineNotificationDate,
+        fieldWorkStart: editTimelineFieldWorkStart,
+        fieldWorkEnd: editTimelineFieldWorkEnd,
+        findingReportOffset: editTimelineFindingReportOffset,
+        finalReportOffset: editTimelineFinalReportOffset,
+      },
+      outcome: editFieldwork,
+      preparedBy: { name: editPreparedByName, title: editPreparedByTitle, date: editPreparedDate },
+      approvedBy: { name: editApprovedByName, title: editApprovedByTitle, date: editApprovedDate },
+    };
+  };
+
   const statusOptions = [
     { label: "Planning", value: "PLANNING" },
     { label: "Submitted for Approval", value: "SUBMITTED_FOR_APPROVAL" },
@@ -1338,7 +1382,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
       {/* Screen-matching Modal Editor Overlay */}
       {isPopupOpen && selectedProject && (
         <div id="scoping-modal-root" className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center z-50 overflow-y-auto p-4 md:p-8 animate-fade-in">
-          <div className="bg-slate-50 dark:bg-slate-950 w-full max-w-6xl rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-800 scoping-modal-container">
+          <div className="plan-screen bg-slate-50 dark:bg-slate-950 w-full max-w-6xl rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-800 scoping-modal-container">
             
             {/* Modal Header Breadcrumb & Actions */}
             <div className="px-8 py-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2186,7 +2230,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                   return (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                        <div className="print-keep rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
                           <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Prepare</h4>
                           <div>
                             <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Planning presentation</label>
@@ -2210,7 +2254,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                           </div>
                         </div>
 
-                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                        <div className="print-keep rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
                           <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Field work</h4>
                           <div>
                             <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Start</label>
@@ -2240,7 +2284,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                           ) : null}
                         </div>
 
-                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                        <div className="print-keep rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
                           <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Reporting</h4>
                           <div>
                             <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Finding report, days after field work</label>
@@ -2273,7 +2317,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                         </div>
                       </div>
 
-                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+                      <div className="print-keep rounded-lg border border-slate-200 dark:border-slate-800 p-4 space-y-3">
                         <div className="flex items-center justify-between text-[11px] font-sans text-slate-500 dark:text-slate-400">
                           <h4 className="font-bold uppercase tracking-wider">Timeline</h4>
                           {chartSpan > 0 && (
@@ -2383,6 +2427,11 @@ export default function PlanningClient({ initialProjectsPage, users, departments
               </div>
             </div>
 
+          </div>
+
+          {/* Print-only report: what Export PDF prints instead of the editor above */}
+          <div className="plan-print-root">
+            <PlanPrintDocument data={buildPrintData()} />
           </div>
         </div>
       )}
