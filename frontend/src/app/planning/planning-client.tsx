@@ -2140,147 +2140,206 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                   V. Operational Excellence timeline
                 </h3>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Left Column: Interactive Inputs */}
-                  <div className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Planning Presentation Date</label>
-                      <input 
-                        type="date" 
-                        value={editTimelinePresDate}
-                        disabled={isReadOnly}
-                        onChange={(e) => setEditTimelinePresDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
+                {(() => {
+                  // Milestones are chained: field work end -> finding report -> final report
+                  const shortDate = (d: string | null) =>
+                    d ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : null;
+                  const daysBetween = (from: string, to: string) =>
+                    from && to ? Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) : null;
+                  const findingReportDate = getCalculatedDate(editTimelineFieldWorkEnd, editTimelineFindingReportOffset);
+                  const finalReportDate = findingReportDate
+                    ? getCalculatedDate(findingReportDate, editTimelineFinalReportOffset)
+                    : null;
+                  const fieldWorkSpan = daysBetween(editTimelineFieldWorkStart, editTimelineFieldWorkEnd);
+                  const fieldWorkEndsBeforeStart = fieldWorkSpan !== null && fieldWorkSpan < 0;
+                  const fieldWorkDays = fieldWorkSpan !== null && !fieldWorkEndsBeforeStart ? fieldWorkSpan + 1 : null;
+                  const totalDays = finalReportDate ? daysBetween(editTimelinePresDate, finalReportDate) : null;
+                  const pluralDays = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 
-                    <div className="space-y-1.5">
-                      <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Notification to Department in charge</label>
-                      <input 
-                        type="date" 
-                        value={editTimelineNotificationDate}
-                        disabled={isReadOnly}
-                        onChange={(e) => setEditTimelineNotificationDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
+                  // Chart: one row per milestone on a shared date axis (only milestones with a date)
+                  const dayLabel = (d: string) =>
+                    new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+                  const chartRows = [
+                    { key: "pres", label: "Planning presentation", start: editTimelinePresDate, end: editTimelinePresDate, color: "bg-slate-400" },
+                    { key: "notify", label: "Notify department", start: editTimelineNotificationDate, end: editTimelineNotificationDate, color: "bg-slate-400" },
+                    {
+                      key: "field",
+                      label: "Field work",
+                      start: editTimelineFieldWorkStart || editTimelineFieldWorkEnd,
+                      end: editTimelineFieldWorkEnd || editTimelineFieldWorkStart,
+                      color: "bg-blue-500",
+                    },
+                    { key: "finding", label: "Finding report", start: findingReportDate ?? "", end: findingReportDate ?? "", color: "bg-emerald-500" },
+                    { key: "final", label: "Final report", start: finalReportDate ?? "", end: finalReportDate ?? "", color: "bg-emerald-500" },
+                  ].filter((r) => r.start);
+                  const chartTimes = chartRows
+                    .flatMap((r) => [new Date(r.start).getTime(), new Date(r.end).getTime()])
+                    .filter((t) => !isNaN(t));
+                  const chartMin = chartTimes.length ? Math.min(...chartTimes) : 0;
+                  const chartMax = chartTimes.length ? Math.max(...chartTimes) : 0;
+                  const chartSpan = chartMax - chartMin;
+                  const toIso = (t: number) => new Date(t).toISOString().split("T")[0];
+                  const pct = (d: string) => ((new Date(d).getTime() - chartMin) / chartSpan) * 100;
+                  const todayTime = new Date(new Date().toISOString().split("T")[0]).getTime();
+                  const showToday = chartSpan > 0 && todayTime >= chartMin && todayTime <= chartMax;
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Field Work Start</label>
-                        <input 
-                          type="date" 
-                          value={editTimelineFieldWorkStart}
-                          disabled={isReadOnly}
-                          onChange={(e) => setEditTimelineFieldWorkStart(e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Field Work End</label>
-                        <input 
-                          type="date" 
-                          value={editTimelineFieldWorkEnd}
-                          disabled={isReadOnly}
-                          onChange={(e) => setEditTimelineFieldWorkEnd(e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Finding/Observation Offset (Days)</label>
-                        <input 
-                          type="number" 
-                          value={editTimelineFindingReportOffset}
-                          disabled={isReadOnly}
-                          onChange={(e) => setEditTimelineFindingReportOffset(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[12px] font-sans font-bold text-slate-700 dark:text-slate-300 uppercase">Final Report Offset (Days)</label>
-                        <input 
-                          type="number" 
-                          value={editTimelineFinalReportOffset}
-                          disabled={isReadOnly}
-                          onChange={(e) => setEditTimelineFinalReportOffset(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Column: Visual Timeline Stepper */}
-                  <div className="bg-slate-50 dark:bg-slate-950 rounded-lg p-5 border border-slate-100 dark:border-slate-900 space-y-4">
-                    <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-400">Timeline Milestone Preview</h4>
-                    
-                    <div className="relative pl-6 border-l-2 border-blue-500/30 dark:border-blue-900/40 space-y-6">
-                      {/* Milestone 1 */}
-                      <div className="relative">
-                        <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-blue-500 bg-white dark:bg-slate-950 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                          <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Prepare</h4>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Planning presentation</label>
+                            <input
+                              type="date"
+                              value={editTimelinePresDate}
+                              disabled={isReadOnly}
+                              onChange={(e) => setEditTimelinePresDate(e.target.value)}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Notify department in charge</label>
+                            <input
+                              type="date"
+                              value={editTimelineNotificationDate}
+                              disabled={isReadOnly}
+                              onChange={(e) => setEditTimelineNotificationDate(e.target.value)}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                            />
+                          </div>
                         </div>
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Planning Presentation Date</div>
-                        <div className="text-[11px] font-sans text-slate-500">{formatDateString(editTimelinePresDate)}</div>
+
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                          <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Field work</h4>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Start</label>
+                            <input
+                              type="date"
+                              value={editTimelineFieldWorkStart}
+                              disabled={isReadOnly}
+                              onChange={(e) => setEditTimelineFieldWorkStart(e.target.value)}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">End</label>
+                            <input
+                              type="date"
+                              value={editTimelineFieldWorkEnd}
+                              min={editTimelineFieldWorkStart || undefined}
+                              disabled={isReadOnly}
+                              onChange={(e) => setEditTimelineFieldWorkEnd(e.target.value)}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                            />
+                          </div>
+                          {fieldWorkEndsBeforeStart ? (
+                            <p className="text-[11px] text-red-600 dark:text-red-400">End is before the start date.</p>
+                          ) : fieldWorkDays !== null ? (
+                            <span className="inline-flex items-center rounded px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">{pluralDays(fieldWorkDays)}</span>
+                          ) : null}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                          <h4 className="text-[11px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Reporting</h4>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Finding report, days after field work</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                value={editTimelineFindingReportOffset}
+                                disabled={isReadOnly}
+                                onChange={(e) => setEditTimelineFindingReportOffset(parseInt(e.target.value) || 0)}
+                                className="w-20 px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                              />
+                              <span className="inline-flex items-center rounded px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">{shortDate(findingReportDate) ?? "Set field work end"}</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 mb-1">Final report, days after finding report</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                value={editTimelineFinalReportOffset}
+                                disabled={isReadOnly}
+                                onChange={(e) => setEditTimelineFinalReportOffset(parseInt(e.target.value) || 0)}
+                                className="w-20 px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                              />
+                              <span className="inline-flex items-center rounded px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">{shortDate(finalReportDate) ?? "Set field work end"}</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Milestone 2 */}
-                      <div className="relative">
-                        <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-blue-500 bg-white dark:bg-slate-950 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                        </div>
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Notification to Department in charge</div>
-                        <div className="text-[11px] font-sans text-slate-500">{formatDateString(editTimelineNotificationDate)}</div>
-                      </div>
-
-                      {/* Milestone 3 */}
-                      <div className="relative">
-                        <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-blue-500 bg-white dark:bg-slate-950 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                        </div>
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Field Work Duration</div>
-                        <div className="text-[11px] font-sans text-slate-500">
-                          {editTimelineFieldWorkStart || editTimelineFieldWorkEnd ? (
-                            `${formatDateString(editTimelineFieldWorkStart)} to ${formatDateString(editTimelineFieldWorkEnd)}`
-                          ) : (
-                            "TBD"
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+                        <div className="flex items-center justify-between text-[11px] font-sans text-slate-500 dark:text-slate-400">
+                          <h4 className="font-bold uppercase tracking-wider">Timeline</h4>
+                          {chartSpan > 0 && (
+                            <span>{shortDate(toIso(chartMin))} to {shortDate(toIso(chartMax))}</span>
                           )}
                         </div>
+                        {chartSpan > 0 ? (
+                          <div className="relative space-y-1">
+                            {chartRows.map((row) => {
+                              const left = pct(row.start);
+                              const right = pct(row.end);
+                              const isRange = row.end !== row.start;
+                              const labelText = isRange ? `${dayLabel(row.start)} - ${dayLabel(row.end)}` : dayLabel(row.start);
+                              const labelOnLeft = right > 75;
+                              return (
+                                <div key={row.key} className="flex items-center gap-3">
+                                  <span className="w-40 shrink-0 text-xs text-slate-600 dark:text-slate-300">{row.label}</span>
+                                  <div className="relative mx-2 h-7 flex-1">
+                                    <div className="absolute inset-x-0 top-1/2 border-t border-slate-100 dark:border-slate-800" />
+                                    {isRange ? (
+                                      <div
+                                        className={`absolute top-1/2 h-3 -translate-y-1/2 rounded ${row.color}`}
+                                        style={{ left: `${left}%`, width: `max(${Math.max(right - left, 0)}%, 8px)` }}
+                                      />
+                                    ) : (
+                                      <div
+                                        className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full ${row.color}`}
+                                        style={{ left: `${left}%` }}
+                                      />
+                                    )}
+                                    <span
+                                      className="absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] text-slate-500 dark:text-slate-400"
+                                      style={labelOnLeft ? { right: `calc(${100 - left}% + 14px)` } : { left: `calc(${right}% + 14px)` }}
+                                    >
+                                      {labelText}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {showToday && (
+                              <div className="pointer-events-none absolute inset-y-0" style={{ left: "calc(10rem + 0.75rem + 0.5rem)", right: "0.5rem" }}>
+                                <div
+                                  className="absolute inset-y-0 border-l border-dashed border-red-400"
+                                  style={{ left: `${((todayTime - chartMin) / chartSpan) * 100}%` }}
+                                >
+                                  <span className="absolute -top-1 left-1 text-[10px] font-semibold text-red-500">Today</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">Add at least two dates to see the timeline.</p>
+                        )}
                       </div>
 
-                      {/* Milestone 4 */}
-                      <div className="relative">
-                        <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-blue-500 bg-white dark:bg-slate-950 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                        </div>
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Finding/Observation Report Submission</div>
-                        <div className="text-[11px] font-sans text-slate-500">
-                          {formatDateString(getCalculatedDate(editTimelineFieldWorkEnd, editTimelineFindingReportOffset) || "")}
-                          <span className="text-[10px] text-slate-400 ml-1.5">({editTimelineFindingReportOffset} days after fieldwork)</span>
-                        </div>
-                      </div>
-
-                      {/* Milestone 5 */}
-                      <div className="relative">
-                        <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-blue-500 bg-white dark:bg-slate-950 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                        </div>
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">Final Report to Top Management</div>
-                        <div className="text-[11px] font-sans text-slate-500">
-                          {formatDateString(
-                            getCalculatedDate(
-                              getCalculatedDate(editTimelineFieldWorkEnd, editTimelineFindingReportOffset) || "", 
-                              editTimelineFinalReportOffset
-                            ) || ""
-                          )}
-                          <span className="text-[10px] text-slate-400 ml-1.5">({editTimelineFinalReportOffset} days after finding report)</span>
-                        </div>
+                      <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-100 dark:border-slate-800 pt-3 text-xs text-slate-500 dark:text-slate-400">
+                        <span>Field work: {fieldWorkDays !== null ? pluralDays(fieldWorkDays) : "not set"}</span>
+                        <span>
+                          Final report: {pluralDays(editTimelineFindingReportOffset + editTimelineFinalReportOffset)} after field work ends
+                        </span>
+                        <span>Whole plan: {totalDays !== null && totalDays >= 0 ? pluralDays(totalDays) : "not set"}</span>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
               {/* Panel 4: Fieldwork Strategy & Expected Outcomes */}
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4">
