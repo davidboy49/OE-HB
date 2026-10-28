@@ -119,29 +119,6 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
     router.refresh();
   };
 
-  const [simulatedAlerts, setSimulatedAlerts] = useState<Array<{ id: string; to: string; subject: string; body: string }>>([]);
-
-  useEffect(() => {
-    const handleSimulatedEmail = (e: Event) => {
-      const customEvent = e as CustomEvent<{ to: string; subject: string; body: string }>;
-      const { to, subject, body } = customEvent.detail;
-      const newAlert = {
-        id: Math.random().toString(36).substring(7),
-        to,
-        subject,
-        body
-      };
-      setSimulatedAlerts(prev => [...prev, newAlert]);
-      // Auto-remove after 8 seconds
-      setTimeout(() => {
-        setSimulatedAlerts(prev => prev.filter(a => a.id !== newAlert.id));
-      }, 8000);
-    };
-
-    window.addEventListener("send-simulated-email" as any, handleSimulatedEmail);
-    return () => window.removeEventListener("send-simulated-email" as any, handleSimulatedEmail);
-  }, []);
-
   // Initialize theme from localStorage or document class
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -361,38 +338,6 @@ export default function AppLayout({ children, currentUser: initialCurrentUser }:
         <main className="min-h-0 flex-1 overflow-y-auto p-8 bg-slate-100 dark:bg-slate-950">
           {children}
         </main>
-      </div>
-
-      {/* Global Simulated SMTP Notification Stack */}
-      <div className="fixed bottom-6 left-6 z-[100] flex flex-col gap-3 max-w-sm w-full no-print">
-        {simulatedAlerts.map((alert) => (
-          <div 
-            key={alert.id} 
-            className="bg-slate-900 border border-slate-800 text-slate-100 p-4 rounded-lg shadow-2xl animate-slide-up flex flex-col gap-1.5 relative overflow-hidden"
-          >
-            {/* Top pulsing indicator */}
-            <div className="flex items-center justify-between">
-              <div className="text-[10px] font-sans text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
-                Simulated SMTP Alert
-              </div>
-              <button 
-                onClick={() => setSimulatedAlerts(prev => prev.filter(a => a.id !== alert.id))}
-                className="text-slate-400 hover:text-white cursor-pointer transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-200">To: {alert.to}</div>
-              <div className="text-xs font-semibold text-slate-300 mt-1">{alert.subject}</div>
-              <div 
-                className="text-[10px] text-slate-450 leading-relaxed mt-1 prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: alert.body }}
-              />
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

@@ -36,6 +36,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
 import OePlanSelect from "@/components/ui/oe-plan-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
@@ -528,7 +529,7 @@ export default function ScheduleClient({
         // bubble into the catch below and be told the save "failed" when it didn't - only
         // the notification email did.
         try {
-          const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
+          await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
             "/notifications/send-email",
             {
               method: "POST",
@@ -543,11 +544,6 @@ export default function ScheduleClient({
               })
             }
           );
-          if (emailResult.success) {
-            for (const alert of emailResult.simulatedAlerts) {
-              window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-            }
-          }
         } catch (emailErr) {
           console.warn("Release succeeded, but the notification email could not be sent:", emailErr);
         }
@@ -717,7 +713,16 @@ export default function ScheduleClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
-  const pagination = useClientPagination(filteredSchedules, "execution-schedules-page-size", `${searchQuery}|${projectFilter}`);
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    version: (s) => Number(String(s.visitNumber ?? "").replace(/^V/i, "")) || 1,
+    departments: (s) => s.departments,
+    date: (s) => s.actualVisitDate,
+    leader: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "execution-schedules-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -784,13 +789,13 @@ export default function ScheduleClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">OE Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">Version #</th>
-                  <th className="px-6 py-4">Department(s)</th>
-                  <th className="px-6 py-4">Visit Date</th>
-                  <th className="px-6 py-4">Execution Leader</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Version #" sortKey="version" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department(s)" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Visit Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Execution Leader" sortKey="leader" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -1229,7 +1234,7 @@ export default function ScheduleClient({
                     <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-555 dark:text-slate-400 uppercase font-sans font-bold">
                       <tr>
                         <th className="px-4 py-3 w-14 border-r border-slate-200 dark:border-slate-800">Day</th>
-                        <th className="px-4 py-3 w-24 border-r border-slate-200 dark:border-slate-800">Date</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">Date</th>
                         <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Time</th>
                         <th className="px-4 py-3 w-64 border-r border-slate-200 dark:border-slate-800">OE Scope</th>
                         <th className="px-4 py-3 w-80 border-r border-slate-200 dark:border-slate-800">Activities/Data/Document Request</th>
@@ -1255,7 +1260,7 @@ export default function ScheduleClient({
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-700 dark:text-slate-300">
                               {row.day || ""}
                             </td>
-                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-200">
                               {formatDateRange(row)}
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-sans text-[10px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
@@ -1450,7 +1455,7 @@ export default function ScheduleClient({
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                                       Execution Date
                                     </label>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 gap-2">
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
                                         <input

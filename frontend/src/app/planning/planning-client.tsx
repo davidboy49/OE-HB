@@ -48,6 +48,7 @@ import PlanItemEditor from "@/components/ui/plan-item-editor";
 import CreateOePlanModal from "./create-oe-plan-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
+import { SortableTh, type SortState } from "@/components/ui/sortable-header";
 
 // "Which part need to focus on" used to be a list of coded items (JSON array of
 // { id, text }); it is now free text edited in a RichEditor (HTML). Converts a
@@ -112,6 +113,13 @@ export default function PlanningClient({ initialProjectsPage, users, departments
   const [projects, setProjects] = useState<OePlan[]>(initialProjectsPage.items);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectsPage.items[0]?.id || "");
   const [page, setPage] = useState(initialProjectsPage.page);
+  // The list is paged on the server, so sorting is done there too (sorting the visible page
+  // alone would be misleading). null = the server's default order (newest code first).
+  const [sort, setSort] = useState<SortState | null>(null);
+  const toggleSort = (key: string) => {
+    setSort((prev) => ({ key, direction: prev?.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+    setPage(1);
+  };
   const [totalItems, setTotalItems] = useState(initialProjectsPage.totalItems);
   const [totalPages, setTotalPages] = useState(initialProjectsPage.totalPages);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
@@ -166,6 +174,10 @@ export default function PlanningClient({ initialProjectsPage, users, departments
           search: searchQuery.trim(),
           status: statusFilter,
         });
+        if (sort) {
+          params.set("sortBy", sort.key);
+          params.set("sortDir", sort.direction);
+        }
         const result = await clientApi<PaginatedResponse<OePlan>>(`/oe-plans/page?${params}`);
         if (cancelled) return;
         setProjects(result.items);
@@ -187,7 +199,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [page, pageSize, searchQuery, statusFilter, reloadKey]);
+  }, [page, pageSize, searchQuery, statusFilter, sort, reloadKey]);
 
   // Selected project details edit state
   const selectedProject = projects.find(p => p.id === selectedProjectId);
@@ -835,12 +847,6 @@ export default function PlanningClient({ initialProjectsPage, users, departments
     }
   };
 
-  const triggerEmailAlerts = (simulatedAlerts: Array<{ to: string; subject: string; body: string }>) => {
-    for (const alert of simulatedAlerts) {
-      window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-    }
-  };
-
   /**
    * Best-effort: called after saveStatusChange has already succeeded, so a caller without
    * notifications:send shouldn't see this 403 as if the status change itself had failed -
@@ -849,7 +855,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
   const sendPlanningEmailAlert = async (status: string, details: string) => {
     if (!selectedProject) return;
     try {
-      const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
+      await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>("/notifications/send-email", {
         method: "POST",
         body: JSON.stringify({
           templateId: "planning",
@@ -857,9 +863,6 @@ export default function PlanningClient({ initialProjectsPage, users, departments
           variables: { status, details }
         })
       });
-      if (emailResult.success) {
-        triggerEmailAlerts(emailResult.simulatedAlerts);
-      }
     } catch (emailErr) {
       console.warn("Status change succeeded, but the notification email could not be sent:", emailErr);
     }
@@ -1244,12 +1247,12 @@ export default function PlanningClient({ initialProjectsPage, users, departments
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
               <tr>
-                <th className="px-6 py-4">OE Plan Code</th>
-                <th className="px-6 py-4">Project Name</th>
+                <SortableTh label="OE Plan Code" sortKey="code" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Project Name" sortKey="name" sort={sort} onSort={toggleSort} />
                 <th className="px-6 py-4">OE Leader</th>
-                <th className="px-6 py-4">Start Date</th>
-                <th className="px-6 py-4">End Date</th>
-                <th className="px-6 py-4">Status</th>
+                <SortableTh label="Start Date" sortKey="startDate" sort={sort} onSort={toggleSort} />
+                <SortableTh label="End Date" sortKey="endDate" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">

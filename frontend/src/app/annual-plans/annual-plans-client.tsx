@@ -31,6 +31,7 @@ import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
 import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 
 interface AnnualPlansClientProps {
@@ -525,8 +526,20 @@ export default function AnnualPlansClient({
       p.planName.toLowerCase().includes(query) || 
       p.period.toLowerCase().includes(query)
     );
-  }).sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
-  const pagination = useClientPagination(filteredPlans, "annual-plans-page-size", searchQuery);
+  });
+  // Default: newest year first; plans within the same year A-Z by name
+  const tableSort = useTableSort(
+    filteredPlans,
+    {
+      year: (p) => p.period,
+      name: (p) => p.planName,
+      remarks: (p) => p.comment,
+      status: (p) => p.status || "DRAFT",
+    },
+    { key: "year", direction: "desc" },
+    (a, b) => a.planName.localeCompare(b.planName, undefined, { sensitivity: "base" }),
+  );
+  const pagination = useClientPagination(tableSort.sorted, "annual-plans-page-size", `${searchQuery}|${tableSort.id}`);
 
   const periodOptions = Array.from({ length: 11 }, (_, i) => {
     const year = new Date().getFullYear() - 2 + i;
@@ -573,10 +586,10 @@ export default function AnnualPlansClient({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
               <tr>
-                <th className="px-6 py-4">Plan Name</th>
-                <th className="px-6 py-4">Year</th>
-                <th className="px-6 py-4">Remarks</th>
-                <th className="px-6 py-4">Status</th>
+                <SortableTh label="Year" sortKey="year" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Plan Name" sortKey="name" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Remarks" sortKey="remarks" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -588,6 +601,9 @@ export default function AnnualPlansClient({
                     plan.id === selectedPlanId ? "bg-slate-100/80 dark:bg-slate-800/50 font-medium" : ""
                   }`}
                 >
+                  <td className="px-6 py-4 text-slate-500">
+                    {plan.period}
+                  </td>
                   <td 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -596,9 +612,6 @@ export default function AnnualPlansClient({
                     className="px-6 py-4 text-[#0066cc] font-medium hover:underline cursor-pointer font-sans"
                   >
                     {plan.planName}
-                  </td>
-                  <td className="px-6 py-4 text-slate-500">
-                    {plan.period}
                   </td>
                   <td className="px-6 py-4 text-slate-500 truncate max-w-[250px]" title={plan.comment}>
                     {plan.comment || "-"}

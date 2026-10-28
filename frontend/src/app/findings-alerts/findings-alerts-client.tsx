@@ -182,10 +182,6 @@ export default function FindingsAlertsClient({
         body: JSON.stringify({ alertItems: [item] }),
       });
       if (res.success && res.simulatedAlerts.length > 0) {
-        // Dispatch window events so floating SMTP alert toasts pop up
-        res.simulatedAlerts.forEach(alert => {
-          window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-        });
         showFeedback(`Sent ${res.simulatedAlerts.length} email reminder(s) for NCN ${item.documentCode}.`);
       } else {
         showFeedback(`Reminder sent for NCN ${item.documentCode}.`);
@@ -206,9 +202,6 @@ export default function FindingsAlertsClient({
         body: JSON.stringify({ alertItems: activeAlertsInView, customNote: batchCustomNote }),
       });
       if (res.success && res.simulatedAlerts.length > 0) {
-        res.simulatedAlerts.forEach(alert => {
-          window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-        });
         showFeedback(`Batch email scan complete! Dispatched ${res.simulatedAlerts.length} reminder notifications.`);
       } else {
         showFeedback("Batch email reminders processed successfully.");
@@ -738,9 +731,6 @@ export default function FindingsAlertsClient({
                     body: JSON.stringify({ alertItems: counts.active > 0 ? parseFindingAlerts(schedules).filter(i => !i.isResolved) : [] }),
                   });
                   if (res.simulatedAlerts.length > 0) {
-                    res.simulatedAlerts.forEach(alert => {
-                      window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-                    });
                     showFeedback(`Immediate scan complete! Sent ${res.simulatedAlerts.length} simulated email alerts.`);
                   } else {
                     showFeedback("Immediate scan complete. No active items required alerts.");

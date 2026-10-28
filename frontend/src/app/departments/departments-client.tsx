@@ -7,13 +7,16 @@ import {
   Lock,
   X,
   Pencil,
-  Power
+  CheckCircle2,
+  XCircle
 } from "lucide-react";
 import type { User, Department, UserGroup, BusinessUnit } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 
 interface DepartmentsClientProps {
   initialUsers: User[];
@@ -59,9 +62,9 @@ export default function DepartmentsClient({
     setIsModalOpen(true);
   };
 
-  const openEditModal = () => {
-    if (!selectedDeptId) return;
-    const dept = departments.find(d => d.id === selectedDeptId);
+  const openEditModal = (id: string | null = selectedDeptId) => {
+    if (!id) return;
+    const dept = departments.find(d => d.id === id);
     if (!dept) return;
 
     setModalMode("edit");
@@ -155,6 +158,21 @@ export default function DepartmentsClient({
     return matchesSearch && matchesBu && matchesStatus;
   });
 
+  const tableSort = useTableSort(filteredDepartments, {
+    code: (d) => d.code,
+    businessUnit: (d) => d.businessUnitName,
+    description: (d) => d.description || d.name,
+    status: (d) => (d.isActive === false ? "Inactive" : "Active"),
+  });
+  const pagination = useClientPagination(
+    tableSort.sorted,
+    "departments-page-size",
+    `${searchQuery}|${buFilter}|${statusFilter}|${tableSort.id}`,
+  );
+  const selectedDept = departments.find(d => d.id === selectedDeptId);
+  // A department already in a Business Unit stays there (legacy rows with none can still be assigned)
+  const buLocked = modalMode === "edit" && !!selectedDept?.businessUnitId;
+
   const buFilterOptions = businessUnits.map(b => ({ label: b.name, value: b.id }));
   const statusFilterOptions = [
     { label: "Active", value: "ACTIVE" },
@@ -184,7 +202,9 @@ export default function DepartmentsClient({
         {/* ActionToolbar */}
         <ActionToolbar
           onCreate={canCreate ? openCreateModal : undefined}
-          onEdit={canEdit && selectedDeptId ? openEditModal : undefined}
+          onEdit={canEdit && selectedDeptId ? () => openEditModal() : undefined}
+          onToggleActive={canEdit && selectedDeptId ? handleToggleActive : undefined}
+          toggleActiveLabel={selectedDept?.isActive === false ? "Reactivate Department" : "Deactivate Department"}
           onRefresh={() => {
             setSearchQuery("");
             setBuFilter("ALL");
@@ -202,86 +222,97 @@ export default function DepartmentsClient({
           activeFilterCountLabel={activeFilterCount === 0 ? "ALL" : `${activeFilterCount} FILTERED`}
         />
 
-        {canEdit && selectedDeptId && (
-          <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
-            <button
-              type="button"
-              onClick={handleToggleActive}
-              className="flex items-center gap-1.5 text-xs font-semibold text-[#05375c] dark:text-accent hover:underline cursor-pointer"
-            >
-              <Power className="w-3.5 h-3.5" />{" "}
-              {departments.find(d => d.id === selectedDeptId)?.isActive === false ? "Reactivate Selected Department" : "Deactivate Selected Department"}
-            </button>
-          </div>
-        )}
-
         {/* Table roster */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-100 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-700 uppercase font-sans font-bold">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
               <tr>
-                <th className="px-12 py-4 w-1/5">Code</th>
-                <th className="px-12 py-4 w-1/4">Business Unit</th>
-                <th className="px-12 py-4 w-1/3">Description</th>
-                <th className="px-12 py-4 w-1/6">Status</th>
+                <SortableTh label="Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Business Unit" sortKey="businessUnit" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Description" sortKey="description" sort={tableSort.sort} onSort={tableSort.toggle} />
+                <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
-              {filteredDepartments.map((dept) => {
-                return (
-                  <tr 
-                    key={dept.id} 
-                    onClick={() => setSelectedDeptId(dept.id === selectedDeptId ? null : dept.id)}
-                    className={`hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors select-none cursor-pointer ${
-                      dept.id === selectedDeptId ? "bg-slate-100 dark:bg-slate-800/50 font-medium" : ""
-                    }`}
-                  >
-                    <td className="px-12 py-5 font-semibold text-slate-800 dark:text-slate-200">
-                      {dept.code}
-                    </td>
-                    <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
-                      {dept.businessUnitName || <span className="italic text-amber-600">Not assigned</span>}
-                    </td>
-                    <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
-                      {dept.description || dept.name}
-                    </td>
-                    <td className="px-12 py-5">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                        dept.isActive === false
-                          ? "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                      }`}>
-                        {dept.isActive === false ? "Inactive" : "Active"}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredDepartments.length === 0 && (
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {filteredDepartments.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-12 py-8 text-center text-slate-400 font-sans text-xs">
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-400 italic">
                     No departments found.
                   </td>
                 </tr>
+              ) : (
+                pagination.pageItems.map((dept) => (
+                  <tr
+                    key={dept.id}
+                    onClick={() => setSelectedDeptId(dept.id === selectedDeptId ? null : dept.id)}
+                    className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors select-none cursor-pointer ${
+                      dept.id === selectedDeptId ? "bg-slate-100/80 dark:bg-slate-800/50 font-medium" : ""
+                    }`}
+                  >
+                    <td
+                      onClick={(e) => {
+                        if (!canEdit) return;
+                        e.stopPropagation();
+                        setSelectedDeptId(dept.id);
+                        openEditModal(dept.id);
+                      }}
+                      className={`px-6 py-4.5 font-medium text-[#0066cc] ${canEdit ? "hover:underline cursor-pointer" : ""}`}
+                    >
+                      {dept.code}
+                    </td>
+                    <td className="px-6 py-4.5 text-slate-600 dark:text-slate-400">
+                      {dept.businessUnitName || <span className="italic text-amber-600">Not assigned</span>}
+                    </td>
+                    <td className="px-6 py-4.5 text-slate-700 dark:text-slate-300">
+                      {dept.description || dept.name}
+                    </td>
+                    <td className="px-6 py-4.5">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850">
+                        {dept.isActive === false ? (
+                          <>
+                            <XCircle className="w-3.5 h-3.5 text-slate-400" />
+                            Inactive
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                            Active
+                          </>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={pagination.page}
+          pageSize={pagination.pageSize}
+          totalItems={pagination.totalItems}
+          totalPages={pagination.totalPages}
+          emptyLabel="No departments found"
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+        />
 
       </div>
 
       {/* CREATE/EDIT Department Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center items-center z-50 p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-850">
-            
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800">
+
             {/* Modal Header */}
-            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
-              <h3 className="font-bold text-sm tracking-wider text-[#05375c] dark:text-accent font-sans">
-                <span className="uppercase text-xs font-sans font-bold text-slate-500 mr-1.5">CREATE NEW</span>
-                <span className="text-slate-800 dark:text-slate-100">Department</span>
-              </h3>
-              <button 
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+              <div>
+                <div className="text-[10px] font-sans text-slate-400 font-bold uppercase">Department</div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  {modalMode === "create" ? "New Department" : `Edit ${deptIdInput}`}
+                </h3>
+              </div>
+              <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
@@ -291,9 +322,9 @@ export default function DepartmentsClient({
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSaveDepartment} className="p-6 space-y-6">
-              <div className="space-y-2">
-                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">Code</label>
+            <form onSubmit={handleSaveDepartment} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Code</label>
                 <input
                   type="text"
                   required
@@ -302,47 +333,59 @@ export default function DepartmentsClient({
                   maxLength={3}
                   onChange={(e) => setDeptIdInput(e.target.value.slice(0, 3))}
                   placeholder="e.g. FIN (max 3 characters)"
-                  className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#05375c] text-slate-800 dark:text-slate-250 disabled:opacity-50"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#05375c] disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">Business Unit *</label>
-                <div className="border border-slate-200 dark:border-slate-700 rounded">
-                  <MultiSelect
-                    selectedValues={deptBuInput ? [deptBuInput] : []}
-                    onChange={(values) => setDeptBuInput(values[0] || "")}
-                    singleSelect={true}
-                    options={businessUnits.map((b) => ({ value: b.id, label: b.name, subLabel: b.description || undefined }))}
-                    placeholder="Select Business Unit..."
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Business Unit</label>
+                {buLocked ? (
+                  <div className="flex items-center gap-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-3 py-2 text-xs text-slate-800 dark:text-slate-200 opacity-60 cursor-not-allowed">
+                    <Lock className="w-3 h-3 text-slate-400" />
+                    {businessUnits.find((b) => b.id === deptBuInput)?.name || "-"}
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 dark:border-slate-700 rounded">
+                    <MultiSelect
+                      selectedValues={deptBuInput ? [deptBuInput] : []}
+                      onChange={(values) => setDeptBuInput(values[0] || "")}
+                      singleSelect={true}
+                      options={businessUnits.map((b) => ({ value: b.id, label: b.name, subLabel: b.description || undefined }))}
+                      placeholder="Select Business Unit..."
+                    />
+                  </div>
+                )}
+                {buLocked && (
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Code and Business Unit can't be changed after creation. To move a department, create it in the other Business Unit and deactivate this one.
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-lg font-semibold text-slate-800 dark:text-slate-200">Description</label>
+              <div className="space-y-1">
+                <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Description</label>
                 <input
                   type="text"
                   required
                   value={deptDescInput}
                   onChange={(e) => setDeptDescInput(e.target.value)}
                   placeholder="e.g. Finance"
-                  className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#05375c] text-slate-800 dark:text-slate-250"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#05375c]"
                 />
               </div>
 
               {/* Modal Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-6 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded cursor-pointer"
+                  className="px-4 py-2 bg-[#05375c] text-white hover:bg-[#074776] text-xs font-bold rounded cursor-pointer"
                 >
                   Save
                 </button>

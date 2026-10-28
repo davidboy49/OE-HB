@@ -38,6 +38,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
 import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
@@ -702,7 +703,15 @@ export default function MeetingsClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
-  const pagination = useClientPagination(filteredSchedules, "meetings-page-size", `${searchQuery}|${projectFilter}`);
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    departments: (s) => getDepartmentWithVersion(s.departments, s.projectId),
+    date: (s) => s.actualVisitDate,
+    facilitator: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "meetings-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -770,12 +779,12 @@ export default function MeetingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">OE Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">Department(s)</th>
-                  <th className="px-6 py-4">Meeting Date</th>
-                  <th className="px-6 py-4">Facilitator</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department(s)" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Meeting Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Facilitator" sortKey="facilitator" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">

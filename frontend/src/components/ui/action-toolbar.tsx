@@ -8,6 +8,7 @@ import {
   Trash2, 
   TrendingUp, 
   RotateCw, 
+  Power,
   SlidersHorizontal,
   Search,
   ChevronDown
@@ -49,6 +50,9 @@ interface ActionToolbarProps {
   onCopy?: () => void;
   onDelete?: () => void;
   onChartToggle?: () => void;
+  /** Activate/deactivate the selected row; `toggleActiveLabel` is its tooltip. */
+  onToggleActive?: () => void;
+  toggleActiveLabel?: string;
   onRefresh?: () => void;
   
   searchQuery?: string;
@@ -75,6 +79,8 @@ export default function ActionToolbar({
   onCopy,
   onDelete,
   onChartToggle,
+  onToggleActive,
+  toggleActiveLabel = "Deactivate",
   onRefresh,
   searchQuery,
   setSearchQuery,
@@ -150,6 +156,16 @@ export default function ActionToolbar({
             title="Toggle Charts"
           >
             <TrendingUp className="w-4 h-4" />
+          </button>
+        )}
+        {onToggleActive && (
+          <button 
+            type="button" 
+            onClick={onToggleActive}
+            className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors cursor-pointer"
+            title={toggleActiveLabel}
+          >
+            <Power className="w-4 h-4" />
           </button>
         )}
         {onRefresh && (

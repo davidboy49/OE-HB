@@ -60,6 +60,7 @@ import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
 import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import ExecScheduleSelect from "@/components/ui/exec-schedule-select";
 import { formatOePlanOption } from "@/components/ui/oe-plan-select";
 
@@ -508,7 +509,7 @@ export default function FindingsClient({
         // otherwise see this 403 bubble into the catch below and be told the save "failed"
         // when it didn't - only the notification email did.
         try {
-          const emailResult = await clientApi<{ success: boolean; simulatedAlerts: any[] }>("/notifications/send-email", {
+          await clientApi<{ success: boolean; simulatedAlerts: any[] }>("/notifications/send-email", {
             method: "POST",
             body: JSON.stringify({
               templateId: "findings",
@@ -520,11 +521,6 @@ export default function FindingsClient({
               }
             }),
           });
-          if (emailResult.success) {
-            for (const alert of emailResult.simulatedAlerts) {
-              window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-            }
-          }
         } catch (emailErr) {
           console.warn("Release succeeded, but the notification email could not be sent:", emailErr);
         }
@@ -884,7 +880,15 @@ export default function FindingsClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
-  const pagination = useClientPagination(filteredSchedules, "findings-page-size", `${searchQuery}|${projectFilter}`);
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    departments: (s) => s.departments,
+    date: (s) => s.actualVisitDate,
+    leaders: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "findings-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -967,12 +971,12 @@ export default function FindingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">OE Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">Department</th>
-                  <th className="px-6 py-4">Finding Date</th>
-                  <th className="px-6 py-4">OE Leaders</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Finding Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="OE Leaders" sortKey="leaders" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">

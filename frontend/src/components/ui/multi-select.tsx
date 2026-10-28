@@ -166,6 +166,11 @@ export default function MultiSelect({
             )}
           </span>
         ))}
+        {/* The input (which carries the placeholder) isn't rendered when disabled, so an empty
+            disabled field would collapse to its padding - show the placeholder as text instead. */}
+        {!compact && disabled && selectedValues.length === 0 && (
+          <span className="text-xs font-semibold text-slate-400">{placeholder}</span>
+        )}
         {!compact && !disabled && (
           <input
             ref={inputRef}

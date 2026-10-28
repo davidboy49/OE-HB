@@ -18,9 +18,15 @@ import type { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { Prisma } from '../generated/prisma/client';
 
+/** Columns the OE Plan list can be sorted by (a whitelist - never a raw column name from the client). */
+export const OE_PLAN_SORT_FIELDS = ['code', 'name', 'startDate', 'endDate', 'status'] as const;
+export type OePlanSortField = (typeof OE_PLAN_SORT_FIELDS)[number];
+
 interface OePlanListOptions {
   search?: string;
   status?: string;
+  sortBy?: OePlanSortField;
+  sortDir?: 'asc' | 'desc';
   skip?: number;
   take?: number;
 }
@@ -225,7 +231,10 @@ export class OePlansService {
         },
         project: true,
       },
-      orderBy: { code: 'desc' },
+      // The code is the tie-break (and the default order) so paging stays stable
+      orderBy: options.sortBy
+        ? [{ [options.sortBy]: options.sortDir ?? 'asc' }, { code: 'desc' }]
+        : { code: 'desc' },
       skip: options.skip,
       take: options.take,
       // This DB is remote (~200ms/round-trip); the default "query" strategy issues
@@ -362,12 +371,21 @@ export class OePlansService {
 
   async findPage(
     read: OePlanReadScope,
-    options: { page: number; pageSize: number; search?: string; status?: string },
+    options: {
+      page: number;
+      pageSize: number;
+      search?: string;
+      status?: string;
+      sortBy?: OePlanSortField;
+      sortDir?: 'asc' | 'desc';
+    },
   ): Promise<PaginatedResponse<OePlan>> {
     const { page, pageSize } = options;
     const listOptions = {
       search: options.search,
       status: options.status,
+      sortBy: options.sortBy,
+      sortDir: options.sortDir,
       skip: (page - 1) * pageSize,
       take: pageSize,
     };

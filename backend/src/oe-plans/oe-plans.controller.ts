@@ -11,7 +11,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { OePlansService } from './oe-plans.service';
+import {
+  OE_PLAN_SORT_FIELDS,
+  OePlanSortField,
+  OePlansService,
+} from './oe-plans.service';
 import { CreateOePlanDto } from './dto/create-oe-plan.dto';
 import { UpdateOePlanDto } from './dto/update-oe-plan.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
@@ -47,6 +51,8 @@ export class OePlansController {
     @Query('pageSize') pageSizeValue = '10',
     @Query('search') search = '',
     @Query('status') status = 'ALL',
+    @Query('sortBy') sortBy = '',
+    @Query('sortDir') sortDir = 'asc',
   ) {
     const page = Number(pageValue);
     const pageSize = Number(pageSizeValue);
@@ -67,9 +73,23 @@ export class OePlansController {
       throw new BadRequestException('status is not valid');
     }
 
+    if (sortBy && !(OE_PLAN_SORT_FIELDS as readonly string[]).includes(sortBy)) {
+      throw new BadRequestException('sortBy is not valid');
+    }
+    if (sortDir !== 'asc' && sortDir !== 'desc') {
+      throw new BadRequestException('sortDir must be asc or desc');
+    }
+
     return this.oePlansService.findPage(
       await this.accessScope.oePlanReadScope(user.sub),
-      { page, pageSize, search: search.trim(), status },
+      {
+        page,
+        pageSize,
+        search: search.trim(),
+        status,
+        sortBy: (sortBy || undefined) as OePlanSortField | undefined,
+        sortDir,
+      },
     );
   }
 

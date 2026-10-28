@@ -65,6 +65,18 @@ export class DepartmentsService {
     businessUnitId: string,
   ): Promise<Department> {
     await this.assertBusinessUnit(businessUnitId);
+    // Moving a department would rewrite the Business Unit on all of its existing projects and
+    // can collide with a same-named department in the target BU. Legacy rows with no BU yet
+    // can still be assigned one.
+    const current = await this.prisma.department.findUnique({
+      where: { id },
+      select: { businessUnitId: true },
+    });
+    if (current?.businessUnitId && current.businessUnitId !== businessUnitId) {
+      throw new BadRequestException(
+        "A department can't be moved to another Business Unit. Create it in the other Business Unit and deactivate this one.",
+      );
+    }
     try {
       const d = await this.prisma.department.update({
         where: { id },
