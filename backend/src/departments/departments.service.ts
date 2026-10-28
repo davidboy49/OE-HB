@@ -16,6 +16,7 @@ const toDto = (d: DepartmentWithBu): Department => ({
   code: d.code,
   name: d.name,
   description: d.description,
+  isActive: d.isActive,
   businessUnitId: d.businessUnitId,
   businessUnitName: d.businessUnit?.name ?? null,
 });
@@ -86,13 +87,15 @@ export class DepartmentsService {
     }
   }
 
-  async remove(id: string): Promise<boolean> {
-    await this.prisma.user.updateMany({
-      where: { departmentId: id },
-      data: { departmentId: null },
+  // Departments are deactivated, not deleted: they stay on existing users, projects and
+  // meetings, and just stop being offered for new ones.
+  async setActive(id: string, isActive: boolean): Promise<Department> {
+    const d = await this.prisma.department.update({
+      where: { id },
+      data: { isActive },
+      include: { businessUnit: true },
     });
-    await this.prisma.department.delete({ where: { id } });
-    return true;
+    return toDto(d);
   }
 
   private translate(e: unknown) {

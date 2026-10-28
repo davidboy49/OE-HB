@@ -34,6 +34,7 @@ model Department {
   code               String // Short code the admin types (e.g. "FIN"); unique within a Business Unit, not globally
   name               String
   description        String?
+  isActive           Boolean             @default(true) // Inactive departments stay on existing records but can't be picked for new ones
   businessUnitId     String? // Each Business Unit has its own departments; required by the UI, nullable for legacy rows
   businessUnit       BusinessUnit?       @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
   users              User[]

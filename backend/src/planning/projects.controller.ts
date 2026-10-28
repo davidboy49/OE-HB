@@ -82,7 +82,7 @@ export class ProjectsController {
       new Date(dto.conductDate),
       new Date(dto.endDate),
       dto.durationDay,
-      dto.purpose,
+      dto.purpose ?? '',
       dto.objectives ?? '',
       dto.scope ?? '',
     );
@@ -114,7 +114,7 @@ export class ProjectsController {
       new Date(dto.conductDate),
       new Date(dto.endDate),
       dto.durationDay,
-      dto.purpose,
+      dto.purpose ?? '',
       dto.objectives ?? '',
       dto.scope ?? '',
     );

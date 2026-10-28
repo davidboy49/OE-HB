@@ -1542,10 +1542,14 @@ export default function PlanningClient({ initialProjectsPage, users, departments
                               const target = annualPlans?.find(plan => plan.id === editAnnualPlanId);
                               if (target) filtered.push(target);
                             }
-                            return filtered.map(plan => ({
-                              value: plan.id,
-                              label: `${plan.planName} (${plan.period})`
-                            }));
+                            // Newest year first, then by name
+                            return [...filtered]
+                              .sort((a, b) => b.period.localeCompare(a.period) || a.planName.localeCompare(b.planName))
+                              .map(plan => ({
+                                value: plan.id,
+                                label: plan.planName,
+                                pill: plan.period,
+                              }));
                           })()}
                           placeholder="Select Annual OE Plan..."
                         />

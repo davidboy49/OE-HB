@@ -7,7 +7,7 @@ import {
   Lock,
   X,
   Pencil,
-  Trash2
+  Power
 } from "lucide-react";
 import type { User, Department, UserGroup, BusinessUnit } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
@@ -35,7 +35,8 @@ export default function DepartmentsClient({
 
   // Search/Filter states
   const [searchQuery, setSearchQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("ALL");
+  const [buFilter, setBuFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,7 +50,6 @@ export default function DepartmentsClient({
 
   const canCreate = RBAC.can(currentUser, "departments:create");
   const canEdit = RBAC.can(currentUser, "departments:update");
-  const canDelete = RBAC.can(currentUser, "departments:delete");
 
   const openCreateModal = () => {
     setModalMode("create");
@@ -117,24 +117,26 @@ export default function DepartmentsClient({
     }
   };
 
-  const handleDeleteDepartment = async () => {
+  const handleToggleActive = async () => {
     if (!selectedDeptId) return;
     const dept = departments.find(d => d.id === selectedDeptId);
     if (!dept) return;
 
-    const confirmDel = window.confirm(`Are you sure you want to delete department "${dept.code}"? This will unassign all users currently mapped to this department.`);
-    if (!confirmDel) return;
+    const makeActive = dept.isActive === false;
+    if (!makeActive && !window.confirm(`Deactivate department "${dept.code}"? It stays on existing records but can't be picked for new ones.`)) return;
 
     try {
-      const success = await clientApi<boolean>(`/departments/${selectedDeptId}`, { method: "DELETE" });
-      if (success) {
-        setDepartments(departments.filter(d => d.id !== selectedDeptId));
-        setSelectedDeptId(null);
-        showFeedback(`Department "${dept.code}" has been deleted.`);
+      const updated = await clientApi<Department>(`/departments/${selectedDeptId}/active`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: makeActive }),
+      });
+      if (updated) {
+        setDepartments(departments.map(d => d.id === selectedDeptId ? updated : d));
+        showFeedback(`Department "${dept.code}" ${makeActive ? "reactivated" : "deactivated"}.`);
       }
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Delete Error: ${err.message || err.toString()}`);
+      showFeedback(`Error: ${err.message || err.toString()}`);
     }
   };
 
@@ -147,15 +149,18 @@ export default function DepartmentsClient({
   const filteredDepartments = departments.filter(d => {
     const matchesSearch = d.code.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (d.description && d.description.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesSearch;
+    const matchesBu = buFilter === "ALL" || d.businessUnitId === buFilter;
+    const matchesStatus =
+      statusFilter === "ALL" || (statusFilter === "INACTIVE" ? d.isActive === false : d.isActive !== false);
+    return matchesSearch && matchesBu && matchesStatus;
   });
 
-  const roleFilterOptions = [
-    { label: "Admin", value: "ADMIN" },
-    { label: "OE Leader", value: "OE_LEADER" },
-    { label: "OE Member", value: "OE_MEMBER" },
-    { label: "Department PIC", value: "DEPT_PIC" }
+  const buFilterOptions = businessUnits.map(b => ({ label: b.name, value: b.id }));
+  const statusFilterOptions = [
+    { label: "Active", value: "ACTIVE" },
+    { label: "Inactive", value: "INACTIVE" }
   ];
+  const activeFilterCount = [buFilter, statusFilter].filter(v => v !== "ALL").length;
 
   return (
     <div className="space-y-6">
@@ -180,21 +185,35 @@ export default function DepartmentsClient({
         <ActionToolbar
           onCreate={canCreate ? openCreateModal : undefined}
           onEdit={canEdit && selectedDeptId ? openEditModal : undefined}
-          onDelete={canDelete && selectedDeptId ? handleDeleteDepartment : undefined}
           onRefresh={() => {
             setSearchQuery("");
-            setRoleFilter("ALL");
+            setBuFilter("ALL");
+            setStatusFilter("ALL");
             setSelectedDeptId(null);
           }}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          searchPlaceholder="Search users..."
-          filterLabel="Role"
-          filterValue={roleFilter}
-          setFilterValue={setRoleFilter}
-          filterOptions={roleFilterOptions}
-          activeFilterCountLabel={roleFilter === "ALL" ? "ALL" : "FILTERED"}
+          searchPlaceholder="Search departments..."
+          filterLabel="Business Unit"
+          filterValue={buFilter}
+          setFilterValue={setBuFilter}
+          filterOptions={buFilterOptions}
+          extraFilters={[{ label: "Status", value: statusFilter, setValue: setStatusFilter, options: statusFilterOptions }]}
+          activeFilterCountLabel={activeFilterCount === 0 ? "ALL" : `${activeFilterCount} FILTERED`}
         />
+
+        {canEdit && selectedDeptId && (
+          <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
+            <button
+              type="button"
+              onClick={handleToggleActive}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#05375c] dark:text-accent hover:underline cursor-pointer"
+            >
+              <Power className="w-3.5 h-3.5" />{" "}
+              {departments.find(d => d.id === selectedDeptId)?.isActive === false ? "Reactivate Selected Department" : "Deactivate Selected Department"}
+            </button>
+          </div>
+        )}
 
         {/* Table roster */}
         <div className="overflow-x-auto">
@@ -203,7 +222,8 @@ export default function DepartmentsClient({
               <tr>
                 <th className="px-12 py-4 w-1/5">Code</th>
                 <th className="px-12 py-4 w-1/4">Business Unit</th>
-                <th className="px-12 py-4 w-1/2">Description</th>
+                <th className="px-12 py-4 w-1/3">Description</th>
+                <th className="px-12 py-4 w-1/6">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
@@ -225,12 +245,21 @@ export default function DepartmentsClient({
                     <td className="px-12 py-5 text-slate-600 dark:text-slate-300">
                       {dept.description || dept.name}
                     </td>
+                    <td className="px-12 py-5">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                        dept.isActive === false
+                          ? "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                      }`}>
+                        {dept.isActive === false ? "Inactive" : "Active"}
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
               {filteredDepartments.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-12 py-8 text-center text-slate-400 font-sans text-xs">
+                  <td colSpan={4} className="px-12 py-8 text-center text-slate-400 font-sans text-xs">
                     No departments found.
                   </td>
                 </tr>
@@ -270,8 +299,9 @@ export default function DepartmentsClient({
                   required
                   disabled={modalMode === "edit"}
                   value={deptIdInput}
-                  onChange={(e) => setDeptIdInput(e.target.value)}
-                  placeholder="e.g. FIN"
+                  maxLength={3}
+                  onChange={(e) => setDeptIdInput(e.target.value.slice(0, 3))}
+                  placeholder="e.g. FIN (max 3 characters)"
                   className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#05375c] text-slate-800 dark:text-slate-250 disabled:opacity-50"
                 />
               </div>

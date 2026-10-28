@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   Patch,
@@ -12,6 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { DepartmentsService } from './departments.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
+import { SetDepartmentActiveDto } from './dto/set-department-active.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -60,14 +60,14 @@ export class DepartmentsController {
     );
   }
 
-  @Delete(':id')
-  @RequirePermission('departments:delete')
+  @Patch(':id/active')
+  @RequirePermission('departments:update')
   @UseInterceptors(ActivityLogInterceptor)
   @LogActivity((req) => ({
-    action: 'DELETE_DEPARTMENT',
-    details: `Deleted department "${req.params.id}"`,
+    action: req.body.isActive ? 'ACTIVATE_DEPARTMENT' : 'DEACTIVATE_DEPARTMENT',
+    details: `${req.body.isActive ? 'Reactivated' : 'Deactivated'} department ID: ${req.params.id}`,
   }))
-  remove(@Param('id') id: string) {
-    return this.departmentsService.remove(id);
+  setActive(@Param('id') id: string, @Body() dto: SetDepartmentActiveDto) {
+    return this.departmentsService.setActive(id, dto.isActive);
   }
 }

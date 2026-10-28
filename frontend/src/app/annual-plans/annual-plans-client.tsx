@@ -87,7 +87,7 @@ export default function AnnualPlansClient({
   const [apProjectName, setApProjectName] = useState("");
   const [apBuId, setApBuId] = useState(""); // Business Unit picked first ...
   const [apDepartmentId, setApDepartmentId] = useState(""); // ... then one of its departments
-  const [apType, setApType] = useState("OE");
+  const [apType, setApType] = useState("ISO Internal OE");
   const [apVersion, setApVersion] = useState("V1");
   const [apRevieweeIds, setApRevieweeIds] = useState<string[]>([]);
   const [apConductDate, setApConductDate] = useState("");
@@ -302,7 +302,7 @@ export default function AnnualPlansClient({
     setApProjectName("");
     setApBuId("");
     setApDepartmentId("");
-    setApType("OE");
+    setApType("ISO Internal OE");
     setApVersion("V1");
     setApRevieweeIds([]);
     setApConductDate("");
@@ -352,8 +352,8 @@ export default function AnnualPlansClient({
     const chosenDept = departments.find(d => d.id === apDepartmentId);
     const apTopic = chosenDept?.name ?? "";
     const apBu = chosenDept?.businessUnitName ?? "";
-    if (!apPurpose.trim() || apRevieweeIds.length === 0) {
-      showFeedback("Error: Purpose and Reviewee(s) are required.");
+    if (apRevieweeIds.length === 0) {
+      showFeedback("Error: Reviewee(s) are required.");
       return;
     }
     if (!apScopeItems.some((item) => item.text.trim())) {
@@ -844,7 +844,7 @@ export default function AnnualPlansClient({
                         <th className="px-4 py-3">No</th>
                         <th className="px-4 py-3">Type</th>
                         <th className="px-4 py-3">Project Name</th>
-                        <th className="px-4 py-3">Department/Topic</th>
+                        <th className="px-4 py-3">Department</th>
                         <th className="px-4 py-3">BU</th>
                         <th className="px-4 py-3">Version</th>
                         <th className="px-4 py-3">Conduct Date</th>
@@ -1024,9 +1024,8 @@ export default function AnnualPlansClient({
                       singleSelect={true}
                       disabled={!childCanEdit}
                       options={[
-                        { value: "OE", label: "OE" },
-                        { value: "ISO Internal OE", label: "ISO Internal OE" },
-                        { value: "ISO External OE", label: "ISO External OE" }
+                        { value: "ISO Internal OE", label: "ISO Internal" },
+                        { value: "ISO External OE", label: "ISO External" }
                       ]}
                       placeholder="Select Type..."
                     />
@@ -1073,7 +1072,7 @@ export default function AnnualPlansClient({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department / Project Topic *</label>
+                  <label className="text-xs font-sans font-bold uppercase text-slate-500">Department *</label>
                   <div className="border border-slate-200 dark:border-slate-800 rounded-md">
                     <MultiSelect
                       selectedValues={apDepartmentId ? [apDepartmentId] : []}
@@ -1098,7 +1097,7 @@ export default function AnnualPlansClient({
                       singleSelect={true}
                       disabled={!childCanEdit || !apBuId}
                       options={departments
-                        .filter((d) => d.businessUnitId === apBuId)
+                        .filter((d) => d.businessUnitId === apBuId && (d.isActive !== false || d.id === apDepartmentId))
                         .map((d) => ({
                           value: d.id,
                           label: d.name,
@@ -1159,7 +1158,7 @@ export default function AnnualPlansClient({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-sans font-bold uppercase text-slate-500">Purpose *</label>
+                <label className="text-xs font-sans font-bold uppercase text-slate-500">Purpose</label>
                 <textarea
                   value={apPurpose}
                   onChange={(e) => setApPurpose(e.target.value)}

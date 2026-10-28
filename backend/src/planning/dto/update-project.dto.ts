@@ -42,10 +42,10 @@ export class UpdateProjectDto {
   @Min(0)
   durationDay!: number;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  purpose!: string;
+  purpose?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

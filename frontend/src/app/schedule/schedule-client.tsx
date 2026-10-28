@@ -1168,16 +1168,33 @@ export default function ScheduleClient({
                       </tr>
 
                       {/* Row 11: OE Scope */}
-                      <tr>
+                      <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
                           OE Scope:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
-                          <PlanItemEditor 
+                          <PlanItemEditor
                             sectionTitle="OE Scope"
                             items={parsePlanItems(scope, "IOE-SCP")}
                             onChange={() => {}}
                             prefix="IOE-SCP"
+                            editable={false}
+                            hideHeader={true}
+                          />
+                        </td>
+                      </tr>
+
+                      {/* Row 12: Document Request (from the linked OE Plan) */}
+                      <tr>
+                        <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
+                          Document Request:
+                        </td>
+                        <td colSpan={3} className="px-4 py-3">
+                          <PlanItemEditor
+                            sectionTitle="Document Request"
+                            items={availableDataRequests}
+                            onChange={() => {}}
+                            prefix="OE-DRQ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1524,7 +1541,8 @@ export default function ScheduleClient({
                           </div>
 
                           {/* OE Scope and Data Request */}
-                          <div className="space-y-6 flex-1 overflow-y-auto px-2 pb-2">
+                          {/* Bottom padding leaves room for the open dropdown lists, which this scroll area would otherwise clip */}
+                          <div className="space-y-6 flex-1 overflow-y-auto px-2 pb-64">
                             {/* OE Scope Selection */}
                             <div className="space-y-1">
                               <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">OE Scope</label>

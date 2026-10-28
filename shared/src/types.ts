@@ -3,6 +3,7 @@ export interface Department {
   code: string; // Short code shown to users (e.g. "FIN"); unique within a Business Unit only
   name: string;
   description: string | null;
+  isActive?: boolean; // false = deactivated: kept on existing records, not offered for new ones
   businessUnitId?: string | null; // Each Business Unit has its own departments
   businessUnitName?: string | null;
 }

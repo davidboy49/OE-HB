@@ -7,6 +7,16 @@ interface Option {
   value: string;
   label: string;
   subLabel?: string;
+  /** Small badge shown in front of the label (e.g. a year). */
+  pill?: string;
+}
+
+function OptionPill({ text }: { text: string }) {
+  return (
+    <span className="shrink-0 px-1.5 py-0 text-[10px] font-bold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+      {text}
+    </span>
+  );
 }
 
 interface MultiSelectProps {
@@ -133,7 +143,15 @@ export default function MultiSelect({
             }`}
           >
             {isHighlighted(val) && <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0" />}
-            {options.find(o => o.value === val || o.value.toLowerCase() === val.toLowerCase())?.label || val}
+            {(() => {
+              const opt = options.find(o => o.value === val || o.value.toLowerCase() === val.toLowerCase());
+              return (
+                <>
+                  {opt?.pill && <OptionPill text={opt.pill} />}
+                  {opt?.label || val}
+                </>
+              );
+            })()}
             {!disabled && !isLocked(val) && (
               <button
                 type="button"
@@ -180,7 +198,10 @@ export default function MultiSelect({
                 onClick={() => handleSelect(opt.value)}
                 className="w-full text-left px-2.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200 flex flex-col transition-colors rounded cursor-pointer"
               >
-                <span className="font-medium text-xs text-slate-800 dark:text-slate-200">{opt.label}</span>
+                <span className="flex items-center gap-1.5 font-medium text-xs text-slate-800 dark:text-slate-200">
+                  {opt.pill && <OptionPill text={opt.pill} />}
+                  {opt.label}
+                </span>
                 {opt.subLabel && (
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{opt.subLabel}</span>
                 )}
