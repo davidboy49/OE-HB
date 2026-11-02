@@ -53,9 +53,9 @@ function Cell({ html }: { html: string }) {
 }
 
 export default function FindingPrintDocument({ data }: { data: FindingPrintData }) {
-  usePrintFileName([data.title.replace(/\s·\s/g, " - "), "OE Findings Report"]);
+  const fileName = usePrintFileName([data.title.replace(/\s·\s/g, " - "), "OE Findings Report"]);
   return (
-    <div className="plan-print-document" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
+    <div className="plan-print-document" data-file-name={fileName} data-footer-label="OE Findings Report" data-landscape="true" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
       <PrintFooterLabel label="OE Findings Report" />
       <PrintLandscape />
       <ReportHeader

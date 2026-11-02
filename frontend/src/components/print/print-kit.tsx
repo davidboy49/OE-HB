@@ -157,7 +157,7 @@ export function PrintFooterLabel({ label }: { label: string }) {
 /** "Save as PDF" suggests the page title as the file name, so while a report is mounted the title
     becomes "<parts> - <date>" for the duration of the print (Export PDF button and Ctrl+P alike),
     then goes back. Characters a file name can't hold are replaced. */
-export function usePrintFileName(parts: string[]) {
+export function usePrintFileName(parts: string[]): string {
   const name = [...parts, new Date().toISOString().slice(0, 10)]
     .filter(Boolean)
     .join(" - ")
@@ -180,6 +180,7 @@ export function usePrintFileName(parts: string[]) {
       document.title = original;
     };
   }, [name]);
+  return name;
 }
 
 /** Switches the printed page to A4 landscape for as long as the report is mounted - for reports
