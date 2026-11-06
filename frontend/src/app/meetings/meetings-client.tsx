@@ -312,6 +312,9 @@ export default function MeetingsClient({
     return isProjectMember(proj);
   };
 
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too).
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = isPlanClosedFor(selectedProjectId);
   const canManage = RBAC.can(currentUser, "meetings:create") || RBAC.can(currentUser, "meetings:update") || RBAC.can(currentUser, "meetings:delete");
   const canSubmitMeeting = RBAC.can(currentUser, "meetings:submit");
   const canApproveMeeting = RBAC.can(currentUser, "meetings:approve");
@@ -756,7 +759,7 @@ export default function MeetingsClient({
   }));
 
   const activeSchedule = schedules.find(x => x.id === selectedScheduleId);
-  const isLocked = meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL";
+  const isLocked = isPlanClosed || meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL";
 
   return (
     <div className="space-y-6">
@@ -795,7 +798,7 @@ export default function MeetingsClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -968,7 +971,7 @@ export default function MeetingsClient({
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {meetingStatus === "DRAFT" && (
+                {meetingStatus === "DRAFT" && !isPlanClosed && (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -977,7 +980,7 @@ export default function MeetingsClient({
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
                 )}
-                {meetingStatus === "DRAFT" && canSubmitMeeting && (
+                {meetingStatus === "DRAFT" && !isPlanClosed && canSubmitMeeting && (
                   <button
                     type="button"
                     onClick={handleSubmitForApproval}
@@ -986,7 +989,7 @@ export default function MeetingsClient({
                     <Send className="w-3.5 h-3.5" /> Submit for Approval
                   </button>
                 )}
-                {meetingStatus === "SUBMITTED_FOR_APPROVAL" && canApproveMeeting && (
+                {meetingStatus === "SUBMITTED_FOR_APPROVAL" && !isPlanClosed && canApproveMeeting && (
                   <>
                     <button
                       type="button"
@@ -1004,7 +1007,7 @@ export default function MeetingsClient({
                     </button>
                   </>
                 )}
-                {meetingStatus === "RELEASED" && canApproveMeeting && (
+                {meetingStatus === "RELEASED" && !isPlanClosed && canApproveMeeting && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -1216,7 +1219,9 @@ export default function MeetingsClient({
               {/* PDF Print Footer Note */}
               <div className="border-t border-slate-200 dark:border-slate-800 pt-4 text-[12px] font-roboto text-slate-400 leading-relaxed italic">
                 Note: Alignment agendas and decision minutes represent binding milestones of coordinated department.
-                {isLocked && <span className="not-italic text-amber-600 dark:text-amber-300">This record is released and locked. Use Reopen to edit.</span>}
+                {isPlanClosed ? (
+                  <span className="not-italic text-amber-600 dark:text-amber-300">The linked OE Plan is closed, so this record is read-only. Reopen the plan to edit.</span>
+                ) : isLocked && <span className="not-italic text-amber-600 dark:text-amber-300">This record is released and locked. Use Reopen to edit.</span>}
               </div>
             </form>
           </div>

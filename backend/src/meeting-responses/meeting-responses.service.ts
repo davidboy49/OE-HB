@@ -52,6 +52,8 @@ const NO_DEPARTMENT_MESSAGE =
 
 const CLOSED_MESSAGES: Record<ClosedReason, string> = {
   MEETING_NOT_RELEASED: 'This Open Meeting has not been released yet.',
+  PLAN_CLOSED:
+    'The OE Plan for this meeting is closed, so responses are read-only.',
   PLAN_NOT_RELEASED:
     'The OE Plan for this meeting is not released (it may be closed).',
   ANNUAL_PLAN_NOT_APPROVED: 'The Annual Plan for this meeting is not approved.',

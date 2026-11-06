@@ -316,7 +316,10 @@ export default function ScheduleClient({
   // Reopen goes through the update route, so it needs both keys (backend enforces the same).
   const canReopenSchedule = RBAC.can(currentUser, "execution-schedules:reopen") && RBAC.can(currentUser, "execution-schedules:update");
   // Released schedules are locked for everyone; without edit rights the form is view-only.
-  const isReadOnly = isLocked || !canEditSchedule;
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too).
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = modalMode === "edit" && isPlanClosedFor(selectedProjectId);
+  const isReadOnly = isLocked || isPlanClosed || !canEditSchedule;
 
   // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
   const buildPrintData = (): SessionPrintData => {
@@ -816,7 +819,7 @@ export default function ScheduleClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -943,7 +946,7 @@ export default function ScheduleClient({
 
               {/* Actions Header Bar */}
               <div className="flex items-center gap-2.5 shrink-0 no-print">
-                {modalMode === "edit" && canManage && !isLocked && (
+                {modalMode === "edit" && canManage && !isLocked && !isPlanClosed && (
                   <button
                     type="button"
                     onClick={handleDeleteSchedule}
@@ -968,7 +971,7 @@ export default function ScheduleClient({
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
                 )}
-                {isLocked && canReopenSchedule && (
+                {isLocked && !isPlanClosed && canReopenSchedule && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -998,6 +1001,11 @@ export default function ScheduleClient({
 
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
+              {isPlanClosed && (
+                <div className="no-print text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded px-3 py-2">
+                  The linked OE Plan is closed, so this schedule is read-only. Reopen the plan to edit.
+                </div>
+              )}
               
               {/* OE Plan selection */}
               <div className="flex flex-col md:flex-row gap-4 items-center no-print">

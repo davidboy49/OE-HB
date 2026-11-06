@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma/client';
-import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+import {
+  assertOePlanReleased,
+  assertParentOePlanNotClosed,
+} from '../common/assert-oe-plan-status';
 import {
   PlanItemsService,
   PLAN_ITEM_OWNER,
@@ -243,6 +246,7 @@ export class MeetingsService {
     data: UpdateOpenMeetingInput,
     actorName: string,
   ): Promise<any> {
+    await assertParentOePlanNotClosed(this.prisma, 'meeting', id);
     // Submitted/released meetings are locked. This used to silently send them back to DRAFT
     // (voiding the approval); now the edit is refused until someone rejects/reopens it.
     const current = await this.prisma.openMeeting.findUnique({
@@ -335,6 +339,7 @@ export class MeetingsService {
   ): Promise<any> {
     const m = await this.findOne(meetingId);
     if (!m) throw new NotFoundException('Open Meeting not found');
+    await assertParentOePlanNotClosed(this.prisma, 'meeting', meetingId);
 
     const confirmation = JSON.stringify({
       confirmedAt: new Date().toISOString(),
@@ -356,6 +361,7 @@ export class MeetingsService {
     if (!current || current.isDeleted) {
       throw new NotFoundException('Open Meeting not found');
     }
+    await assertParentOePlanNotClosed(this.prisma, 'meeting', id);
     if (!ALLOWED_MEETING_STATUS_TRANSITIONS[current.status]?.includes(status)) {
       throw new BadRequestException(
         `An Open Meeting cannot move from ${current.status} to ${status}. It must be submitted for approval, then approved by an OE Leader.`,
@@ -369,6 +375,7 @@ export class MeetingsService {
   }
 
   async remove(id: string): Promise<boolean> {
+    await assertParentOePlanNotClosed(this.prisma, 'meeting', id);
     await this.prisma.openMeeting.update({
       where: { id },
       data: { isDeleted: true },

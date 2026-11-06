@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AttachmentStorageRegistry } from './attachment-storage';
+import { assertParentOePlanNotClosed } from '../../common/assert-oe-plan-status';
 
 /** Per-file cap. Also enforced by the upload route's multer limit (FINDING_ATTACHMENT_MAX_BYTES). */
 export const FINDING_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
@@ -60,6 +61,7 @@ export class FindingAttachmentsService {
         'Attachments are only allowed on OE Findings rows.',
       );
     }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
     if (requireExistingRow && !rowIdsOf(schedule.scheduleRows).has(rowId)) {
       throw new NotFoundException('Finding row not found');
     }
@@ -122,6 +124,7 @@ export class FindingAttachmentsService {
       select: { id: true, rowId: true },
     });
     if (!att) throw new NotFoundException('Attachment not found');
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
     if (requireExistingRow) {
       const schedule = await this.prisma.executionSchedule.findUnique({
         where: { id: scheduleId },

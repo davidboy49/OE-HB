@@ -36,3 +36,31 @@ export async function assertOePlanReleased(
     );
   }
 }
+
+/**
+ * Blocks any change to a record (Open Meeting, Execution Schedule or OE Findings report) whose
+ * parent Individual OE Plan is CLOSED. Closing a plan freezes everything under it, not just new
+ * records: reopen the plan (CLOSED -> RELEASED) to make changes again. Reads stay allowed.
+ */
+export async function assertParentOePlanNotClosed(
+  prisma: PrismaService,
+  kind: 'meeting' | 'schedule',
+  id: string,
+): Promise<void> {
+  const record =
+    kind === 'meeting'
+      ? await prisma.openMeeting.findUnique({
+          where: { id },
+          select: { oePlan: { select: { status: true, isDeleted: true } } },
+        })
+      : await prisma.executionSchedule.findUnique({
+          where: { id },
+          select: { oePlan: { select: { status: true, isDeleted: true } } },
+        });
+  const plan = record?.oePlan;
+  if (plan && !plan.isDeleted && plan.status === 'CLOSED') {
+    throw new BadRequestException(
+      'This OE Plan is CLOSED, so its records are read-only. Reopen the plan to make changes.',
+    );
+  }
+}

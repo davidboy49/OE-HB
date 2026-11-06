@@ -12,7 +12,10 @@ import {
   rowIdsOf,
 } from './attachments/finding-attachments.service';
 import { Prisma } from '../generated/prisma/client';
-import { assertOePlanReleased } from '../common/assert-oe-plan-status';
+import {
+  assertOePlanReleased,
+  assertParentOePlanNotClosed,
+} from '../common/assert-oe-plan-status';
 import {
   PlanItemsService,
   PLAN_ITEM_OWNER,
@@ -397,6 +400,7 @@ export class ExecutionSchedulesService {
     if (!s || s.isDeleted) {
       throw new NotFoundException('Execution Schedule not found');
     }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
 
     await this.mergeJsonColumn(
       'departmentConsents',
@@ -439,6 +443,7 @@ export class ExecutionSchedulesService {
   ): Promise<any> {
     const s = await this.findOne(scheduleId);
     if (!s) throw new NotFoundException('Execution Schedule not found');
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
 
     await this.mergeJsonColumn(
       'attendeeConfirmations',
@@ -478,6 +483,7 @@ export class ExecutionSchedulesService {
     if (!target || target.isDeleted) {
       throw new NotFoundException('Execution Schedule not found');
     }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
 
     let rows: any[];
     try {
@@ -563,6 +569,7 @@ export class ExecutionSchedulesService {
     if (!target || target.isDeleted) {
       throw new NotFoundException('Execution Schedule not found');
     }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', id);
 
     // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
     const {
@@ -670,6 +677,7 @@ export class ExecutionSchedulesService {
    * not-found everywhere else in this service - nothing is actually removed from the database.
    */
   async remove(id: string): Promise<boolean> {
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', id);
     const { count } = await this.prisma.executionSchedule.updateMany({
       where: { id, isDeleted: false },
       data: { isDeleted: true },

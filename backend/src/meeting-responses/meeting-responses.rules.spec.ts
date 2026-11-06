@@ -43,6 +43,13 @@ describe('getResponseWindow', () => {
   it('is closed once the OE Plan is closed', () => {
     expect(getResponseWindow({ ...base, planStatus: 'CLOSED' })).toEqual({
       open: false,
+      reason: 'PLAN_CLOSED',
+    });
+  });
+
+  it('is closed while the OE Plan is not yet released', () => {
+    expect(getResponseWindow({ ...base, planStatus: 'PLANNING' })).toEqual({
+      open: false,
       reason: 'PLAN_NOT_RELEASED',
     });
   });

@@ -304,12 +304,16 @@ export default function FindingsClient({
 
   // Matches the real backend gate on the report's save route (PATCH /execution-schedules/:id),
   // not findings:create/findings:update - those govern an unrelated Finding DB model.
-  const canManage = RBAC.can(currentUser, "execution-schedules:update");
-  const canDeleteFindingRows = RBAC.can(currentUser, "execution-schedules:delete-finding-row");
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too), so the
+  // editor drops every edit/resolve right for a report under one and shows it read-only.
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = modalMode === "edit" && isPlanClosedFor(selectedProjectId);
+  const canManage = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:update");
+  const canDeleteFindingRows = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:delete-finding-row");
   // Lets a Department PIC fill in Completed Date/Corrective Action/attachments and Resolve (once)
   // on one row without full edit rights over the rest of the report (see the resolve-finding-row
   // route). Corrective Action Date/Remarks stay editor-only.
-  const canResolve = RBAC.can(currentUser, "execution-schedules:resolve-finding");
+  const canResolve = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:resolve-finding");
 
   // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
   const buildPrintData = (): FindingPrintData => {
@@ -1005,7 +1009,7 @@ export default function FindingsClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -1196,7 +1200,12 @@ export default function FindingsClient({
 
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
-              
+              {isPlanClosed && (
+                <div className="no-print text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded px-3 py-2">
+                  The linked OE Plan is closed, so this findings report is read-only. Reopen the plan to edit.
+                </div>
+              )}
+
               {/* Linked Execution Schedule strip */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3 no-print">
                 <div className="flex border border-slate-250 dark:border-slate-800 rounded-lg h-12 items-center">
@@ -1675,7 +1684,7 @@ export default function FindingsClient({
                       {rows.length === 0 ? (
                         <tr>
                           <td colSpan={(canManage || canResolve) ? 7 : 6} className="px-4 py-8 text-center text-slate-400 italic">
-                            No finding line items recorded in this report. Click "Add Finding Line" to add one.
+                            No finding line items recorded in this report.{canManage && !isLocked && ' Click "Add Finding Line" to add one.'}
                           </td>
                         </tr>
                       ) : (

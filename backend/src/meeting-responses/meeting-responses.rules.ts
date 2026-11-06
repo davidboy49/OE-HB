@@ -8,6 +8,7 @@ export type ResponseStatus = (typeof RESPONSE_STATUSES)[number];
 
 export type ClosedReason =
   | 'MEETING_NOT_RELEASED'
+  | 'PLAN_CLOSED'
   | 'PLAN_NOT_RELEASED'
   | 'ANNUAL_PLAN_NOT_APPROVED'
   | 'MEETING_DATE_PASSED';
@@ -36,6 +37,7 @@ export interface ResponseWindowInput {
 export function getResponseWindow(i: ResponseWindowInput): ResponseWindow {
   if (i.meetingStatus !== 'RELEASED')
     return { open: false, reason: 'MEETING_NOT_RELEASED' };
+  if (i.planStatus === 'CLOSED') return { open: false, reason: 'PLAN_CLOSED' };
   if (i.planStatus !== 'RELEASED')
     return { open: false, reason: 'PLAN_NOT_RELEASED' };
   if (i.annualPlanStatus != null && i.annualPlanStatus !== 'APPROVED')
