@@ -346,6 +346,7 @@ export default function ScheduleClient({
       ],
       objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
       scopeItems: filled(scopeItems),
+      documentRequests: filled(availableDataRequests),
       rowsHeading: "Execution schedule",
       rows: rows.map(r => ({
         day: r.day ?? "",

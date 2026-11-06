@@ -39,6 +39,8 @@ export interface SessionPrintData {
   details: [string, string][];
   objectives: PlanItem[];
   scopeItems: PlanItem[];
+  /** The linked OE Plan's document requests. Omit for documents that have none (Open Meeting). */
+  documentRequests?: PlanItem[];
   /** Omit for documents with no row table (Open Meeting). */
   rowsHeading?: string;
   rows?: SessionPrintRow[];
@@ -84,6 +86,12 @@ export default function SessionPrintDocument({ data }: { data: SessionPrintData 
         <SubHeading>Scope</SubHeading>
         <ItemTable idHeader="ID" textHeader="Scope" rows={data.scopeItems.map((o) => ({ id: o.id, text: o.text }))} />
       </Section>
+
+      {data.documentRequests && (
+        <Section title="Document request">
+          <ItemTable idHeader="ID" textHeader="Document request" rows={data.documentRequests.map((o) => ({ id: o.id, text: o.text }))} />
+        </Section>
+      )}
 
       {data.rows && (
       <Section title={data.rowsHeading ?? "Rows"}>
