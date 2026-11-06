@@ -82,7 +82,7 @@ html {
 }
 
 @theme inline {
-  --font-sans: "Roboto", sans-serif;
+  --font-sans: "Roboto", var(--font-khmer), sans-serif;
   --font-mono: "Fira Code", monospace;
   
   --color-background: var(--background);

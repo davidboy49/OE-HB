@@ -7,8 +7,9 @@ import { AUTH_COOKIE } from "@/lib/apiClient";
 // is excluded entirely: it's the client-side fetch proxy, not a page - redirecting
 // a fetch() call to a login HTML page would break every client component's error
 // handling, not just the QR flow. The backend's own JwtAuthGuard (401) is the real
-// auth boundary for API calls; this middleware only gates page navigation.
-const PUBLIC_PATHS = ["/login", "/api/session", "/api/backend"];
+// auth boundary for API calls; this middleware only gates page navigation. /api/pdf (server-side
+// Export PDF) checks the session itself and answers 401, for the same reason.
+const PUBLIC_PATHS = ["/login", "/api/session", "/api/backend", "/api/pdf"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

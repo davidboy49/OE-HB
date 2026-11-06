@@ -1,5 +1,11 @@
-/* "Export PDF": renders the on-page print report (.plan-print-document) straight to a PDF file and
-   downloads it, so there is no print dialog or "Save as" step. The report is captured off-screen at
+/* "Export PDF": downloads the on-page print report (.plan-print-document) as a PDF file, with no
+   print dialog or "Save as" step.
+
+   First choice is the server (POST /api/pdf): it prints the same markup and CSS with headless
+   Chrome, giving real selectable vector text exactly like Ctrl+P. If that fails (Chrome not
+   installed, server busy or down), it falls back to the client-side image PDF below.
+
+   Fallback: the report is captured off-screen at
    the same width the print layout uses, cut into A4 pages (never through a table row, a kept block
    or a heading), and stamped with the same footer as Ctrl+P (label left, "Page X of Y" right).
    Ctrl+P still works and prints real selectable text through the @media print rules. */
@@ -10,6 +16,70 @@ const SCALE = 2;
 
 let busy = false;
 
+/** Every stylesheet on the page as text, with relative url(...)s (fonts) made root-relative so they
+    still resolve once the CSS is inlined into a different document. */
+function collectCss(): string {
+  const parts: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // cross-origin sheet (none expected)
+    }
+    let text = Array.from(rules, (r) => r.cssText).join("\n");
+    if (sheet.href) {
+      const base = sheet.href;
+      text = text.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q: string, ref: string) => {
+        if (/^(data:|#|[a-z][a-z0-9+.-]*:\/\/)/i.test(ref)) return m;
+        const u = new URL(ref, base);
+        return u.origin === location.origin ? `url(${q}${u.pathname}${q})` : m;
+      });
+    }
+    parts.push(text);
+  }
+  return parts.join("\n");
+}
+
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Vector PDF from the server. Returns false when it isn't available, so the caller falls back. */
+async function exportViaServer(source: HTMLElement, fileName: string, label: string, landscape: boolean): Promise<boolean> {
+  try {
+    const res = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        html: source.outerHTML,
+        css: collectCss(),
+        label,
+        landscape,
+        fileName,
+        htmlClass: document.documentElement.className,
+        bodyClass: document.body.className,
+      }),
+    });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("application/pdf")) {
+      console.warn("Server PDF export unavailable, using the image PDF instead.", res.status);
+      return false;
+    }
+    downloadBlob(await res.blob(), `${fileName}.pdf`);
+    return true;
+  } catch (err) {
+    console.warn("Server PDF export failed, using the image PDF instead.", err);
+    return false;
+  }
+}
+
 export async function exportReportPdf(): Promise<void> {
   if (busy) return;
   const source = document.querySelector<HTMLElement>(".plan-print-root .plan-print-document");
@@ -18,6 +88,16 @@ export async function exportReportPdf(): Promise<void> {
   const previousCursor = document.body.style.cursor;
   document.body.style.cursor = "progress";
   try {
+    if (
+      await exportViaServer(
+        source,
+        source.dataset.fileName || "OE-HB report",
+        source.dataset.footerLabel ?? "",
+        source.dataset.landscape === "true",
+      )
+    ) {
+      return;
+    }
     const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas-pro"), import("jspdf")]);
 
     const landscape = source.dataset.landscape === "true";
