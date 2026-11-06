@@ -2,7 +2,20 @@
 @import "tailwindcss";
 
 html {
-  zoom: 110%;
+  --app-zoom: 1.1;
+  zoom: var(--app-zoom);
+}
+
+/* Under the page zoom a 100vh box is 110% of the window tall, so the whole page scrolled
+   (sidebar and top bar included) instead of only the content area. Size full-height boxes
+   to the real window instead. */
+@media screen {
+  .h-screen {
+    height: calc(100dvh / var(--app-zoom));
+  }
+  .min-h-screen {
+    min-height: calc(100dvh / var(--app-zoom));
+  }
 }
 
 
