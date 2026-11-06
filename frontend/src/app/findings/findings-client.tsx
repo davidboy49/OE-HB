@@ -1664,9 +1664,9 @@ export default function FindingsClient({
                       <tr className="bg-slate-50 dark:bg-slate-900 border-b border-[#0066cc] font-bold text-slate-700 dark:text-slate-200">
                         <th className="px-4 py-3 w-[5%] text-center border-r border-[#0066cc]/30">No</th>
                         <th className="px-4 py-3 w-[14%] border-r border-[#0066cc]/30">Linked OE Scope</th>
-                        <th className="px-4 py-3 w-[34%] border-r border-[#0066cc]/30">Finding & Observations</th>
-                        <th className="px-4 py-3 w-[20%] border-r border-[#0066cc]/30">Implication</th>
-                        <th className="px-4 py-3 w-[20%] border-r border-[#0066cc]/30">Recommendation</th>
+                        <th className="px-4 py-3 w-[22%] border-r border-[#0066cc]/30">Finding & Observations</th>
+                        <th className="px-4 py-3 w-[26%] border-r border-[#0066cc]/30">Implication</th>
+                        <th className="px-4 py-3 w-[26%] border-r border-[#0066cc]/30">Recommendation</th>
                         <th className="px-4 py-3 w-[7%] text-center">Status</th>
                         {(canManage || canResolve) && <th className="px-4 py-3 w-20 text-center border-l border-[#0066cc]/30 no-print">Action</th>}
                       </tr>

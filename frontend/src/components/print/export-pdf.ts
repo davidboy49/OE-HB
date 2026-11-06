@@ -31,9 +31,15 @@ export async function exportReportPdf(): Promise<void> {
     const widthPx = Math.round(contentWmm * PX_PER_MM);
     const pageHPx = contentHmm * PX_PER_MM;
 
-    // Off-screen copy at the print width, so wrapping matches the printed report.
+    // Off-screen copy at the print width, so wrapping matches the printed report. Absolute, not
+    // fixed: a fixed element is captured only as tall as the window, which cut long reports off.
     const host = document.createElement("div");
-    host.style.cssText = `position:fixed;left:-100000px;top:0;width:${widthPx}px;background:#fff;`;
+    host.style.cssText = `position:absolute;left:-100000px;top:0;width:${widthPx}px;background:#fff;`;
+    // The app zooms the page to 110% (zoom on <html>). Undo it on the copy: html2canvas lays words
+    // out at zoomed positions but draws them unzoomed, which left gaps between words and measured
+    // the report too short, cutting off its last rows.
+    const pageZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    host.style.zoom = String(1 / pageZoom);
     const clone = source.cloneNode(true) as HTMLElement;
     host.appendChild(clone);
     document.body.appendChild(host);
@@ -51,7 +57,7 @@ export async function exportReportPdf(): Promise<void> {
         ...Array.from(clone.querySelectorAll("tr, .print-keep, img, svg")).map((el) => rect(el)),
         ...Array.from(clone.querySelectorAll("h2, h3")).map((el) => rect(el, 36)),
       ];
-      const totalPx = host.scrollHeight;
+      const totalPx = Math.ceil(host.getBoundingClientRect().height);
 
       const cuts: number[] = [0];
       while (totalPx - cuts[cuts.length - 1] > pageHPx + 1) {
@@ -73,6 +79,7 @@ export async function exportReportPdf(): Promise<void> {
         scale,
         backgroundColor: "#ffffff",
         windowWidth: widthPx,
+        windowHeight: Math.max(window.innerHeight, Math.ceil(totalPx)),
         useCORS: true,
         logging: false,
       });

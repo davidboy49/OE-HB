@@ -86,9 +86,9 @@ export default function FindingPrintDocument({ data }: { data: FindingPrintData 
               <tr>
                 <th style={{ ...th, width: "5%" }}>No</th>
                 <th style={{ ...th, width: "12%" }}>Linked OE scope</th>
-                <th style={{ ...th, width: "34%" }}>Finding and observations</th>
-                <th style={{ ...th, width: "20%" }}>Implication</th>
-                <th style={{ ...th, width: "20%" }}>Recommendation</th>
+                <th style={{ ...th, width: "22%" }}>Finding and observations</th>
+                <th style={{ ...th, width: "26%" }}>Implication</th>
+                <th style={{ ...th, width: "26%" }}>Recommendation</th>
                 <th style={{ ...th, width: "9%" }}>Status</th>
               </tr>
             </thead>
