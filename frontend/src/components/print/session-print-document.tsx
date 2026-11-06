@@ -64,9 +64,9 @@ function IdText({ items, missing }: { items: { id: string; text: string }[]; mis
 }
 
 export default function SessionPrintDocument({ data }: { data: SessionPrintData }) {
-  usePrintFileName([data.title.replace(/\s·\s/g, " - "), data.kind]);
+  const fileName = usePrintFileName([data.title.replace(/\s·\s/g, " - "), data.kind]);
   return (
-    <div className="plan-print-document" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
+    <div className="plan-print-document" data-file-name={fileName} data-footer-label={data.kind} style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
       <PrintFooterLabel label={data.kind} />
       <ReportHeader
         eyebrow={data.kind}

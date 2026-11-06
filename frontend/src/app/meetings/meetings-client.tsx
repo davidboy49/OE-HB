@@ -46,6 +46,7 @@ import PlanItemEditor from "@/components/ui/plan-item-editor";
 import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
 import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import OePlanSelect, { formatOePlanOption } from "@/components/ui/oe-plan-select";
+import { exportReportPdf } from "@/components/print/export-pdf";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -962,7 +963,7 @@ export default function MeetingsClient({
               <div className="flex items-center gap-2.5 shrink-0 no-print">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void exportReportPdf()}
                   className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF

@@ -50,6 +50,7 @@ import CreateOePlanModal from "./create-oe-plan-modal";
 import QRCode from "qrcode";
 import { clientApi } from "@/lib/apiClient";
 import { SortableTh, type SortState } from "@/components/ui/sortable-header";
+import { exportReportPdf } from "@/components/print/export-pdf";
 
 // "Which part need to focus on" used to be a list of coded items (JSON array of
 // { id, text }); it is now free text edited in a RichEditor (HTML). Converts a
@@ -1427,7 +1428,7 @@ export default function PlanningClient({ initialProjectsPage, users, departments
               <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 no-print">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void exportReportPdf()}
                   className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded transition-colors cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF

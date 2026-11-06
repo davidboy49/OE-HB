@@ -63,7 +63,7 @@ const addDays = (base: string, days: number) => {
 };
 
 export default function PlanPrintDocument({ data }: { data: PlanPrintData }) {
-  usePrintFileName([data.code, data.name, "Individual OE Plan"]);
+  const fileName = usePrintFileName([data.code, data.name, "Individual OE Plan"]);
   const t = data.timeline;
   const findingReport = t.fieldWorkEnd ? addDays(t.fieldWorkEnd, t.findingReportOffset) : "";
   const finalReport = findingReport ? addDays(findingReport, t.finalReportOffset) : "";
@@ -118,7 +118,7 @@ export default function PlanPrintDocument({ data }: { data: PlanPrintData }) {
   ];
 
   return (
-    <div className="plan-print-document" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
+    <div className="plan-print-document" data-file-name={fileName} data-footer-label="Individual OE Plan" style={{ color: "#1a1a1a", fontSize: 10.5, lineHeight: 1.5, fontFamily: "var(--font-sans, Arial, sans-serif)" }}>
       <PrintFooterLabel label="Individual OE Plan" />
       <ReportHeader
         eyebrow="Operational Excellence Plan"
