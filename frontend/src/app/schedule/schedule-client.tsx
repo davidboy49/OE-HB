@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   Users, 
   Building, 
@@ -24,19 +24,27 @@ import {
 import type {
   ExecutionSchedule,
   OpenMeeting,
-  AuditProject,
+  OePlan,
+  Project,
   User,
   Department,
-  ScheduleRow
-} from "@auditdesk/shared";
-import { clientApi } from "@/lib/apiClient";
+  ScheduleRow,
+  PlanItem
+} from "@oeportal/shared";
+import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import SessionPrintDocument, { type SessionPrintData } from "@/components/print/session-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import OpenMeetingSelect from "@/components/ui/open-meeting-select";
+import OePlanSelect from "@/components/ui/oe-plan-select";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems, serializePlanItems } from "@auditdesk/shared";
+import { parsePlanItems, serializePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
+import { exportReportPdf } from "@/components/print/export-pdf";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -55,6 +63,19 @@ const formatDateString = (dateStr: string) => {
   }
   return dateStr;
 };
+
+// Formats a row's date (and, when it spans more than one day, its end date) for display
+const formatDateRange = (row: ScheduleRow) => {
+  const from = formatDateString(row.date);
+  if (!row.dateTo || row.dateTo === row.date) return from;
+  return `${from} - ${formatDateString(row.dateTo)}`;
+};
+
+// Rows saved before per-row ids existed won't have one yet - assign one client-side so every
+// row has a stable identity to work with; the next save persists it (see backend/src/
+// execution-schedules/execution-schedules.service.ts's backfillRowIds for the server-side twin).
+const withRowIds = (rows: ScheduleRow[]): ScheduleRow[] =>
+  rows.map((r) => (r.id ? r : { ...r, id: crypto.randomUUID() }));
 
 // Helpers to parse and format HTML5 time picker values
 const parseTimeRange = (timeStr: string) => {
@@ -100,18 +121,20 @@ const formatTimeRange = (from: string, to: string) => {
 
 interface ScheduleClientProps {
   initialSchedules: ExecutionSchedule[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
+  plannedEngagements?: Project[];
   currentUser: User | null;
 }
 
-export default function ScheduleClient({ 
-  initialSchedules, 
-  projects, 
-  users, 
+export default function ScheduleClient({
+  initialSchedules,
+  projects,
+  users,
   departments,
-  currentUser 
+  plannedEngagements = [],
+  currentUser
 }: ScheduleClientProps) {
   const [schedules, setSchedules] = useState<ExecutionSchedule[]>(initialSchedules.filter(s => s.language !== "finding" && s.language !== "meeting"));
   
@@ -121,6 +144,10 @@ export default function ScheduleClient({
 
   // Selection & Modal
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  // The updatedAt of the schedule as last loaded/saved; sent back as expectedUpdatedAt so the
+  // server can refuse a save if someone else changed the schedule in the meantime, instead of
+  // silently overwriting their edit (see ExecutionSchedulesService.update).
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   
@@ -129,39 +156,50 @@ export default function ScheduleClient({
   const [departmentsStr, setDepartmentsStr] = useState("");
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("1");
-  const [deptVersionInfo, setDeptVersionInfo] = useState<{ version: string; processedCount: number; isProcessed: boolean; nextVersion: string } | null>(null);
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
 
-  useEffect(() => {
-    if (selectedProjectId && departmentsStr) {
-      const params = new URLSearchParams({ projectId: selectedProjectId, department: departmentsStr });
-      if (selectedScheduleId) params.set("excludeScheduleId", selectedScheduleId);
-      clientApi<{ version: string; processedCount: number; isProcessed: boolean; nextVersion: string }>(
-        `/audit-plans/department-version?${params.toString()}`
-      )
-        .then((info) => {
-          setDeptVersionInfo(info);
-          if (modalMode === "create") {
-            setVisitNumber(info.isProcessed ? String(info.processedCount + 1) : "1");
-          }
-        })
-        .catch(console.error);
-    } else {
-      setDeptVersionInfo(null);
+  // "Version #" is the Planned Engagement's own department version (e.g. the
+  // "V2" already shown as the OE Plan Department's version elsewhere) - not a
+  // count recomputed from this project's own released execution schedules.
+  // Same department-resolution fallback as meetings-client.tsx's
+  // getDepartmentWithVersion: explicit projectId match, then annualPlanId +
+  // topic match, then a topic-only match across all Planned Engagements.
+  const resolveDepartmentVersion = (dept: string, proj: OePlan | null | undefined): string => {
+    if (!dept) return "V1";
+    const cleanDept = dept.trim().toLowerCase();
+
+    if (proj?.projectId) {
+      const ap = plannedEngagements.find(a => a.id === proj.projectId);
+      if (ap && ap.topic.toLowerCase() === cleanDept) return ap.version || "V1";
     }
-  }, [selectedProjectId, departmentsStr, modalMode, selectedScheduleId]);
-  const [auditPeriodStart, setAuditPeriodStart] = useState("");
-  const [auditPeriodEnd, setAuditPeriodEnd] = useState("");
-
-  const handleAuditPeriodStartChange = (val: string) => {
-    setAuditPeriodStart(val);
-    setAuditPeriod(val && auditPeriodEnd ? `${val} to ${auditPeriodEnd}` : val || auditPeriodEnd || "");
+    if (proj?.annualPlanId) {
+      const ap = plannedEngagements.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === cleanDept);
+      if (ap) return ap.version || "V1";
+    }
+    const ap = plannedEngagements.find(a => a.topic.toLowerCase() === cleanDept);
+    return ap?.version || "V1";
   };
 
-  const handleAuditPeriodEndChange = (val: string) => {
-    setAuditPeriodEnd(val);
-    setAuditPeriod(auditPeriodStart && val ? `${auditPeriodStart} to ${val}` : auditPeriodStart || val || "");
+  useEffect(() => {
+    if (modalMode !== "create") return;
+    if (!selectedProjectId || !departmentsStr) return;
+    const proj = projects.find(p => p.id === selectedProjectId);
+    const firstDept = departmentsStr.split(",").map(d => d.trim()).filter(Boolean)[0] || "";
+    const version = resolveDepartmentVersion(firstDept, proj);
+    setVisitNumber(version.replace(/^V/i, "") || "1");
+  }, [selectedProjectId, departmentsStr, modalMode, projects, plannedEngagements]);
+  const [oePeriodStart, setOePeriodStart] = useState("");
+  const [oePeriodEnd, setOePeriodEnd] = useState("");
+
+  const handleOePeriodStartChange = (val: string) => {
+    setOePeriodStart(val);
+    setOePeriod(val && oePeriodEnd ? `${val} to ${oePeriodEnd}` : val || oePeriodEnd || "");
+  };
+
+  const handleOePeriodEndChange = (val: string) => {
+    setOePeriodEnd(val);
+    setOePeriod(oePeriodStart && val ? `${oePeriodStart} to ${val}` : oePeriodStart || val || "");
   };
 
   const [leadExecution, setLeadExecution] = useState("");
@@ -221,32 +259,43 @@ export default function ScheduleClient({
   const additionalAttendeesArray = additionalAttendees ? additionalAttendees.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setAdditionalAttendeesArray = (vals: string[]) => setAdditionalAttendees(vals.join(", "));
 
-  // Convert departments string to array for MultiSelect component
-  const departmentsArray = departmentsStr ? departmentsStr.split(",").map(s => s.trim()).filter(Boolean) : [];
-  const setDepartmentsArray = (vals: string[]) => setDepartmentsStr(vals.join(", "));
-
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
+    subLabel: u.email ?? "",
   }));
 
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by OePlanSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
+
   const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
-  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || "", "AP-DRQ");
+  const selectedScheduleObj = schedules.find(s => s.id === selectedScheduleId);
+  // Rows store Data Request ids only. A viewer without oe-plans:view has no OE Plan to look the
+  // text up in, so fall back to the copy the schedule API carries (dataRequestItems).
+  const availableDataRequests = parsePlanItems(selectedProjectObj?.dataRequestType || selectedScheduleObj?.dataRequestItems || "", "OE-DRQ");
   const dataRequestOptions = availableDataRequests.map(d => ({
     value: d.id,
-    label: d.id,
-    subLabel: d.text
+    label: d.text || d.id,
+    subLabel: d.id
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser?.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser?.id || proj.leadAuditorId === currentUser?.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser?.name)) return true;
-    if (proj.auditorIds?.includes(currentUser?.id)) return true;
+    if (currentUser?.grants?.["oe-plans:view"] === "ALL") return true;
+    if (proj.leaderId === currentUser?.id || proj.leaderId === currentUser?.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser?.name)) return true;
+    if (proj.memberIds?.includes(currentUser?.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser?.id) || picList.includes(currentUser?.name)) return true;
     return false;
@@ -254,13 +303,67 @@ export default function ScheduleClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser?.role === "ADMIN") return true;
+    if (currentUser?.grants?.["execution-schedules:view"] === "ALL") return true;
     if (sched.ownerName === currentUser?.name || sched.lastModifiedBy === currentUser?.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);
   };
 
   const canManage = RBAC.can(currentUser, "execution-schedules:create") || RBAC.can(currentUser, "execution-schedules:update") || RBAC.can(currentUser, "execution-schedules:delete");
+  const canEditSchedule = modalMode === "create"
+    ? RBAC.can(currentUser, "execution-schedules:create")
+    : RBAC.can(currentUser, "execution-schedules:update");
+  // Reopen goes through the update route, so it needs both keys (backend enforces the same).
+  const canReopenSchedule = RBAC.can(currentUser, "execution-schedules:reopen") && RBAC.can(currentUser, "execution-schedules:update");
+  // Released schedules are locked for everyone; without edit rights the form is view-only.
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too).
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = modalMode === "edit" && isPlanClosedFor(selectedProjectId);
+  const isReadOnly = isLocked || isPlanClosed || !canEditSchedule;
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): SessionPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const scopeItems = parsePlanItems(scope, "IOE-SCP");
+    const ids = (csv?: string) => (csv || "").split(",").map(x => x.trim()).filter(Boolean);
+    const code = selectedProjectObj?.code ?? selectedScheduleObj?.projectCode ?? "";
+    const name = selectedProjectObj?.name ?? selectedScheduleObj?.projectName ?? "";
+    const dash = (v: string) => v || "—";
+    return {
+      kind: "Execution Schedule",
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: scheduleStatus === "RELEASED" ? "Released" : "Draft",
+      figures: [
+        ["Visit", dash(visitNumber)],
+        ["Actual visit date", dash(actualVisitDate ? formatDateString(actualVisitDate) : "")],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Schedule rows", String(rows.length)],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Additional attendees", dash(additionalAttendees)],
+        ["Standards", dash(standards)],
+        ["Language", dash(language)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(scopeItems),
+      documentRequests: filled(availableDataRequests),
+      rowsHeading: "Execution schedule",
+      rows: rows.map(r => ({
+        day: r.day ?? "",
+        date: formatDateRange(r),
+        time: r.time ?? "",
+        scope: ids(r.oeScope).map(id => ({ id, text: scopeItems.find(o => o.id === id)?.text ?? "" })),
+        dataRequests: ids(r.dataRequest).map(id => ({ id, text: availableDataRequests.find(d => d.id === id)?.text ?? "" })),
+        activity: r.activity,
+        conductBy: r.conductBy,
+        pIncharge: r.pIncharge,
+      })),
+    };
+  };
 
   const showFeedback = (msg: string, type: "success" | "error" = "success") => {
     setFeedback(msg);
@@ -278,10 +381,8 @@ export default function ScheduleClient({
     setDepartmentsStr(project.departments || "");
     setAddress("HB-HQ");
 
-    // Calculate OE# (integer sequence for this project)
-    const existingForProject = schedules.filter(s => s.projectId === projectId);
-    const nextOeInt = String(existingForProject.length + 1);
-    setVisitNumber(nextOeInt);
+    // Version # is resolved by the useEffect above from the linked Planned
+    // Engagement's department version, once departmentsStr updates.
 
     // "Allow to manually but auto-fill"
     const parsedStart = project.startDate ? project.startDate.split("T")[0] : "";
@@ -289,17 +390,17 @@ export default function ScheduleClient({
     
     const parsedEnd = project.endDate ? project.endDate.split("T")[0] : "";
     const period = parsedStart && parsedEnd ? `${parsedStart} to ${parsedEnd}` : parsedStart || parsedEnd || "";
-    setAuditPeriod(period);
-    setAuditPeriodStart(parsedStart);
-    setAuditPeriodEnd(parsedEnd);
+    setOePeriod(period);
+    setOePeriodStart(parsedStart);
+    setOePeriodEnd(parsedEnd);
     
-    // Auto-derive Lead Auditor from project
-    const leadUser = users.find(u => u.id === project.leadAuditorId || u.name === project.leadAuditorId);
-    const leadName = leadUser ? leadUser.name : (project.leadAuditorId || "");
+    // Auto-derive Execution Leader from project
+    const leadUser = users.find(u => u.id === project.leaderId || u.name === project.leaderId);
+    const leadName = leadUser ? leadUser.name : (project.leaderId || "");
 
-    // Auto-derive Auditors from project
-    const auditorNamesClean = project.auditorNames
-      ? project.auditorNames.split(",").map(s => {
+    // Auto-derive OE Members from project
+    const memberNamesClean = project.memberNames
+      ? project.memberNames.split(",").map(s => {
           const clean = s.trim();
           const u = users.find(user => user.name === clean || user.id === clean);
           return u ? u.name : clean;
@@ -316,11 +417,18 @@ export default function ScheduleClient({
       : "";
 
     setLeadExecution(leadName);
-    setTeamMembers(auditorNamesClean);
+    setTeamMembers(memberNamesClean);
     setAdditionalAttendees(attendeesClean);
     setStandards("Work Procedure, work instruction, and policy");
-    setObjectives(project.objectives || "");
-    setScope(project.scope || "");
+
+    // Resolve inherited objectives/scope from the linked Planned Engagement -
+    // OePlan.objectives/scope alone can be empty or stale.
+    const linkedPlannedEngagement = project.projectId
+      ? plannedEngagements.find(ap => ap.id === project.projectId)
+      : null;
+    const inherited = resolveInheritedPlanContent(project, linkedPlannedEngagement);
+    setObjectives(inherited.objectives);
+    setScope(inherited.scope);
 
     // Prepopulate empty rows
     setRows([]);
@@ -333,11 +441,10 @@ export default function ScheduleClient({
     setDepartmentsStr("");
     setAddress("HB-HQ");
     setVisitNumber("1");
-    setDeptVersionInfo(null);
     setActualVisitDate("");
-    setAuditPeriod("");
-    setAuditPeriodStart("");
-    setAuditPeriodEnd("");
+    setOePeriod("");
+    setOePeriodStart("");
+    setOePeriodEnd("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
@@ -358,14 +465,14 @@ export default function ScheduleClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
-    const parts = (sched.auditPeriod || "").split(" to ");
+    setOePeriod(sched.oePeriod);
+    const parts = (sched.oePeriod || "").split(" to ");
     if (parts.length === 2) {
-      setAuditPeriodStart(parts[0]);
-      setAuditPeriodEnd(parts[1]);
+      setOePeriodStart(parts[0]);
+      setOePeriodEnd(parts[1]);
     } else {
-      setAuditPeriodStart("");
-      setAuditPeriodEnd("");
+      setOePeriodStart("");
+      setOePeriodEnd("");
     }
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
@@ -376,12 +483,13 @@ export default function ScheduleClient({
     setScope(sched.scope);
     
     try {
-      setRows(JSON.parse(sched.scheduleRows));
+      setRows(withRowIds(JSON.parse(sched.scheduleRows)));
     } catch {
       setRows([]);
     }
 
     setScheduleStatus((sched.status as any) || "DRAFT");
+    setLoadedUpdatedAt(sched.updatedAt || null);
     setIsModalOpen(true);
   };
 
@@ -415,13 +523,18 @@ export default function ScheduleClient({
       return false;
     }
 
+    if (!additionalAttendees.trim()) {
+      showFeedback("Please add at least one additional attendee before saving.");
+      return false;
+    }
+
     const payload = {
       projectId: selectedProjectId,
       departments: departmentsStr,
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
@@ -451,35 +564,39 @@ export default function ScheduleClient({
         if (!selectedScheduleId) return false;
         const result = await clientApi<ExecutionSchedule>(`/execution-schedules/${selectedScheduleId}`, {
           method: "PATCH",
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: loadedUpdatedAt || undefined })
         });
         if (!result) return false;
         setScheduleStatus(targetStatus);
+        setLoadedUpdatedAt(result.updatedAt || null);
       }
 
       const fresh = await clientApi<ExecutionSchedule[]>("/execution-schedules");
       setSchedules(fresh.filter((s: any) => s.language !== "finding" && s.language !== "meeting"));
 
       if (targetStatus === "RELEASED") {
-        const emailResult = await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
-          "/notifications/send-email",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              templateId: "schedule",
-              projectId: payload.projectId,
-              variables: {
-                auditPeriod: payload.auditPeriod,
-                leadExecution: payload.leadExecution,
-                standards: payload.standards
-              }
-            })
-          }
-        );
-        if (emailResult.success) {
-          for (const alert of emailResult.simulatedAlerts) {
-            window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-          }
+        // Best-effort: the schedule is already released at this point (the PATCH above
+        // succeeded). A caller without notifications:send would otherwise see this 403
+        // bubble into the catch below and be told the save "failed" when it didn't - only
+        // the notification email did.
+        try {
+          await clientApi<{ success: boolean; simulatedAlerts: Array<{ to: string; subject: string; body: string }> }>(
+            "/notifications/send-email",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                templateId: "schedule",
+                projectId: payload.projectId,
+                variables: {
+                  oePeriod: payload.oePeriod,
+                  leadExecution: payload.leadExecution,
+                  standards: payload.standards
+                }
+              })
+            }
+          );
+        } catch (emailErr) {
+          console.warn("Release succeeded, but the notification email could not be sent:", emailErr);
         }
       }
 
@@ -495,7 +612,11 @@ export default function ScheduleClient({
       return true;
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Save failed: ${err.message || err.toString()}`);
+      if (err instanceof ApiError && err.status === 409) {
+        showFeedback("Someone else saved changes to this schedule first. Reload it and re-apply your edit.");
+      } else {
+        showFeedback(`Save failed: ${err.message || err.toString()}`);
+      }
       return false;
     }
   };
@@ -537,8 +658,8 @@ export default function ScheduleClient({
     if (!s) return;
 
     showConfirm(
-      "Delete Execution Schedule",
-      `Are you sure you want to delete the execution schedule for "${s.projectName}"? This action cannot be undone.`,
+      "Delete Execution Schedule & Document Request",
+      `Are you sure you want to delete the execution schedule & document request for "${s.projectName}"? This action cannot be undone.`,
       async () => {
         try {
           const success = await clientApi<boolean>(`/execution-schedules/${selectedScheduleId}`, { method: "DELETE" });
@@ -563,7 +684,7 @@ export default function ScheduleClient({
   };
 
   const addRow = () => {
-    const newRow = { day: "", date: new Date().toISOString().split('T')[0], time: "09:00 AM - 10:00 AM", auditScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
+    const newRow = { id: crypto.randomUUID(), day: "", date: new Date().toISOString().split('T')[0], dateTo: "", time: "09:00 AM - 10:00 AM", oeScope: "", activity: "", conductBy: "", pIncharge: "", dataRequest: "" };
     setRows([...rows, newRow]);
     setActiveRowIndex(rows.length);
     setDraftRow({ ...newRow });
@@ -591,11 +712,11 @@ export default function ScheduleClient({
 
   const saveDraftRow = () => {
     if (activeRowIndex !== null && draftRow) {
-      if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
-        showFeedback("Please select at least one Audit Scope for this slot.", "error");
+      if (!draftRow.oeScope || draftRow.oeScope.trim() === "") {
+        showFeedback("Please select at least one OE Scope for this slot.", "error");
         return;
       }
-      
+
       setRows(rows.map((r, idx) => idx === activeRowIndex ? draftRow : r));
       setActiveRowIndex(null);
       setDraftRow(null);
@@ -608,8 +729,9 @@ export default function ScheduleClient({
       const hasChanges = 
         original.day !== draftRow.day ||
         original.date !== draftRow.date ||
+        original.dateTo !== draftRow.dateTo ||
         original.time !== draftRow.time ||
-        original.auditScope !== draftRow.auditScope ||
+        original.oeScope !== draftRow.oeScope ||
         original.activity !== draftRow.activity ||
         original.conductBy !== draftRow.conductBy ||
         original.pIncharge !== draftRow.pIncharge ||
@@ -642,6 +764,16 @@ export default function ScheduleClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    version: (s) => Number(String(s.visitNumber ?? "").replace(/^V/i, "")) || 1,
+    departments: (s) => s.departments,
+    date: (s) => s.actualVisitDate,
+    leader: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "execution-schedules-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -687,7 +819,7 @@ export default function ScheduleClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -708,13 +840,13 @@ export default function ScheduleClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">OE Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">OE#</th>
-                  <th className="px-6 py-4">Department(s)</th>
-                  <th className="px-6 py-4">Visit Date</th>
-                  <th className="px-6 py-4">Lead Auditor</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Version #" sortKey="version" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department(s)" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Visit Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Execution Leader" sortKey="leader" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -725,7 +857,7 @@ export default function ScheduleClient({
                     </td>
                   </tr>
                 ) : (
-                  filteredSchedules.map((s) => (
+                  pagination.pageItems.map((s) => (
                     <tr 
                       key={s.id} 
                       onClick={() => setSelectedScheduleId(s.id === selectedScheduleId ? null : s.id)}
@@ -779,13 +911,22 @@ export default function ScheduleClient({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            emptyLabel="No schedules found"
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
         </div>
       </div>
 
       {/* Edit/Create Popup Modal Styled Like "2. Schedule.doc" Document */}
       {isModalOpen && (
         <div id="scoping-modal-root" className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center z-50 overflow-y-auto p-4 md:p-8 animate-fade-in no-print-backdrop">
-          <div className="bg-white dark:bg-slate-950 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
+          <div className="plan-screen bg-white dark:bg-slate-950 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
             
             {/* Modal Header */}
             <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -794,7 +935,7 @@ export default function ScheduleClient({
                   Document 2. Schedule
                 </div>
                 <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                  {modalMode === "create" ? "Link New OE Schedule" : "Edit Execution Schedule"}
+                  {modalMode === "create" ? "Link New OE Schedule" : "Edit Execution Schedule & Document Request"}
                 </h2>
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 pt-1 text-[10px] font-roboto text-slate-400 mt-1">
                   <span className="flex items-center gap-1">
@@ -805,7 +946,7 @@ export default function ScheduleClient({
 
               {/* Actions Header Bar */}
               <div className="flex items-center gap-2.5 shrink-0 no-print">
-                {modalMode === "edit" && canManage && !isLocked && (
+                {modalMode === "edit" && canManage && !isLocked && !isPlanClosed && (
                   <button
                     type="button"
                     onClick={handleDeleteSchedule}
@@ -816,12 +957,12 @@ export default function ScheduleClient({
                 )}
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void exportReportPdf()}
                   className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {!isReadOnly && (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -829,7 +970,8 @@ export default function ScheduleClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                )}
+                {isLocked && !isPlanClosed && canReopenSchedule && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -838,7 +980,7 @@ export default function ScheduleClient({
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
                 )}
-                {!isLocked && (
+                {!isReadOnly && (
                   <button
                     type="button"
                     onClick={handleReleaseSchedule}
@@ -858,25 +1000,28 @@ export default function ScheduleClient({
             </div>
 
             {/* Modal Scrollable Body */}
-            <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
+            <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
+              {isPlanClosed && (
+                <div className="no-print text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded px-3 py-2">
+                  The linked OE Plan is closed, so this schedule is read-only. Reopen the plan to edit.
+                </div>
+              )}
               
-              {/* Audit Plan selection */}
+              {/* OE Plan selection */}
               <div className="flex flex-col md:flex-row gap-4 items-center no-print">
                 <div className="flex-1 min-w-[200px]">
                   <label className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">OE Plan</label>
-                  <select
-                    disabled={isLocked || modalMode === "edit"}
-                    value={selectedProjectId}
-                    onChange={(e) => handleProjectSelect(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm rounded-md px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-accent font-sans"
-                  >
-                    <option value="">Select OE Plan...</option>
-                    {projects
-                      .filter(p => !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))
-                      .map(p => (
-                        <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                    ))}
-                  </select>
+                  <div className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-md">
+                    <OePlanSelect
+                      disabled={isLocked || modalMode === "edit"}
+                      projects={projects.filter(p => p.status === "RELEASED" && !schedules.some(s => s.projectId === p.id && s.id !== selectedScheduleId))}
+                      selectedProjectId={selectedProjectId}
+                      onSelect={handleProjectSelect}
+                      placeholder="Select OE Plan..."
+                      linkedProjectsById={linkedProjectsById}
+                      departmentsById={departmentsById}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -885,13 +1030,23 @@ export default function ScheduleClient({
                 <div className="overflow-x-auto border border-slate-350 dark:border-slate-800 rounded-md">
                   <table className="w-full border-collapse text-xs">
                     <tbody>
-                      {/* Row 1: Departments */}
+                      {/* Row 1: Project name */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Department:
+                          Project name:
                         </td>
                         <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
-                          {departmentsStr || <span className="text-slate-400 font-normal italic">Select an Audit Plan to auto-derive department</span>}
+                          {selectedProjectObj?.name || selectedScheduleObj?.projectName || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive project name</span>}
+                        </td>
+                      </tr>
+
+                      {/* Row: Department(s) - derived from the linked OE Plan, read-only */}
+                      <tr className="border-b border-slate-300 dark:border-slate-800/80">
+                        <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
+                          Department(s):
+                        </td>
+                        <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
+                          {departmentsStr || <span className="text-slate-400 font-normal italic">Select an OE Plan to auto-derive department(s)</span>}
                         </td>
                       </tr>
 
@@ -901,7 +1056,8 @@ export default function ScheduleClient({
                           Address:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="text" 
                             value={address}
                             onChange={(e) => setAddress(e.target.value)}
@@ -914,25 +1070,19 @@ export default function ScheduleClient({
                       {/* Row 3: Visit Number + Actual Visit Date */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          OE#:
+                          Version #:
                         </td>
                         <td className="w-1/4 px-4 py-2 border-r border-slate-300 dark:border-slate-800/80">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <input 
-                              type="number"
-                              min="1"
-                              value={visitNumber ? visitNumber.replace(/^V/i, "") : "1"}
-                              onChange={(e) => setVisitNumber(e.target.value)}
-                              placeholder="1"
-                              className="w-16 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold focus:outline-none text-slate-800 dark:text-slate-100"
-                            />
-                          </div>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded font-mono font-bold text-xs bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300/80 dark:border-slate-700">
+                            {visitNumber ? `V${visitNumber.replace(/^V/i, "")}` : "V1"}
+                          </span>
                         </td>
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
                           Actual Visit Date:
                         </td>
                         <td className="w-1/4 px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="date"
                             value={actualVisitDate}
                             onChange={(e) => setActualVisitDate(e.target.value)}
@@ -941,41 +1091,45 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
-                      {/* Row 4: Audit Period */}
+                      {/* Row 4: Review Period */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Audit Period:
+                          Review Period:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <div className="flex items-center gap-2 max-w-sm">
-                            <input 
+                            <input
+                              disabled={isReadOnly}
                               type="date"
-                              value={auditPeriodStart}
-                              onChange={(e) => handleAuditPeriodStartChange(e.target.value)}
+                              value={oePeriodStart}
+                              onChange={(e) => handleOePeriodStartChange(e.target.value)}
                               className="w-1/2 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
                             />
                             <span className="text-slate-400 font-bold text-xs">to</span>
-                            <input 
+                            <input
+                              disabled={isReadOnly}
                               type="date"
-                              value={auditPeriodEnd}
-                              onChange={(e) => handleAuditPeriodEndChange(e.target.value)}
+                              value={oePeriodEnd}
+                              onChange={(e) => handleOePeriodEndChange(e.target.value)}
                               className="w-1/2 bg-slate-100/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
                             />
                           </div>
                         </td>
                       </tr>
 
-                      {/* Row 5: Lead Execution */}
+                      {/* Row 5: Execution Leader */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Lead Auditor(s):
+                          Execution Leader(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={true}
                           />
                         </td>
@@ -984,14 +1138,16 @@ export default function ScheduleClient({
                       {/* Row 6: Team Member(s) */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          Auditor(s):
+                          Team Member(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1000,14 +1156,16 @@ export default function ScheduleClient({
                       {/* Row 7: Additional Attendees and Roles */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 leading-normal">
-                          Additional Attendees and Roles:
+                          Additional Attendees and Roles *:
                         </td>
                         <td colSpan={3} className="px-4 py-2.5">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             selectedValues={additionalAttendeesArray}
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
-                            placeholder="Type to search system users or press Enter for custom names..."
+                            placeholder="Search system users..."
                             singleSelect={false}
                           />
                         </td>
@@ -1019,7 +1177,8 @@ export default function ScheduleClient({
                           Standard(s):
                         </td>
                         <td colSpan={3} className="px-4 py-2">
-                          <input 
+                          <input
+                            disabled={isReadOnly}
                             type="text" 
                             value={standards}
                             onChange={(e) => setStandards(e.target.value)}
@@ -1028,13 +1187,15 @@ export default function ScheduleClient({
                         </td>
                       </tr>
 
-                      {/* Row 9: OE Language */}
+                      {/* Row 9: Report Language */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
-                          OE Language:
+                          Report Language:
                         </td>
                         <td colSpan={3} className="px-4 py-2">
                           <MultiSelect
+                            disabled={isReadOnly}
+                            plainWhenDisabled
                             options={[
                               { value: "Khmer", label: "Khmer" },
                               { value: "English", label: "English" },
@@ -1058,9 +1219,9 @@ export default function ScheduleClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="OE Objectives"
-                            items={parsePlanItems(objectives, "IAP-OBJ")}
+                            items={parsePlanItems(objectives, "IOE-OBJ")}
                             onChange={() => {}}
-                            prefix="IAP-OBJ"
+                            prefix="IOE-OBJ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1068,16 +1229,33 @@ export default function ScheduleClient({
                       </tr>
 
                       {/* Row 11: OE Scope */}
-                      <tr>
+                      <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
                           OE Scope:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
-                          <PlanItemEditor 
-                            sectionTitle="OPE Scope"
-                            items={parsePlanItems(scope, "IAP-ISCP")}
+                          <PlanItemEditor
+                            sectionTitle="OE Scope"
+                            items={parsePlanItems(scope, "IOE-SCP")}
                             onChange={() => {}}
-                            prefix="IAP-ISCP"
+                            prefix="IOE-SCP"
+                            editable={false}
+                            hideHeader={true}
+                          />
+                        </td>
+                      </tr>
+
+                      {/* Row 12: Document Request (from the linked OE Plan) */}
+                      <tr>
+                        <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
+                          Document Request:
+                        </td>
+                        <td colSpan={3} className="px-4 py-3">
+                          <PlanItemEditor
+                            sectionTitle="Document Request"
+                            items={availableDataRequests}
+                            onChange={() => {}}
+                            prefix="OE-DRQ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1095,41 +1273,42 @@ export default function ScheduleClient({
                   <h3 className="text-xs font-sans font-bold uppercase tracking-wider text-[#05375c] dark:text-accent">
                     Execution Schedule Rows
                   </h3>
-                  <button
-                    type="button"
-                    onClick={addRow}
-                    className="flex items-center gap-1 px-3 py-1 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/20 text-[#0066cc] dark:text-sky-400 text-xs font-semibold rounded cursor-pointer no-print"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add Day/Slot
-                  </button>
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={addRow}
+                      className="flex items-center gap-1 px-3 py-1 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/20 text-[#0066cc] dark:text-sky-400 text-xs font-semibold rounded cursor-pointer no-print"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Day/Slot
+                    </button>
+                  )}
                 </div>
 
                 {/* 1. Interactive Table Editor View (Screen only) */}
                 <div className="no-print overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-xs border-collapse table-fixed">
                     <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-555 dark:text-slate-400 uppercase font-sans font-bold">
                       <tr>
-                        <th className="px-4 py-3 w-16 border-r border-slate-200 dark:border-slate-800">Day</th>
-                        <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Date</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-200 dark:border-slate-800">Audit Scope</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">Type of data to request</th>
-                        <th className="px-4 py-3 border-r border-slate-200 dark:border-slate-800">Functional Units/Activities/ Document request</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">Conduct by</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-200 dark:border-slate-800">P-Incharge</th>
-                        <th className="px-4 py-3 w-24 text-center">Actions</th>
+                        <th className="px-4 py-3 w-14 border-r border-slate-200 dark:border-slate-800">Day</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">Date</th>
+                        <th className="px-4 py-3 w-28 border-r border-slate-200 dark:border-slate-800">Time</th>
+                        <th className="px-4 py-3 w-64 border-r border-slate-200 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 w-80 border-r border-slate-200 dark:border-slate-800">Activities/Data/Document Request</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">Conduct by</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-200 dark:border-slate-800">P-Incharge</th>
+                        <th className="px-4 py-3 w-20 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80 bg-white dark:bg-slate-950">
                       {rows.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="text-center py-8 text-slate-400 italic">
+                          <td colSpan={8} className="text-center py-8 text-slate-400 italic">
                             No slots created yet. Click "+ Add Day/Slot" above.
                           </td>
                         </tr>
                       ) : (
                         rows.map((row, index) => (
-                          <tr 
+                          <tr
                             key={index}
                             onClick={() => startEditingRow(index)}
                             className="hover:bg-slate-50/50 dark:hover:bg-slate-900/35 transition-colors cursor-pointer align-top border-b border-slate-200 dark:border-slate-800 last:border-0"
@@ -1137,17 +1316,17 @@ export default function ScheduleClient({
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-700 dark:text-slate-300">
                               {row.day || ""}
                             </td>
-                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                              {formatDateString(row.date)}
+                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-200">
+                              {formatDateRange(row)}
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-sans text-[10px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {row.time || "Time not selected"}
                             </td>
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800">
                               {(() => {
-                                const available = parsePlanItems(scope, "IAP-ISCP");
-                                if (!row.auditScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                                const ids = row.auditScope.split(",").map(s => s.trim()).filter(Boolean);
+                                const available = parsePlanItems(scope, "IOE-SCP");
+                                if (!row.oeScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                const ids = row.oeScope.split(",").map(s => s.trim()).filter(Boolean);
                                 if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
                                 return (
                                   <div className="flex flex-col gap-3">
@@ -1161,7 +1340,7 @@ export default function ScheduleClient({
                                             </span>
                                           </div>
                                           <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                            {matched ? matched.text : <span className="text-slate-400 italic font-normal">Audit Scope text not found</span>}
+                                            {matched ? matched.text : <span className="text-slate-400 italic font-normal">OE Scope text not found</span>}
                                           </div>
                                         </div>
                                       );
@@ -1170,13 +1349,35 @@ export default function ScheduleClient({
                                 );
                               })()}
                             </td>
-                            <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-700 dark:text-slate-300">
-                              {row.dataRequest || "None"}
+                            <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                              <div className="flex flex-col gap-3">
+                                {(() => {
+                                  const ids = (row.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                  return ids.map(id => {
+                                    const matched = availableDataRequests.find(d => d.id === id);
+                                    return (
+                                      <div key={id} className="flex flex-col gap-1">
+                                        <div>
+                                          <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                            {id}
+                                          </span>
+                                        </div>
+                                        <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                        </div>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                                {row.activity && (
+                                  <div
+                                    className="leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
+                                    dangerouslySetInnerHTML={{ __html: row.activity }}
+                                  />
+                                )}
+                              </div>
                             </td>
-                            <td 
-                              className="p-3 border-r border-slate-200 dark:border-slate-800 leading-relaxed text-slate-700 dark:text-slate-355 rich-text-content"
-                              dangerouslySetInnerHTML={{ __html: row.activity || "<i>No activities set. Click to configure.</i>" }}
-                            />
                             <td className="p-3 border-r border-slate-200 dark:border-slate-800 font-semibold text-[#05375c] dark:text-sky-400 whitespace-pre-wrap">
                               {row.conductBy || "Unassigned"}
                             </td>
@@ -1189,18 +1390,20 @@ export default function ScheduleClient({
                                   type="button"
                                   onClick={() => startEditingRow(index)}
                                   className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 cursor-pointer"
-                                  title="Edit Slot"
+                                  title={isReadOnly ? "View Slot" : "Edit Slot"}
                                 >
                                   <Edit className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => removeRow(index)}
-                                  className="p-1.5 hover:bg-red-500/10 rounded text-red-500 cursor-pointer"
-                                  title="Delete Slot"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {!isReadOnly && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRow(index)}
+                                    className="p-1.5 hover:bg-red-500/10 rounded text-red-500 cursor-pointer"
+                                    title="Delete Slot"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1213,8 +1416,11 @@ export default function ScheduleClient({
                 {/* 2. Nested Schedule Slot Editor Modal (Screen only) */}
                 {activeRowIndex !== null && draftRow !== null && (() => {
                   const timeVals = parseTimeRange(draftRow.time);
-                  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(draftRow.date) 
-                    ? draftRow.date 
+                  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(draftRow.date)
+                    ? draftRow.date
+                    : "";
+                  const validDateTo = draftRow.dateTo && /^\d{4}-\d{2}-\d{2}$/.test(draftRow.dateTo)
+                    ? draftRow.dateTo
                     : "";
                   const conductByArray = draftRow.conductBy
                     ? draftRow.conductBy.split(",").map(name => name.trim()).filter(Boolean)
@@ -1223,22 +1429,20 @@ export default function ScheduleClient({
                     ? draftRow.pIncharge.split(",").map(name => name.trim()).filter(Boolean)
                     : [];
 
-                  const auditorOptions = users
-                    .filter(u => u.role === "ADMIN" || u.role === "LEAD_AUDITOR" || u.role === "AUDITOR")
-                    .map(u => ({
-                      value: u.name,
-                      label: u.name,
-                      subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
-                    }));
+                  const memberOptions = users.map(u => ({
+                    value: u.name,
+                    label: u.name,
+                    subLabel: u.email ?? "",
+                  }));
 
                   const picOptions = users.map(u => ({
                     value: u.name,
                     label: u.name,
-                    subLabel: `${u.role.replace("_", " ")}${u.email ? ` • ${u.email}` : ""}`
+                    subLabel: u.email ?? "",
                   }));
 
-                  const availableAuditScopes = parsePlanItems(scope, "IAP-ISCP");
-                  const auditScopeOptions = availableAuditScopes.map(o => ({
+                  const availableOeScopes = parsePlanItems(scope, "IOE-SCP");
+                  const oeScopeOptions = availableOeScopes.map(o => ({
                     value: o.id,
                     label: o.id,
                     subLabel: (o.text || "").substring(0, 50) + ((o.text || "").length > 50 ? "..." : "")
@@ -1279,7 +1483,7 @@ export default function ScheduleClient({
                             >
                               <span className="flex items-center gap-2">
                                 <Calendar className="w-3.5 h-3.5 text-[#0066cc]" />
-                                <span>Execution Parameters (Date, Time, Auditors, PIC)</span>
+                                <span>Execution Parameters (Date, Time, OE Members, PIC)</span>
                               </span>
                               <ChevronRight className={`w-4 h-4 transition-transform duration-205 text-slate-400 ${isParamsExpanded ? "rotate-90" : ""}`} />
                             </button>
@@ -1292,7 +1496,8 @@ export default function ScheduleClient({
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                                       Day
                                     </label>
-                                    <input 
+                                    <input
+                                      disabled={isReadOnly}
                                       type="text"
                                       value={draftRow.day || ""}
                                       onChange={(e) => updateDraftField("day", e.target.value)}
@@ -1306,12 +1511,29 @@ export default function ScheduleClient({
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                                       Execution Date
                                     </label>
-                                    <input 
-                                      type="date"
-                                      value={validDate}
-                                      onChange={(e) => updateDraftField("date", e.target.value)}
-                                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-                                    />
+                                    <div className="grid grid-cols-1 gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
+                                        <input
+                                          disabled={isReadOnly}
+                                          type="date"
+                                          value={validDate}
+                                          onChange={(e) => updateDraftField("date", e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] text-slate-400 font-sans uppercase">To</span>
+                                        <input
+                                          disabled={isReadOnly}
+                                          type="date"
+                                          value={validDateTo}
+                                          min={validDate || undefined}
+                                          onChange={(e) => updateDraftField("dateTo", e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-805 rounded px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
+                                        />
+                                      </div>
+                                    </div>
                                   </div>
 
                                   {/* Time Selector */}
@@ -1320,7 +1542,8 @@ export default function ScheduleClient({
                                     <div className="grid grid-cols-2 gap-2">
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">From</span>
-                                        <input 
+                                        <input
+                                          disabled={isReadOnly}
                                           type="time" 
                                           value={timeVals.from} 
                                           onChange={(e) => {
@@ -1332,7 +1555,8 @@ export default function ScheduleClient({
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-[9px] text-slate-400 font-sans uppercase">To</span>
-                                        <input 
+                                        <input
+                                          disabled={isReadOnly}
                                           type="time" 
                                           value={timeVals.to} 
                                           onChange={(e) => {
@@ -1349,12 +1573,14 @@ export default function ScheduleClient({
                                 <div className="grid grid-cols-2 gap-4">
                                   {/* Conduct By Dropdown */}
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Conducted By (Auditors)</label>
+                                    <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Conducted By (OE Members)</label>
                                     <MultiSelect
+                                      disabled={isReadOnly}
+                                      plainWhenDisabled
                                       selectedValues={conductByArray}
                                       onChange={(values) => updateDraftField("conductBy", values.join(", "))}
-                                      options={auditorOptions}
-                                      placeholder="Select auditors or type custom name..."
+                                      options={memberOptions}
+                                      placeholder="Select OE members..."
                                     />
                                   </div>
 
@@ -1362,10 +1588,12 @@ export default function ScheduleClient({
                                   <div className="space-y-1">
                                     <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Person in Charge (PIC)</label>
                                     <MultiSelect
+                                      disabled={isReadOnly}
+                                      plainWhenDisabled
                                       selectedValues={pInchargeArray}
                                       onChange={(values) => updateDraftField("pIncharge", values.join(", "))}
                                       options={picOptions}
-                                      placeholder="Select PICs or type custom name..."
+                                      placeholder="Select PICs..."
                                     />
                                   </div>
                                 </div>
@@ -1373,45 +1601,77 @@ export default function ScheduleClient({
                             )}
                           </div>
 
-                          {/* Audit Scope and Data Request */}
-                          <div className="space-y-6 flex-1 overflow-y-auto px-2 pb-2">
-                            {/* Audit Scope Selection */}
+                          {/* OE Scope and Data Request */}
+                          {/* Bottom padding leaves room for the open dropdown lists, which this scroll area would otherwise clip */}
+                          <div className="space-y-6 flex-1 overflow-y-auto px-2 pb-64">
+                            {/* OE Scope Selection */}
                             <div className="space-y-1">
-                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Audit Scope</label>
+                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">OE Scope</label>
                               <MultiSelect
-                                selectedValues={draftRow.auditScope ? draftRow.auditScope.split(",").map(s => s.trim()).filter(Boolean) : []}
-                                onChange={(values) => updateDraftField("auditScope", values.join(", "))}
-                                options={auditScopeOptions}
-                                placeholder="Select audit scope..."
+                                disabled={isReadOnly}
+                                plainWhenDisabled
+                                selectedValues={draftRow.oeScope ? draftRow.oeScope.split(",").map(s => s.trim()).filter(Boolean) : []}
+                                onChange={(values) => updateDraftField("oeScope", values.join(", "))}
+                                options={oeScopeOptions}
+                                placeholder="Select OE scope..."
                               />
-                              <div className="mt-2 min-h-[120px] p-3 border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                              <div className="mt-2">
                                 {(() => {
-                                  const ids = (draftRow.auditScope || "").split(",").map(s => s.trim()).filter(Boolean);
-                                  if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-xs">No scope selected.</span>;
-                                  return ids.map(id => {
-                                    const match = availableAuditScopes.find(o => o.id === id);
-                                    return match ? match.text : id;
-                                  }).join("\n\n");
+                                  const ids = (draftRow.oeScope || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  if (ids.length === 0) {
+                                    return (
+                                      <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/60 dark:bg-slate-900/50 text-xs text-slate-400 italic font-sans">
+                                        No scope selected.
+                                      </div>
+                                    );
+                                  }
+                                  const items = ids.map(id => availableOeScopes.find(o => o.id === id) || { id, text: "" });
+                                  return (
+                                    <PlanItemEditor
+                                      sectionTitle="OE Scope"
+                                      items={items}
+                                      onChange={() => {}}
+                                      prefix="IOE-SCP"
+                                      editable={false}
+                                      hideHeader={true}
+                                    />
+                                  );
                                 })()}
                               </div>
                             </div>
 
                             {/* Data Request Selection */}
                             <div className="space-y-1">
-                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Type of data to request</label>
+                              <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">Type(s) of data to request</label>
                               <MultiSelect
-                                selectedValues={draftRow.dataRequest ? [draftRow.dataRequest] : []}
-                                onChange={(selected) => updateDraftField("dataRequest", selected.length > 0 ? selected[0] : "")}
+                                disabled={isReadOnly}
+                                plainWhenDisabled
+                                selectedValues={draftRow.dataRequest ? draftRow.dataRequest.split(",").map(s => s.trim()).filter(Boolean) : []}
+                                onChange={(values) => updateDraftField("dataRequest", values.join(", "))}
                                 options={dataRequestOptions}
-                                placeholder="Select data to request..."
-                                singleSelect={true}
+                                placeholder="Select type(s) of data to request..."
                               />
-                              <div className="mt-2 min-h-[120px] p-3 border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                              <div className="mt-2">
                                 {(() => {
-                                  const id = draftRow.dataRequest;
-                                  if (!id) return <span className="text-slate-400 italic font-sans text-xs">No data request selected.</span>;
-                                  const match = dataRequestOptions.find(o => o.value === id);
-                                  return match ? match.subLabel : id;
+                                  const ids = (draftRow.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                  if (ids.length === 0) {
+                                    return (
+                                      <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/60 dark:bg-slate-900/50 text-xs text-slate-400 italic font-sans">
+                                        No data request selected.
+                                      </div>
+                                    );
+                                  }
+                                  const items = ids.map(id => availableDataRequests.find(o => o.id === id) || { id, text: "" });
+                                  return (
+                                    <PlanItemEditor
+                                      sectionTitle="Data Request"
+                                      items={items}
+                                      onChange={() => {}}
+                                      prefix="OE-DRQ"
+                                      editable={false}
+                                      hideHeader={true}
+                                    />
+                                  );
                                 })()}
                               </div>
                             </div>
@@ -1426,15 +1686,17 @@ export default function ScheduleClient({
                             onClick={cancelDraftRow}
                             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                           >
-                            Discard
+                            {isReadOnly ? "Close" : "Discard"}
                           </button>
-                          <button
-                            type="button"
-                            onClick={saveDraftRow}
-                            className="px-5 py-2 bg-[#0066cc] hover:bg-[#0052a3] text-white text-xs font-bold rounded cursor-pointer"
-                          >
-                            Save
-                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={saveDraftRow}
+                              className="px-5 py-2 bg-[#0066cc] hover:bg-[#0052a3] text-white text-xs font-bold rounded cursor-pointer"
+                            >
+                              Save
+                            </button>
+                          )}
                         </div>
 
                       </div>
@@ -1444,30 +1706,29 @@ export default function ScheduleClient({
 
                 {/* 3. Flat Printout Table View (Print only - hidden on screen) */}
                 <div className="hidden print:block overflow-x-auto border border-slate-350 dark:border-slate-800 rounded-md">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-xs border-collapse table-fixed">
                     <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-300 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                       <tr>
-                        <th className="px-4 py-3 w-16 border-r border-slate-300 dark:border-slate-800">Day</th>
-                        <th className="px-4 py-3 w-28 border-r border-slate-300 dark:border-slate-800">Date</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">Time</th>
-                        <th className="px-4 py-3 w-36 border-r border-slate-300 dark:border-slate-800">Audit Scope</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-300 dark:border-slate-800">Type of data to request</th>
-                        <th className="px-4 py-3 border-r border-slate-300 dark:border-slate-800">Functional Units/Activities/ Document request</th>
-                        <th className="px-4 py-3 w-40 border-r border-slate-300 dark:border-slate-800">Conduct by</th>
-                        <th className="px-4 py-3 w-40">P-Incharge</th>
+                        <th className="px-4 py-3 w-14 border-r border-slate-300 dark:border-slate-800">Day</th>
+                        <th className="px-4 py-3 w-24 border-r border-slate-300 dark:border-slate-800">Date</th>
+                        <th className="px-4 py-3 w-28 border-r border-slate-300 dark:border-slate-800">Time</th>
+                        <th className="px-4 py-3 w-48 border-r border-slate-300 dark:border-slate-800">OE Scope</th>
+                        <th className="px-4 py-3 border-r border-slate-300 dark:border-slate-800">Activities/Data/Document Request</th>
+                        <th className="px-4 py-3 w-32 border-r border-slate-300 dark:border-slate-800">Conduct by</th>
+                        <th className="px-4 py-3 w-32">P-Incharge</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-300 dark:divide-slate-800 bg-white dark:bg-slate-900">
                       {rows.map((row, index) => (
                         <tr key={index} className="align-top border-b border-slate-300 dark:border-slate-800">
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">{row.day || ""}</td>
-                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-bold whitespace-pre-wrap">{formatDateString(row.date)}</td>
+                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-bold whitespace-pre-wrap">{formatDateRange(row)}</td>
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-sans text-[10px] whitespace-pre-wrap">{row.time || "Time not selected"}</td>
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800">
                             {(() => {
-                              const available = parsePlanItems(scope, "IAP-ISCP");
-                              if (!row.auditScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
-                              const ids = row.auditScope.split(",").map(s => s.trim()).filter(Boolean);
+                              const available = parsePlanItems(scope, "IOE-SCP");
+                              if (!row.oeScope) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                              const ids = row.oeScope.split(",").map(s => s.trim()).filter(Boolean);
                               if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
                               return (
                                 <div className="flex flex-col gap-3">
@@ -1481,7 +1742,7 @@ export default function ScheduleClient({
                                           </span>
                                         </div>
                                         <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">Audit Scope text not found</span>}
+                                          {matched ? matched.text : <span className="text-slate-400 italic font-normal">OE Scope text not found</span>}
                                         </div>
                                       </div>
                                     );
@@ -1490,13 +1751,33 @@ export default function ScheduleClient({
                               );
                             })()}
                           </td>
-                          <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">
-                            {row.dataRequest || "None"}
+                          <td className="p-3 border-r border-slate-300 dark:border-slate-800">
+                            <div className="flex flex-col gap-3">
+                              {(() => {
+                                const ids = (row.dataRequest || "").split(",").map(s => s.trim()).filter(Boolean);
+                                if (ids.length === 0) return <span className="text-slate-400 italic font-sans text-[10px]">None</span>;
+                                return ids.map(id => {
+                                  const matched = availableDataRequests.find(d => d.id === id);
+                                  return (
+                                    <div key={id} className="flex flex-col gap-1">
+                                      <div>
+                                        <span className="bg-slate-200/50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold tracking-tight inline-block">
+                                          {id}
+                                        </span>
+                                      </div>
+                                      <div className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
+                                        {matched ? matched.text : <span className="text-slate-400 italic font-normal">Data request text not found</span>}
+                                      </div>
+                                    </div>
+                                  );
+                                });
+                              })()}
+                              <div
+                                className="leading-relaxed rich-text-content"
+                                dangerouslySetInnerHTML={{ __html: row.activity }}
+                              />
+                            </div>
                           </td>
-                          <td 
-                            className="p-3 border-r border-slate-300 dark:border-slate-800 leading-relaxed rich-text-content"
-                            dangerouslySetInnerHTML={{ __html: row.activity }}
-                          />
                           <td className="p-3 border-r border-slate-300 dark:border-slate-800 font-medium whitespace-pre-wrap">{row.conductBy}</td>
                           <td className="p-3 font-medium whitespace-pre-wrap">{row.pIncharge}</td>
                         </tr>
@@ -1511,6 +1792,11 @@ export default function ScheduleClient({
                 Note: The operational excellence execution schedule is subject to refinement based on real-time field risk discoveries.
               </div>
             </form>
+          </div>
+
+          {/* Print-only report: what Export PDF prints instead of the editor above */}
+          <div className="plan-print-root">
+            <SessionPrintDocument data={buildPrintData()} />
           </div>
         </div>
       )}

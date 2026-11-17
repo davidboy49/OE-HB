@@ -1,18 +1,17 @@
-import { redirect } from "next/navigation";
-import { apiFetch } from "@/lib/apiClient";
-import { getCurrentUserServer } from "@/lib/auth";
-import type { AuditProject, Department, ExecutionSchedule, User } from "@auditdesk/shared";
+import { apiFetch, fetchOr } from "@/lib/apiClient";
+import { guardPage } from "@/lib/page-access";
+import type { OePlan, Project, Department, ExecutionSchedule, User } from "@oeportal/shared";
 import ScheduleClient from "./schedule-client";
 
 export default async function SchedulePage() {
-  const currentUser = await getCurrentUserServer();
-  if (!currentUser) redirect("/login");
+  const currentUser = await guardPage("/schedule");
 
-  const [projects, schedules, users, departments] = await Promise.all([
-    apiFetch<AuditProject[]>("/audit-projects"),
+  const [projects, schedules, users, departments, plannedEngagements] = await Promise.all([
+    fetchOr<OePlan[]>("/oe-plans", []),
     apiFetch<ExecutionSchedule[]>("/execution-schedules"),
-    apiFetch<User[]>("/users"),
-    apiFetch<Department[]>("/departments"),
+    fetchOr<User[]>("/users", []),
+    fetchOr<Department[]>("/departments", []),
+    fetchOr<Project[]>("/projects", []),
   ]);
 
   return (
@@ -21,6 +20,7 @@ export default async function SchedulePage() {
       projects={projects}
       users={users}
       departments={departments}
+      plannedEngagements={plannedEngagements}
       currentUser={currentUser}
     />
   );

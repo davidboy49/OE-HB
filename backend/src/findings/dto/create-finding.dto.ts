@@ -33,5 +33,5 @@ export class CreateFindingDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  auditorId!: string;
+  memberId!: string;
 }

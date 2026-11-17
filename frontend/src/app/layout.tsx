@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Roboto } from "next/font/google";
+import { Roboto, Noto_Sans_Khmer } from "next/font/google";
 import "./globals.css";
 import { getCurrentUserServer } from "@/lib/auth";
 import AppLayout from "@/components/layout/app-layout";
@@ -10,9 +10,18 @@ const roboto = Roboto({
   display: "swap",
 });
 
+// Khmer text in reports. Bundled with the app (only downloaded by browsers when a page has Khmer
+// characters) so the server-side PDF export prints Khmer without any font installed on the host.
+const notoKhmer = Noto_Sans_Khmer({
+  weight: ["400", "700"],
+  subsets: ["khmer"],
+  display: "swap",
+  variable: "--font-khmer",
+});
+
 export const metadata: Metadata = {
-  title: "AuditDesk - Auditing System Portal",
-  description: "Enterprise Auditing portal for timeline planning, findings tracking, and document management.",
+  title: "OE Portal - Operational Excellence System",
+  description: "Enterprise Operational Excellence portal for timeline planning, findings tracking, and document management.",
 };
 
 export default async function RootLayout({
@@ -24,7 +33,7 @@ export default async function RootLayout({
   const currentUser = await getCurrentUserServer();
 
   return (
-    <html lang="en" className="h-full antialiased dark">
+    <html lang="en" className={`${notoKhmer.variable} h-full antialiased dark`}>
       <body className={`${roboto.className} min-h-full flex flex-col`}>
         {currentUser ? <AppLayout currentUser={currentUser}>{children}</AppLayout> : children}
       </body>

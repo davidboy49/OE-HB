@@ -57,6 +57,21 @@ export async function clientApi<T = any>(path: string, options: RequestInit = {}
   return handleResponse<T>(res);
 }
 
+/**
+ * Like apiFetch, but a 403 ("your group may not read this") yields `fallback` instead of
+ * failing the page. Use for the supporting lists a page shows alongside its main data
+ * (users, departments...), so lacking one of those permissions leaves a dropdown empty
+ * rather than breaking the whole screen.
+ */
+export async function fetchOr<T>(path: string, fallback: T): Promise<T> {
+  try {
+    return await apiFetch<T>(path);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) return fallback;
+    throw err;
+  }
+}
+
 /** Works in either Server or Client Components - picks the right transport automatically. */
 export function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
   if (typeof window === "undefined") return serverApi<T>(path, options);

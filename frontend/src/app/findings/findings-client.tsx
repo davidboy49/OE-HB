@@ -23,11 +23,13 @@ import {
 } from "lucide-react";
 import type {
   User,
-  AuditProject,
+  OePlan,
+  Project,
   ExecutionSchedule as FindingReport,
   ScheduleRow,
-  Department
-} from "@auditdesk/shared";
+  Department,
+  PlanItem
+} from "@oeportal/shared";
 
 interface FindingRow extends ScheduleRow {
   correctiveActionDate?: string;
@@ -36,15 +38,35 @@ interface FindingRow extends ScheduleRow {
   correctiveFinalRemarks?: string;
   correctiveFinalUser?: string;
   correctiveFinalDatetime?: string;
-  attachments?: any[];
+  /** Metadata only - the files live server-side (FindingAttachment) and download by id. */
+  attachments?: FindingAttachment[];
 }
-import { parsePlanItems } from "@auditdesk/shared";
+
+interface FindingAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+}
+
+/** Matches the backend's per-file cap (FINDING_ATTACHMENT_MAX_BYTES). */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+const formatFileSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
 import { clientApi } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import FindingPrintDocument, { type FindingPrintData } from "@/components/print/finding-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import ExecScheduleSelect from "@/components/ui/exec-schedule-select";
+import { formatOePlanOption } from "@/components/ui/oe-plan-select";
+import { exportReportPdf } from "@/components/print/export-pdf";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -70,6 +92,12 @@ const isHtmlEmpty = (html?: string) => {
   const clean = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
   return clean === "";
 };
+
+// Rows saved before per-row ids existed won't have one yet - assign one client-side so a
+// resolve-only user always has an id to target; the next save (by an editor) persists it (see
+// backend/src/execution-schedules/execution-schedules.service.ts's backfillRowIds).
+const withRowIds = (rows: FindingRow[]): FindingRow[] =>
+  rows.map((r) => (r.id ? r : { ...r, id: crypto.randomUUID() }));
 
 const escapeHtml = (value?: string) =>
   (value || "")
@@ -129,18 +157,20 @@ const formatTimeRange = (from: string, to: string) => {
 interface FindingsClientProps {
   initialSchedules: FindingReport[];
   releasedExecSchedules: FindingReport[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
+  plannedEngagements?: Project[];
   currentUser: User;
 }
 
-export default function FindingsClient({ 
-  initialSchedules, 
+export default function FindingsClient({
+  initialSchedules,
   releasedExecSchedules,
-  projects, 
-  users, 
+  projects,
+  users,
   departments,
+  plannedEngagements = [],
   currentUser 
 }: FindingsClientProps) {
   const [schedules, setSchedules] = useState<FindingReport[]>(initialSchedules);
@@ -161,7 +191,7 @@ export default function FindingsClient({
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("NCN #001/26");
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
   const [leadExecution, setLeadExecution] = useState("");
   const [teamMembers, setTeamMembers] = useState("");
   const [additionalAttendees, setAdditionalAttendees] = useState("");
@@ -169,7 +199,6 @@ export default function FindingsClient({
   const [language, setLanguage] = useState("finding"); // Hidden type flag
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<FindingRow[]>([]);
   const [findingStatus, setFindingStatus] = useState<"DRAFT" | "RELEASED">("DRAFT");
   // Active row index for card editing
@@ -178,6 +207,18 @@ export default function FindingsClient({
   const [draftRow, setDraftRow] = useState<FindingRow | null>(null);
 
   const isLocked = findingStatus === "RELEASED";
+
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by ExecScheduleSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
 
   const linkedExecSched = releasedExecSchedules.find(s => s.id === selectedExecScheduleId);
   const linkedRows = useMemo(() => {
@@ -232,20 +273,22 @@ export default function FindingsClient({
   const departmentsArray = departmentsStr ? departmentsStr.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setDepartmentsArray = (vals: string[]) => setDepartmentsStr(vals.join(", "));
 
+  const selectedProjectObj = projects.find(p => p.id === selectedProjectId);
+
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`, 
+    subLabel: u.email ?? "",
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser.id || proj.leadAuditorId === currentUser.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser.name)) return true;
-    if (proj.auditorIds?.includes(currentUser.id)) return true;
+    if (currentUser.grants?.["oe-plans:view"] === "ALL") return true;
+    if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser.name)) return true;
+    if (proj.memberIds?.includes(currentUser.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser.id) || picList.includes(currentUser.name)) return true;
     return false;
@@ -253,17 +296,88 @@ export default function FindingsClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["execution-schedules:view"] === "ALL") return true;
     if (sched.ownerName === currentUser.name || sched.lastModifiedBy === currentUser.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);
   };
 
-  const canManage = RBAC.can(currentUser, "findings:create") || RBAC.can(currentUser, "findings:update");
+  // Matches the real backend gate on the report's save route (PATCH /execution-schedules/:id),
+  // not findings:create/findings:update - those govern an unrelated Finding DB model.
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too), so the
+  // editor drops every edit/resolve right for a report under one and shows it read-only.
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = modalMode === "edit" && isPlanClosedFor(selectedProjectId);
+  const canManage = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:update");
+  const canDeleteFindingRows = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:delete-finding-row");
+  // Lets a Department PIC fill in Completed Date/Corrective Action/attachments and Resolve (once)
+  // on one row without full edit rights over the rest of the report (see the resolve-finding-row
+  // route). Corrective Action Date/Remarks stay editor-only.
+  const canResolve = !isPlanClosed && RBAC.can(currentUser, "execution-schedules:resolve-finding");
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): FindingPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const scopeItems = parsePlanItems(scope, "IOE-SCP");
+    const dash = (v: string) => v || "—";
+    const code = selectedProjectObj?.code ?? linkedExecSched?.projectCode ?? activeSchedule?.projectCode ?? "";
+    const name = selectedProjectObj?.name ?? linkedExecSched?.projectName ?? activeSchedule?.projectName ?? "";
+    const statusOf = (r: FindingRow) =>
+      r.correctiveFinalUser ? "Completed" : r.correctiveFinalDate && r.correctiveFinalDate.trim() !== "" ? "In progress" : "Pending";
+    const count = (s: string) => String(rows.filter(r => statusOf(r) === s).length);
+    return {
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: findingStatus === "RELEASED" ? "Released" : "Draft",
+      figures: [
+        ["Findings", String(rows.length)],
+        ["Pending", count("Pending")],
+        ["In progress", count("In progress")],
+        ["Completed", count("Completed")],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Finding no.", dash(visitNumber)],
+        ["Actual visit date", dash(printFmt(actualVisitDate) || actualVisitDate)],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Additional attendees", dash(additionalAttendees)],
+        ["Standards", dash(standards)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(scopeItems),
+      lines: rows.map((r, i) => {
+        const matched = r.oeScope ? scopeItems.find(o => o.id === r.oeScope) : undefined;
+        return {
+          no: i + 1,
+          scope: r.oeScope ? { id: r.oeScope, text: matched?.text ?? "" } : null,
+          severity: r.time ?? "",
+          date: r.date ?? "",
+          reportedBy: r.conductBy ?? "",
+          finding: r.activity ?? "",
+          implication: r.implication ?? "",
+          recommendation: r.recommendation ?? "",
+          status: statusOf(r),
+          due: r.correctiveFinalDate ?? "",
+          attachments: (r.attachments ?? []).map(a => a.name),
+        };
+      }),
+    };
+  };
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  // Some findings are only Opportunities for Improvement rather than a formal
+  // Non-Conformance - the NCN # field can be re-prefixed between the two kinds
+  // without needing a separate DB column.
+  const isCnKind = /^CN\b/i.test(visitNumber.trim()) && !/^NCN\b/i.test(visitNumber.trim());
+  const setNcnKind = (kind: "NCN" | "CN") => {
+    const rest = visitNumber.trim().replace(/^(NCN|CN)\s*/i, "");
+    setVisitNumber(rest ? `${kind} ${rest}` : `${kind} #001/26`);
   };
 
   // Prepopulate fields when a released Execution Schedule is selected
@@ -272,11 +386,13 @@ export default function FindingsClient({
     if (!schedId) {
       setSelectedProjectId("");
       setDepartmentsStr("");
+      setAddress("");
       setLeadExecution("");
       setTeamMembers("");
       setAdditionalAttendees("");
       setActualVisitDate("");
-      setAuditPeriod("");
+      setOePeriod("");
+      setStandards("");
       setObjectives("");
       setScope("");
       return;
@@ -288,15 +404,31 @@ export default function FindingsClient({
     // Carry over the parent project id so the finding stays linked to the plan
     setSelectedProjectId(execSched.projectId);
     setDepartmentsStr(execSched.departments || "");
+    // address/standards aren't editable in the findings UI, but the backend's
+    // execution-schedules DTO (this table doubles as the findings store, keyed by
+    // language: "finding") requires both non-empty - inherit them from the visit.
+    setAddress(execSched.address || "");
     setLeadExecution(execSched.leadExecution || "");
     setTeamMembers(execSched.teamMembers || "");
     setAdditionalAttendees(execSched.additionalAttendees || "");
     setActualVisitDate(""); // user fills in finding date separately
-    setAuditPeriod(execSched.auditPeriod || "");
+    setOePeriod(execSched.oePeriod || "");
+    setStandards(execSched.standards || "");
 
     const proj = projects.find(p => p.id === execSched.projectId);
-    setObjectives(proj?.objectives || "");
-    setScope(proj?.scope || "");
+    // Resolve inherited objectives/scope from the linked Planned Engagement -
+    // OePlan.objectives/scope alone can be empty or stale.
+    if (proj) {
+      const linkedPlannedEngagement = proj.projectId
+        ? plannedEngagements.find(a => a.id === proj.projectId)
+        : null;
+      const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
+      setObjectives(inherited.objectives);
+      setScope(inherited.scope);
+    } else {
+      setObjectives("");
+      setScope("");
+    }
     setRows([]);
   };
 
@@ -308,7 +440,7 @@ export default function FindingsClient({
     setAddress("");
     setVisitNumber("");
     setActualVisitDate("");
-    setAuditPeriod("");
+    setOePeriod("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
@@ -317,7 +449,6 @@ export default function FindingsClient({
     setObjectives("");
     setScope("");
     setRows([]);
-    setAttachments([]);
     setFindingStatus("DRAFT");
     setIsModalOpen(true);
   };
@@ -334,7 +465,7 @@ export default function FindingsClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
+    setOePeriod(sched.oePeriod);
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
     setAdditionalAttendees(sched.additionalAttendees);
@@ -342,10 +473,9 @@ export default function FindingsClient({
     setLanguage(sched.language || "finding");
     setObjectives(sched.objectives);
     setScope(sched.scope);
-    setAttachments(sched.attachments ? JSON.parse(sched.attachments) : []);
     
     try {
-      setRows(JSON.parse(sched.scheduleRows));
+      setRows(withRowIds(JSON.parse(sched.scheduleRows)));
     } catch {
       setRows([]);
     }
@@ -391,7 +521,7 @@ export default function FindingsClient({
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
@@ -401,7 +531,6 @@ export default function FindingsClient({
       objectives,
       scope,
       scheduleRows: JSON.stringify(options.customRows || rows),
-      attachments: JSON.stringify(attachments),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name,
     };
@@ -434,31 +563,34 @@ export default function FindingsClient({
       setSchedules(fresh.filter((s) => s.language === "finding"));
 
       if (targetStatus === "RELEASED") {
-        const emailResult = await clientApi<{ success: boolean; simulatedAlerts: any[] }>("/notifications/send-email", {
-          method: "POST",
-          body: JSON.stringify({
-            templateId: "findings",
-            projectId: payload.projectId,
-            variables: {
-              findingTitle: payload.departments,
-              severity: payload.standards,
-              recommendation: rows.map(r => r.recommendation).filter(Boolean).join(", ") || "Please review recommendations."
-            }
-          }),
-        });
-        if (emailResult.success) {
-          for (const alert of emailResult.simulatedAlerts) {
-            window.dispatchEvent(new CustomEvent("send-simulated-email", { detail: alert }));
-          }
+        // Best-effort: the report is already released at this point (the PATCH above
+        // succeeded). A caller without notifications:send (e.g. missing that grant) would
+        // otherwise see this 403 bubble into the catch below and be told the save "failed"
+        // when it didn't - only the notification email did.
+        try {
+          await clientApi<{ success: boolean; simulatedAlerts: any[] }>("/notifications/send-email", {
+            method: "POST",
+            body: JSON.stringify({
+              templateId: "findings",
+              projectId: payload.projectId,
+              variables: {
+                findingTitle: payload.departments,
+                severity: payload.standards,
+                recommendation: rows.map(r => r.recommendation).filter(Boolean).join(", ") || "Please review recommendations."
+              }
+            }),
+          });
+        } catch (emailErr) {
+          console.warn("Release succeeded, but the notification email could not be sent:", emailErr);
         }
       }
 
       showFeedback(
         targetStatus === "RELEASED"
-          ? "Audit findings report released and locked."
+          ? "OE findings report released and locked."
           : modalMode === "create"
-            ? "Audit findings report created successfully."
-            : "Audit findings changes saved."
+            ? "OE findings report created successfully."
+            : "OE findings changes saved."
       );
 
       if (shouldClose) setIsModalOpen(false);
@@ -507,7 +639,7 @@ export default function FindingsClient({
     if (!s) return;
 
     showConfirm(
-      "Delete Audit Findings Report",
+      "Delete OE Findings Report",
       `Are you sure you want to delete the findings report for "${s.projectName}"? This action cannot be undone.`,
       async () => {
         try {
@@ -578,6 +710,7 @@ export default function FindingsClient({
 
     setActiveRowIndex(-1);
     setDraftRow({
+      id: crypto.randomUUID(),
       date: "",
       time: "",
       activity: "",
@@ -589,7 +722,7 @@ export default function FindingsClient({
       correctiveActionRemarks: "",
       correctiveFinalDate: "",
       correctiveFinalRemarks: "",
-      auditScope: "",
+      oeScope: "",
       attachments: []
     });
   };
@@ -602,9 +735,9 @@ export default function FindingsClient({
   const saveRowEdit = async () => {
     if (!draftRow) return;
     
-    // Validation: Linked Audit Scope selection is mandatory!
-    if (!draftRow.auditScope || draftRow.auditScope.trim() === "") {
-      alert("Please select a Linked Audit Scope first.");
+    // Validation: Linked OE Scope selection is mandatory!
+    if (!draftRow.oeScope || draftRow.oeScope.trim() === "") {
+      alert("Please select a Linked OE Scope first.");
       return;
     }
     
@@ -645,6 +778,99 @@ export default function FindingsClient({
     await persistFindingReport("DRAFT", { customRows: updated });
   };
 
+  /**
+   * Used instead of saveRowEdit by a resolve-only (execution-schedules:resolve-finding, not
+   * execution-schedules:update) caller - PATCHes just this one row's corrective-action fields
+   * via the narrow backend route, never the full report. The backend's DTO whitelist is the
+   * real boundary; this just avoids sending fields the caller was never shown as editable.
+   */
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const attachmentUrl = (att: FindingAttachment) =>
+    `/api/backend/execution-schedules/${selectedScheduleId}/attachments/${att.id}`;
+
+  /** Files are saved the moment they're added/removed, so the row list and the open editor both update. */
+  const updateRowAttachments = (rowId: string, update: (list: FindingAttachment[]) => FindingAttachment[]) => {
+    setDraftRow(d => (d && d.id === rowId ? { ...d, attachments: update(d.attachments || []) } : d));
+    setRows(rs => rs.map(r => (r.id === rowId ? { ...r, attachments: update(r.attachments || []) } : r)));
+  };
+
+  const uploadAttachments = async (files: File[]) => {
+    if (!draftRow || !selectedScheduleId) return;
+    const rowId = draftRow.id;
+    if (!rowId) {
+      showFeedback("This report needs to be opened and saved once by an editor before files can be attached.");
+      return;
+    }
+    const tooBig = files.filter(f => f.size > MAX_ATTACHMENT_BYTES);
+    if (tooBig.length > 0) {
+      showFeedback(`Not uploaded (over 25 MB): ${tooBig.map(f => f.name).join(", ")}`);
+    }
+    for (const file of files.filter(f => f.size <= MAX_ATTACHMENT_BYTES)) {
+      setUploadingCount(c => c + 1);
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        // Plain fetch, not clientApi: the browser must set the multipart boundary itself.
+        const res = await fetch(`/api/backend/execution-schedules/${selectedScheduleId}/finding-rows/${rowId}/attachments`, {
+          method: "POST",
+          body,
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.message || `Upload failed (${res.status})`);
+        updateRowAttachments(rowId, list => [...list, payload as FindingAttachment]);
+      } catch (err: any) {
+        showFeedback(`Could not upload ${file.name}: ${err.message || err.toString()}`);
+      } finally {
+        setUploadingCount(c => c - 1);
+      }
+    }
+  };
+
+  const removeAttachment = async (att: FindingAttachment) => {
+    if (!draftRow?.id || !selectedScheduleId) return;
+    const rowId = draftRow.id;
+    try {
+      await clientApi(`/execution-schedules/${selectedScheduleId}/attachments/${att.id}`, { method: "DELETE" });
+      updateRowAttachments(rowId, list => list.filter(a => a.id !== att.id));
+    } catch (err: any) {
+      showFeedback(`Could not remove ${att.name}: ${err.message || err.toString()}`);
+    }
+  };
+
+  const saveResolveOnly = async () => {
+    if (!draftRow || activeRowIndex === null || activeRowIndex === -1 || !selectedScheduleId) return;
+    if (!draftRow.id) {
+      showFeedback("This report needs to be opened and saved once by an editor before rows can be resolved individually.");
+      return;
+    }
+    // Resolve is one-way for a resolver: send it only on the first resolve, never to
+    // re-stamp an already-resolved row (the backend rejects that too).
+    const wasResolved = !!rows[activeRowIndex]?.correctiveFinalUser;
+    try {
+      const updatedSchedule = await clientApi<FindingReport>(
+        `/execution-schedules/${selectedScheduleId}/finding-rows/${draftRow.id}/resolve`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            correctiveFinalDate: draftRow.correctiveFinalDate || undefined,
+            correctiveFinalRemarks: draftRow.correctiveFinalRemarks,
+            resolve: draftRow.correctiveFinalUser && !wasResolved ? true : undefined,
+          }),
+        }
+      );
+      try {
+        setRows(JSON.parse(updatedSchedule.scheduleRows || "[]"));
+      } catch {
+        // Response didn't parse - leave local rows as they were rather than blank them out.
+      }
+      setActiveRowIndex(null);
+      setDraftRow(null);
+      showFeedback("Resolution saved.");
+    } catch (err: any) {
+      showFeedback(`Error: ${err.message || err.toString()}`);
+    }
+  };
+
   const deleteRowItem = (index: number) => {
     showConfirm(
       "Delete Line Item",
@@ -670,8 +896,11 @@ export default function FindingsClient({
   const completedFinalRowsCount = rows.filter(row => !!row.correctiveFinalUser).length;
   const pendingFinalRowsCount = rows.filter(row => !row.correctiveFinalUser).length;
 
+  // A resolve-only user clicks Resolve once; only a report editor can toggle it back.
+  const isResolveLocked = !canManage && !!draftRow?.correctiveFinalUser;
+
   const markDraftRowFinalized = () => {
-    if (!draftRow) return;
+    if (!draftRow || isResolveLocked) return;
     
     // If it's already completed, we toggle it back to pending
     if (draftRow.correctiveFinalUser) {
@@ -710,6 +939,15 @@ export default function FindingsClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    departments: (s) => s.departments,
+    date: (s) => s.actualVisitDate,
+    leaders: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "findings-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -771,7 +1009,7 @@ export default function FindingsClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -792,12 +1030,12 @@ export default function FindingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">Audit Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">Department</th>
-                  <th className="px-6 py-4">Finding Date</th>
-                  <th className="px-6 py-4">Lead Auditors</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Finding Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="OE Leaders" sortKey="leaders" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -808,7 +1046,7 @@ export default function FindingsClient({
                     </td>
                   </tr>
                 ) : (
-                  filteredSchedules.map((s) => (
+                  pagination.pageItems.map((s) => (
                     <tr 
                       key={s.id} 
                       onClick={() => setSelectedScheduleId(s.id === selectedScheduleId ? null : s.id)}
@@ -859,11 +1097,21 @@ export default function FindingsClient({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            emptyLabel="No findings reports found"
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
         </div>
       </div>
 
-      {/* Audit Findings Report Editor Modal */}
+      {/* OE Findings Report Editor Modal */}
       {isModalOpen && (
+        <>
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 overflow-y-auto p-4 no-print animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-7xl shadow-2xl flex flex-col max-h-[94vh] animate-scale-up">
             
@@ -909,12 +1157,12 @@ export default function FindingsClient({
                 )}
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void exportReportPdf()}
                   className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {canManage && !isLocked ? (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -922,7 +1170,7 @@ export default function FindingsClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                ) : canManage && isLocked ? (
                   <button
                     type="button"
                     onClick={handleReopenFinding}
@@ -930,8 +1178,8 @@ export default function FindingsClient({
                   >
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
-                )}
-                {!isLocked && (
+                ) : null}
+                {canManage && !isLocked && (
                   <button
                     type="button"
                     onClick={handleReleaseFinding}
@@ -951,8 +1199,13 @@ export default function FindingsClient({
             </div>
 
             {/* Modal Scrollable Body */}
-            <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
-              
+            <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
+              {isPlanClosed && (
+                <div className="no-print text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded px-3 py-2">
+                  The linked OE Plan is closed, so this findings report is read-only. Reopen the plan to edit.
+                </div>
+              )}
+
               {/* Linked Execution Schedule strip */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3 no-print">
                 <div className="flex border border-slate-250 dark:border-slate-800 rounded-lg h-12 items-center">
@@ -967,6 +1220,9 @@ export default function FindingsClient({
                         selectedExecScheduleId={selectedExecScheduleId}
                         onSelect={handleExecScheduleSelect}
                         placeholder="Choose Released Execution Schedule..."
+                        linkedProjectsById={linkedProjectsById}
+                        departmentsById={departmentsById}
+                        disabled={!canManage || isLocked}
                       />
                     ) : (
                       <div className="flex items-center gap-2 overflow-hidden">
@@ -974,13 +1230,16 @@ export default function FindingsClient({
                           const es = releasedExecSchedules.find(s => s.id === selectedExecScheduleId);
                           if (es) {
                             const p = projects.find(proj => proj.id === es.projectId);
+                            const { pill, text } = p
+                              ? formatOePlanOption(p, linkedProjectsById, departmentsById)
+                              : { pill: es.projectCode || "", text: "Unknown OE Plan" };
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {es.projectCode || p?.code}
+                                  {pill}
                                 </span>
                                 <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                                  {p?.name || "Unknown OE Plan"}
+                                  {text}
                                 </span>
                                 <span className="text-slate-550 dark:text-slate-400 shrink-0">
                                   — {es.departments} ({es.actualVisitDate})
@@ -990,13 +1249,14 @@ export default function FindingsClient({
                           }
                           const proj = projects.find(p => p.id === selectedProjectId);
                           if (proj) {
+                            const { pill, text } = formatOePlanOption(proj, linkedProjectsById, departmentsById);
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {proj.code}
+                                  {pill}
                                 </span>
                                 <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                                  {proj.name}
+                                  {text}
                                 </span>
                               </>
                             );
@@ -1013,14 +1273,14 @@ export default function FindingsClient({
                 <div className="border border-[#0066cc] rounded-lg relative z-30">
                   <table className="w-full border-collapse text-xs">
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      {/* Row 1: Department — single value derived from Execution Schedule */}
+                      {/* Row 1: Project name — derived from the linked Execution Schedule's OE Plan */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Department
+                          Project name
                         </td>
                         <td colSpan={3} className="px-4 py-3">
                           <span className="text-xs font-sans font-bold text-slate-800 dark:text-slate-200">
-                            {departmentsStr || "—"}
+                            {selectedProjectObj?.name || "—"}
                           </span>
                         </td>
                       </tr>
@@ -1031,59 +1291,85 @@ export default function FindingsClient({
                           NCN
                         </td>
                         <td className="px-6 py-3">
-                          <input 
-                            type="text" 
-                            value={visitNumber}
-                            onChange={(e) => setVisitNumber(e.target.value)}
-                            placeholder="NCN #001/26"
-                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100"
-                          />
+                          <div className="flex items-center gap-3">
+                            <div className="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-[10px] font-bold shrink-0 no-print">
+                              <button
+                                type="button"
+                                disabled={!canManage || isLocked}
+                                onClick={() => setNcnKind("NCN")}
+                                title="Non-Conformance Note"
+                                className={`px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${!isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                              >
+                                NCN
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!canManage || isLocked}
+                                onClick={() => setNcnKind("CN")}
+                                title="Opportunity for Improvement"
+                                className={`px-2.5 py-1 border-l border-slate-300 dark:border-slate-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${isCnKind ? "bg-[#0066cc] text-white" : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                              >
+                                CN
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              disabled={!canManage || isLocked}
+                              value={visitNumber}
+                              onChange={(e) => setVisitNumber(e.target.value)}
+                              placeholder="NCN #001/26"
+                              className="flex-1 bg-transparent border-none p-0 text-xs focus:outline-none text-slate-800 dark:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            />
+                          </div>
                         </td>
                       </tr>
 
-                      {/* Row 3: Execution Date */}
+                      {/* Row 3: Actual Visit Date */}
                       <tr className="align-middle">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Execution Date
+                          Actual Visit Date
                         </td>
                         <td className="px-6 py-3">
-                          <input 
-                            type="date" 
+                          <input
+                            type="date"
                             required
+                            disabled={!canManage || isLocked}
                             value={actualVisitDate}
                             onChange={(e) => setActualVisitDate(e.target.value)}
                             placeholder="e.g. 22 April 2026"
-                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-bold text-slate-800 dark:text-slate-100"
+                            className="w-full bg-transparent border-none p-0 text-xs focus:outline-none font-bold text-slate-800 dark:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                           />
                         </td>
                       </tr>
 
-                      {/* Row 4: Lead Auditors */}
+                      {/* Row 4: OE Leaders */}
                       <tr className="align-middle relative z-30">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Lead Auditors
+                          OE Leaders
                         </td>
                         <td className="px-6 py-2.5">
                           <MultiSelect
                             selectedValues={leadExecutionArray}
                             onChange={(values) => setLeadExecution(values.join(", "))}
                             options={userOptions}
-                            placeholder="Select lead auditors..."
+                            placeholder="Select OE leaders..."
+                            disabled={!canManage || isLocked}
                           />
                         </td>
                       </tr>
 
-                      {/* Row 5: Auditors */}
+                      {/* Row 5: OE(s) */}
                       <tr className="align-middle relative z-20">
                         <td className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-[#0066cc]/40 text-slate-700 dark:text-slate-300">
-                          Auditors
+                          OE(s)
                         </td>
                         <td className="px-6 py-2.5">
                           <MultiSelect
                             selectedValues={teamMembersArray}
                             onChange={(values) => setTeamMembers(values.join(", "))}
                             options={userOptions}
-                            placeholder="Select auditors..."
+                            placeholder="Select OE(s)..."
+                            disabled={!canManage || isLocked}
                           />
                         </td>
                       </tr>
@@ -1099,6 +1385,7 @@ export default function FindingsClient({
                             onChange={(values) => setAdditionalAttendees(values.join(", "))}
                             options={userOptions}
                             placeholder="Select department reviewees..."
+                            disabled={!canManage || isLocked}
                           />
                         </td>
                       </tr>
@@ -1113,7 +1400,7 @@ export default function FindingsClient({
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
                       <h3 className="text-xs font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Finding & Nonconformity Line Items
+                        Finding & Observation Items
                       </h3>
                       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                         Final corrections remaining: {pendingFinalRowsCount} pending, {completedFinalRowsCount} completed.
@@ -1143,7 +1430,7 @@ export default function FindingsClient({
                 </div>
                 {activeRowIndex !== null && draftRow && (
                   <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 flex justify-center items-center z-[60] p-4 animate-fade-in no-print">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-4xl md:max-w-5xl h-[90vh] max-h-[850px] rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-slide-up">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-5xl md:max-w-6xl h-[90vh] max-h-[900px] rounded-lg shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-slide-up">
                       <div className="px-6 py-4.5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center shrink-0">
                         <div>
                           <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-[9px] font-sans font-bold text-slate-555 dark:text-slate-400">
@@ -1164,19 +1451,20 @@ export default function FindingsClient({
 
                       <div className="p-6 space-y-4 flex-1 overflow-y-auto text-left">
                         <div className="space-y-4">
-                          {/* Linked Audit Scope Selection */}
+                          {/* Linked OE Scope Selection */}
                           <div className="space-y-1">
                             <label className="text-[10px] font-sans text-slate-400 uppercase font-semibold">
                               Linked OE Scope <span className="text-red-500">*</span>
                             </label>
                             <MultiSelect
                               singleSelect={true}
-                              selectedValues={draftRow.auditScope ? [draftRow.auditScope] : []}
-                              onChange={(values) => setDraftRow({ ...draftRow, auditScope: values[0] || "" })}
-                              options={parsePlanItems(scope, "IAP-ISCP").map(obj => ({
+                              disabled={!canManage}
+                              selectedValues={draftRow.oeScope ? [draftRow.oeScope] : []}
+                              onChange={(values) => setDraftRow({ ...draftRow, oeScope: values[0] || "" })}
+                              options={parsePlanItems(scope, "IOE-SCP").map(obj => ({
                                 value: obj.id,
-                                label: obj.id,
-                                subLabel: obj.text
+                                label: obj.text || obj.id,
+                                subLabel: obj.id
                               }))}
                               placeholder="Select a linked OE scope..."
                             />
@@ -1184,23 +1472,28 @@ export default function FindingsClient({
 
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Findings & Observation</label>
-                            <RichEditor 
-                              value={draftRow.activity} 
-                              onChange={(html) => setDraftRow({ ...draftRow, activity: html })} 
+                            <RichEditor
+                              value={draftRow.activity}
+                              onChange={(html) => setDraftRow({ ...draftRow, activity: html })}
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Implication</label>
-                            <RichEditor 
-                              value={draftRow.implication || ""} 
-                              onChange={(html) => setDraftRow({ ...draftRow, implication: html })} 
+                            <RichEditor
+                              value={draftRow.implication || ""}
+                              onChange={(html) => setDraftRow({ ...draftRow, implication: html })}
+                              editorClassName="min-h-[280px] max-h-[550px]"
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-1.5">
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">Recommendation</label>
-                            <RichEditor 
-                              value={draftRow.recommendation || ""} 
-                              onChange={(html) => setDraftRow({ ...draftRow, recommendation: html })} 
+                            <RichEditor
+                              value={draftRow.recommendation || ""}
+                              onChange={(html) => setDraftRow({ ...draftRow, recommendation: html })}
+                              editorClassName="min-h-[280px] max-h-[550px]"
+                              editable={canManage}
                             />
                           </div>
                           <div className="space-y-4 pt-2">
@@ -1217,19 +1510,21 @@ export default function FindingsClient({
                                   <span className="text-sm  font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
                                     Corrective Action Date:
                                   </span>
-                                  <input 
+                                  <input
                                     type="date"
                                     required
+                                    disabled={!canManage}
                                     value={draftRow.correctiveActionDate || ""}
                                     onChange={(e) => setDraftRow({ ...draftRow, correctiveActionDate: e.target.value })}
-                                    className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px]"
+                                    className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px] disabled:cursor-not-allowed disabled:opacity-60"
                                   />
                                 </div>
                                 <div className="space-y-3">
                                   <label className="text-sm  font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Remarks</label>
-                                  <RichEditor 
-                                    value={draftRow.correctiveActionRemarks || ""} 
-                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveActionRemarks: html })} 
+                                  <RichEditor
+                                    value={draftRow.correctiveActionRemarks || ""}
+                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveActionRemarks: html })}
+                                    editable={canManage}
                                   />
                                 </div>
                               </div>
@@ -1238,14 +1533,15 @@ export default function FindingsClient({
                                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                     <div className="flex items-center gap-3">
                                       <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">
-                                        Corrective Final Date:
+                                        Completed Date:
                                       </span>
-                                      <input 
+                                      <input
                                         type="date"
                                         required
+                                        disabled={!(canManage || canResolve)}
                                         value={draftRow.correctiveFinalDate || ""}
                                         onChange={(e) => setDraftRow({ ...draftRow, correctiveFinalDate: e.target.value })}
-                                        className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px]"
+                                        className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer w-full max-w-[200px] disabled:cursor-not-allowed disabled:opacity-60"
                                       />
                                     </div>
                                     <div className="flex items-center gap-3">
@@ -1255,24 +1551,29 @@ export default function FindingsClient({
                                           <span>at {draftRow.correctiveFinalDatetime ? new Date(draftRow.correctiveFinalDatetime).toLocaleString() : ""}</span>
                                         </div>
                                       )}
-                                      <button
-                                        type="button"
-                                        onClick={markDraftRowFinalized}
-                                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors ${
-                                          draftRow.correctiveFinalUser
-                                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15"
-                                            : "bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600"
-                                        }`}
-                                      >
-                                        {draftRow.correctiveFinalUser ? "Resolved" : "Resolve"}
-                                      </button>
+                                      {(canManage || canResolve) && (
+                                        <button
+                                          type="button"
+                                          onClick={markDraftRowFinalized}
+                                          disabled={isResolveLocked}
+                                          title={isResolveLocked ? "Already resolved - only a report editor can undo this" : undefined}
+                                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-xs font-bold transition-colors disabled:cursor-not-allowed ${
+                                            draftRow.correctiveFinalUser
+                                              ? `bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 ${isResolveLocked ? "" : "hover:bg-emerald-500/15"}`
+                                              : "bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600"
+                                          }`}
+                                        >
+                                          {draftRow.correctiveFinalUser ? "Resolved" : "Resolve"}
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 <div className="space-y-1.5">
-                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Remarks</label>
-                                  <RichEditor 
-                                    value={draftRow.correctiveFinalRemarks || ""} 
-                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })} 
+                                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 w-40 sm:shrink-0">Corrective Action</label>
+                                  <RichEditor
+                                    value={draftRow.correctiveFinalRemarks || ""}
+                                    onChange={(html) => setDraftRow({ ...draftRow, correctiveFinalRemarks: html })}
+                                    editable={canManage || canResolve}
                                   />
                                 </div>
                               </div>
@@ -1284,62 +1585,51 @@ export default function FindingsClient({
                             <label className="text-[14px] font-sans font-bold text-slate-750 dark:text-slate-355 uppercase block mb-1">
                               Row Attachments
                             </label>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Up to 25 MB per file. Files are saved as soon as they are added or removed.
+                            </p>
                             <input
                               type="file"
+                              multiple
+                              disabled={!(canManage || canResolve) || uploadingCount > 0}
                               className="block w-full text-xs text-slate-500
                                 file:mr-4 file:py-2 file:px-4
                                 file:rounded-full file:border-0
                                 file:text-xs file:font-semibold
                                 file:bg-[#0066cc]/10 file:text-[#0066cc]
                                 hover:file:bg-[#0066cc]/20
+                                disabled:cursor-not-allowed disabled:opacity-60
                               "
                               onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  const base64 = event.target?.result;
-                                  if (typeof base64 === 'string') {
-                                    const currentAttachments = draftRow.attachments || [];
-                                    setDraftRow({
-                                      ...draftRow,
-                                      attachments: [...currentAttachments, {
-                                        id: Date.now().toString(),
-                                        name: file.name,
-                                        size: file.size,
-                                        type: file.type,
-                                        data: base64
-                                      }]
-                                    });
-                                  }
-                                };
-                                reader.readAsDataURL(file);
+                                const files = Array.from(e.target.files || []);
                                 e.target.value = ''; // reset input
+                                if (files.length > 0) uploadAttachments(files);
                               }}
                             />
+                            {uploadingCount > 0 && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400">Uploading {uploadingCount} file{uploadingCount > 1 ? "s" : ""}...</p>
+                            )}
                             {draftRow.attachments && draftRow.attachments.length > 0 && (
                               <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                                {draftRow.attachments.map((att: any) => (
+                                {draftRow.attachments.map((att) => (
                                   <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
                                     <div className="flex items-center gap-3">
                                       <FileDown className="w-4 h-4 text-slate-400" />
-                                      <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
+                                      <a href={attachmentUrl(att)} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
                                         {att.name}
                                       </a>
-                                      <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
+                                      <span className="text-xs text-slate-500">({formatFileSize(att.size)})</span>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setDraftRow({
-                                          ...draftRow,
-                                          attachments: draftRow.attachments?.filter((a: any) => a.id !== att.id)
-                                        });
-                                      }}
-                                      className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
+                                    {(canManage || canResolve) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeAttachment(att)}
+                                        title="Remove file"
+                                        className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -1356,13 +1646,23 @@ export default function FindingsClient({
                         >
                           Cancel
                         </button>
-                        <button
-                          type="button"
-                          onClick={saveRowEdit}
-                          className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
-                        >
-                          Apply Changes
-                        </button>
+                        {canManage ? (
+                          <button
+                            type="button"
+                            onClick={saveRowEdit}
+                            className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
+                          >
+                            Apply Changes
+                          </button>
+                        ) : canResolve ? (
+                          <button
+                            type="button"
+                            onClick={saveResolveOnly}
+                            className="px-3 py-1.5 bg-[#0066cc] text-white rounded text-xs font-bold hover:bg-[#004499] cursor-pointer"
+                          >
+                            Save Resolution
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1372,19 +1672,19 @@ export default function FindingsClient({
                     <thead>
                       <tr className="bg-slate-50 dark:bg-slate-900 border-b border-[#0066cc] font-bold text-slate-700 dark:text-slate-200">
                         <th className="px-4 py-3 w-[5%] text-center border-r border-[#0066cc]/30">No</th>
-                        <th className="px-4 py-3 w-[30%] border-r border-[#0066cc]/30">Linked OE Scope</th>
-                        <th className="px-4 py-3 w-[25%] border-r border-[#0066cc]/30">Finding & Observations</th>
-                        <th className="px-4 py-3 w-[15%] border-r border-[#0066cc]/30">Implication</th>
-                        <th className="px-4 py-3 w-[15%] border-r border-[#0066cc]/30">Recommendation</th>
-                        <th className="px-4 py-3 w-[10%] text-center">Status</th>
-                        {canManage && <th className="px-4 py-3 w-20 text-center border-l border-[#0066cc]/30 no-print">Action</th>}
+                        <th className="px-4 py-3 w-[14%] border-r border-[#0066cc]/30">Linked OE Scope</th>
+                        <th className="px-4 py-3 w-[22%] border-r border-[#0066cc]/30">Finding & Observations</th>
+                        <th className="px-4 py-3 w-[26%] border-r border-[#0066cc]/30">Implication</th>
+                        <th className="px-4 py-3 w-[26%] border-r border-[#0066cc]/30">Recommendation</th>
+                        <th className="px-4 py-3 w-[7%] text-center">Status</th>
+                        {(canManage || canResolve) && <th className="px-4 py-3 w-20 text-center border-l border-[#0066cc]/30 no-print">Action</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
                       {rows.length === 0 ? (
                         <tr>
-                          <td colSpan={canManage ? 7 : 6} className="px-4 py-8 text-center text-slate-400 italic">
-                            No finding line items recorded in this report. Click "Add Finding Line" to add one.
+                          <td colSpan={(canManage || canResolve) ? 7 : 6} className="px-4 py-8 text-center text-slate-400 italic">
+                            No finding line items recorded in this report.{canManage && !isLocked && ' Click "Add Finding Line" to add one.'}
                           </td>
                         </tr>
                       ) : (
@@ -1392,12 +1692,18 @@ export default function FindingsClient({
                           <tr key={idx} className="align-top hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
                             <td className="px-4 py-3.5 text-center font-sans text-slate-400 border-r border-slate-200 dark:border-slate-800">{idx + 1}</td>
                             
-                            <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 font-sans text-slate-800 dark:text-slate-200 font-semibold">
-                              {row.auditScope ? (
-                                <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-200">
-                                  {row.auditScope}
-                                </span>
-                              ) : (
+                            <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800 font-sans text-slate-800 dark:text-slate-200">
+                              {row.oeScope ? (() => {
+                                const matched = parsePlanItems(scope, "IOE-SCP").find(o => o.id === row.oeScope);
+                                return (
+                                  <div className="space-y-1">
+                                    <div className="font-semibold">{matched?.text || row.oeScope}</div>
+                                    <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-200">
+                                      {row.oeScope}
+                                    </span>
+                                  </div>
+                                );
+                              })() : (
                                 <span className="text-slate-400 italic">—</span>
                               )}
                             </td>
@@ -1418,11 +1724,11 @@ export default function FindingsClient({
                                   )}
                                   {row.conductBy && <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">by {row.conductBy}</span>}
                                 </div>
-                                <div className="prose dark:prose-invert text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: row.activity }} />
+                                <div className="rich-text-content text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: row.activity }} />
                                 {row.attachments && row.attachments.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-1">
-                                    {row.attachments.map((att: any) => (
-                                      <a key={att.id} href={att.data} download={att.name} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-[9px]">
+                                    {row.attachments.map((att) => (
+                                      <a key={att.id} href={attachmentUrl(att)} download={att.name} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-[9px]">
                                         <FileDown className="w-3 h-3" />
                                         <span className="truncate max-w-[100px]">{att.name}</span>
                                       </a>
@@ -1432,10 +1738,10 @@ export default function FindingsClient({
                               </div>
                             </td>
                             <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800">
-                              <div className="prose dark:prose-invert text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.implication) ? row.implication || "" : "" }} />
+                              <div className="rich-text-content text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.implication) ? row.implication || "" : "" }} />
                             </td>
                             <td className="px-4 py-3.5 border-r border-slate-200 dark:border-slate-800">
-                              <div className="prose dark:prose-invert text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.recommendation) ? row.recommendation || "" : "" }} />
+                              <div className="rich-text-content text-[11px] leading-relaxed text-slate-600 dark:text-slate-400" dangerouslySetInnerHTML={{ __html: !isHtmlEmpty(row.recommendation) ? row.recommendation || "" : "" }} />
                             </td>
                             <td className="px-4 pt-4 pb-3 align-top text-center">
                               {row.correctiveFinalUser ? (
@@ -1452,7 +1758,7 @@ export default function FindingsClient({
                                 </span>
                               )}
                             </td>
-                            {canManage && (
+                            {canManage ? (
                               <td className="px-4 py-3.5 text-center space-x-1 whitespace-nowrap border-l border-slate-200 dark:border-slate-800 no-print">
                                 <button
                                   type="button"
@@ -1462,16 +1768,29 @@ export default function FindingsClient({
                                 >
                                   <Edit className="w-3.5 h-3.5" />
                                 </button>
+                                {canDeleteFindingRows && (
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteRowItem(idx)}
+                                    className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                    title="Remove Line"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </td>
+                            ) : canResolve ? (
+                              <td className="px-4 py-3.5 text-center space-x-1 whitespace-nowrap border-l border-slate-200 dark:border-slate-800 no-print">
                                 <button
                                   type="button"
-                                  onClick={() => deleteRowItem(idx)}
-                                  className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                  title="Remove Line"
+                                  onClick={() => startEditingRow(idx)}
+                                  className="p-1 text-slate-400 hover:text-emerald-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                  title="Resolve"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <CheckCircle className="w-3.5 h-3.5" />
                                 </button>
                               </td>
-                            )}
+                            ) : null}
                           </tr>
                         ))
                       )}
@@ -1479,72 +1798,19 @@ export default function FindingsClient({
                   </table>
               </div>
 
-              {/* Attachments Section */}
-              <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-sm font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  Attachments
-                </h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    className="block w-full text-xs text-slate-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-xs file:font-semibold
-                      file:bg-[#0066cc]/10 file:text-[#0066cc]
-                      hover:file:bg-[#0066cc]/20
-                    "
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const base64 = event.target?.result;
-                        if (typeof base64 === 'string') {
-                          setAttachments([...attachments, {
-                            id: Date.now().toString(),
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            data: base64
-                          }]);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = ''; // reset input
-                    }}
-                  />
-                  {attachments.length > 0 && (
-                    <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                      {attachments.map((att) => (
-                        <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <div className="flex items-center gap-3">
-                            <FileDown className="w-4 h-4 text-slate-400" />
-                            <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
-                              {att.name}
-                            </a>
-                            <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                          </div>
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={() => setAttachments(attachments.filter(a => a.id !== att.id))}
-                              className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
               </div>
 
             </form>
           </div>
         </div>
+
+        {/* Print-only report: what Export PDF prints (the editor above is hidden in print) */}
+        <div id="scoping-modal-root">
+          <div className="plan-print-root">
+            <FindingPrintDocument data={buildPrintData()} />
+          </div>
+        </div>
+        </>
       )}
 
     </div>

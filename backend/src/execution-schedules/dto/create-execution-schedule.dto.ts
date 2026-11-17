@@ -30,7 +30,7 @@ export class CreateExecutionScheduleDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  auditPeriod!: string;
+  oePeriod!: string;
 
   @ApiProperty()
   @IsString()
@@ -89,11 +89,6 @@ export class CreateExecutionScheduleDto {
   @IsString()
   @IsNotEmpty()
   scheduleRows!: string;
-
-  @ApiPropertyOptional({ description: 'JSON-serialized array of attachments' })
-  @IsOptional()
-  @IsString()
-  attachments?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

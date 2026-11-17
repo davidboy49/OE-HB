@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { 
+import { useEffect, useRef, useState } from "react";
+import {
+  ClipboardCheck, 
   LayoutDashboard, 
   CalendarRange, 
   ClipboardList,
@@ -14,37 +15,75 @@ import {
   UserCheck, 
   Sun, 
   Moon,
-  ChevronRight,
   ChevronDown,
   Menu,
   Bell,
   User as UserIcon,
   Lock,
   Building,
+  Building2,
   CalendarCheck,
   History,
   MessageSquare,
   Settings as SettingsIcon,
+  ShieldCheck,
   X
 } from "lucide-react";
-import type { User } from "@auditdesk/shared";
-import { getActiveAlertsCount } from "@auditdesk/shared";
+import type { User } from "@oeportal/shared";
 import { apiFetch } from "@/lib/apiClient";
-import { RBAC } from "@/lib/auth";
+import { navFor } from "@/lib/nav";
+
+const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  "/annual-plans": CalendarRange,
+  "/planning": ClipboardList,
+  "/meetings": MessageSquare,
+  "/schedule": CalendarCheck,
+  "/findings": AlertTriangle,
+  "/findings-alerts": BellRing,
+  "/meeting-responses": ClipboardCheck,
+  "/users": Users,
+  "/access-control": ShieldCheck,
+  "/departments": Building,
+  "/business-units": Building2,
+  "/logs": History,
+  "/settings": SettingsIcon,
+};
 
 interface AppLayoutProps {
   children: React.ReactNode;
   currentUser: User;
 }
 
-export default function AppLayout({ children, currentUser }: AppLayoutProps) {
+export default function AppLayout({ children, currentUser: initialCurrentUser }: AppLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light"); // Default light just like screenshot
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [auditModuleOpen, setAuditModuleOpen] = useState(true);
+  const [oeModuleOpen, setOeModuleOpen] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // Root layout persists across client-side (<Link>) navigation in the App
+  // Router - a plain `currentUser` prop would stay frozen at whatever it was
+  // on the last hard load, so sidebar gating/role display could lag behind an
+  // admin changing this user's group/role/permissions elsewhere. Re-fetch on
+  // every route change (each page's own Server Component already does the
+  // same for its own RBAC checks) so the sidebar stays in sync too.
+  const [currentUser, setCurrentUser] = useState<User>(initialCurrentUser);
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    apiFetch<User>("/auth/me")
+      .then(setCurrentUser)
+      .catch(() => {
+        // Session likely expired/invalidated mid-navigation - let the page-level
+        // redirect-to-login (getCurrentUserServer) handle it, not this refresh.
+      });
+  }, [pathname]);
 
   useEffect(() => {
     const savedAvatar = localStorage.getItem(`avatar_${currentUser.id}`);
@@ -80,29 +119,6 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
     router.refresh();
   };
 
-  const [simulatedAlerts, setSimulatedAlerts] = useState<Array<{ id: string; to: string; subject: string; body: string }>>([]);
-
-  useEffect(() => {
-    const handleSimulatedEmail = (e: Event) => {
-      const customEvent = e as CustomEvent<{ to: string; subject: string; body: string }>;
-      const { to, subject, body } = customEvent.detail;
-      const newAlert = {
-        id: Math.random().toString(36).substring(7),
-        to,
-        subject,
-        body
-      };
-      setSimulatedAlerts(prev => [...prev, newAlert]);
-      // Auto-remove after 8 seconds
-      setTimeout(() => {
-        setSimulatedAlerts(prev => prev.filter(a => a.id !== newAlert.id));
-      }, 8000);
-    };
-
-    window.addEventListener("send-simulated-email" as any, handleSimulatedEmail);
-    return () => window.removeEventListener("send-simulated-email" as any, handleSimulatedEmail);
-  }, []);
-
   // Initialize theme from localStorage or document class
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -127,80 +143,50 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
     }
   };
 
-  const [activeAlertsCount, setActiveAlertsCount] = useState<number>(0);
-
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const schedules = await apiFetch<any[]>("/execution-schedules");
-        const count = getActiveAlertsCount(schedules);
-        setActiveAlertsCount(count);
-      } catch (err) {
-        console.error("Failed to fetch alerts count:", err);
-      }
-    };
-
-    fetchAlerts();
-
-    const handleRefresh = () => fetchAlerts();
-    window.addEventListener("findings-updated", handleRefresh);
-    window.addEventListener("schedule-updated", handleRefresh);
-
-    return () => {
-      window.removeEventListener("findings-updated", handleRefresh);
-      window.removeEventListener("schedule-updated", handleRefresh);
-    };
-  }, []);
-
-  const menuItems = [
-    { name: "Annual OE Plans", href: "/annual-plans", icon: CalendarRange },
-    // { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Individual OE Plans", href: "/planning", icon: CalendarRange },    
-    { name: "Open Meetings", href: "/meetings", icon: MessageSquare },
-    { name: "Execution Schedule", href: "/schedule", icon: CalendarCheck },
-    { name: "OE Findings", href: "/findings", icon: AlertTriangle },
-    { name: "Findings Alerts", href: "/findings-alerts", icon: BellRing, badge: activeAlertsCount },
-    { name: "User Groups", href: "/users", icon: Users },
-    { name: "Departments", href: "/departments", icon: Building },
-  ];
-
-  if (RBAC.can(currentUser, "activity-logs:view")) {
-    menuItems.push({ name: "Activity Logs", href: "/logs", icon: History });
-  }
-  if (RBAC.can(currentUser, "notifications:configure")) {
-    menuItems.push({ name: "System Settings", href: "/settings", icon: SettingsIcon });
-  }
+  // Only the pages this user's permissions allow (see lib/nav.ts - the pages themselves
+  // are guarded by the same list, so a hidden item is also a closed door).
+  const menuItems = navFor(currentUser).map((item) => ({
+    ...item,
+    icon: NAV_ICONS[item.href] ?? Building,
+  }));
 
   // Dynamic breadcrumb matching screenshot structure
   const getBreadcrumb = () => {
-    if (pathname.startsWith("/planning")) return "Engagement / Individual OE Plan (IAP)";
+    if (pathname.startsWith("/planning")) return "Project / Individual OE Plan";
     if (pathname.startsWith("/schedule")) return "Execution / Execution Schedule & Document Request";
+    if (pathname.startsWith("/meeting-responses")) return "Collaboration / Department Responses";
     if (pathname.startsWith("/meetings")) return "Collaboration / Open Meetings & Minutes";
     if (pathname.startsWith("/findings-alerts")) return "Mitigation / Findings Alerts";
     if (pathname.startsWith("/findings")) return "Mitigation / Findings Ledger";
     if (pathname.startsWith("/users")) return "Identity / User Management";
+    if (pathname.startsWith("/access-control")) return "Identity / Access Control";
+    if (pathname.startsWith("/no-access")) return "Portal / No access";
     if (pathname.startsWith("/departments")) return "Identity / Department Management";
+    if (pathname.startsWith("/business-units")) return "Identity / Business Unit Management";
     if (pathname.startsWith("/annual-plans")) return "Strategy / Annual OE Plan";
     if (pathname.startsWith("/logs")) return "Administration / Activity Logs";
     if (pathname.startsWith("/settings")) return "Administration / System Settings";
     return "Portal / Dashboard";
   };
 
+  // The QR scan page is phone-first and self-contained - no sidebar.
+  if (pathname.startsWith("/scan")) return <>{children}</>;
+
   return (
-    <div className="min-h-screen flex bg-slate-100 dark:bg-slate-950 text-foreground transition-colors duration-200">
+    <div className="h-screen overflow-hidden flex bg-slate-100 dark:bg-slate-950 text-foreground transition-colors duration-200">
       
       {/* Sidebar - Solid Deep Blue */}
       <aside 
         className={`${
           sidebarOpen ? "w-64" : "w-0 overflow-hidden"
-        } transition-all duration-300 bg-[#063960] text-white flex flex-col justify-between shrink-0 relative shadow-lg z-20`}
+        } h-screen transition-all duration-300 bg-[#063960] text-white flex flex-col shrink-0 relative shadow-lg z-20`}
       >
         {/* Background H Watermark overlay */}
         <div className="absolute inset-0 opacity-5 pointer-events-none flex items-center justify-center overflow-hidden">
           {/* <div className="text-[280px] font-bold select-none font-sans leading-none">H</div> */}
         </div>
 
-        <div className="z-10">
+        <div className="z-10 flex-1 min-h-0 overflow-y-auto">
           {/* Header - "HE PORTAL" */}
           <div className="h-16 flex items-center justify-between px-5 border-b border-[#042844] shrink-0">
             <span className="font-sans font-extrabold tracking-wider text-base">OE Portal</span>
@@ -226,7 +212,7 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
             </label>
             <div className="text-center space-y-1">
               <div className="text-xs text-slate-300 font-sans flex items-center justify-center gap-1">
-                <Lock className="w-3 h-3 text-slate-400" /> {currentUser.role}
+                <Lock className="w-3 h-3 text-slate-400" /> {currentUser.groupName ?? "No Group"}
               </div>
               <div className="font-bold text-sm tracking-wide uppercase text-white">
                 {currentUser.name}
@@ -236,31 +222,35 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
 
           {/* Navigation Links with nesting */}
           <nav className="py-4 space-y-1">
-            {/* Audit Module Collapsible Parent */}
+            {/* OE Module Collapsible Parent (omitted when nothing in it is permitted) */}
+            {menuItems.length > 0 && (
             <div>
               <button
                 type="button"
-                onClick={() => setAuditModuleOpen(!auditModuleOpen)}
+                onClick={() => setOeModuleOpen(!oeModuleOpen)}
                 className="w-full flex items-center justify-between px-5 py-3 text-xs font-bold text-white hover:bg-[#053254]/50 transition-all select-none cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <Building className="w-4 h-4 text-slate-300" />
                   <span className="uppercase tracking-wider">OE Module</span>
                 </div>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${auditModuleOpen ? "" : "-rotate-90"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${oeModuleOpen ? "" : "-rotate-90"}`} />
               </button>
 
               {/* Nested Child Items */}
               <div 
                 className={`transition-all duration-300 overflow-hidden ${
-                  auditModuleOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                  oeModuleOpen ? "max-h-[900px] opacity-100" : "max-h-0 opacity-0"
                 }`}
               >
                 <div className="pl-4 border-l border-[#042844] ml-7 my-1 space-y-1">
                   {menuItems.map((item) => {
                     const Icon = item.icon;
-                    const isActive = pathname.startsWith(item.href) || (item.href === "/dashboard" && pathname === "/");
-                    
+                    const isActive =
+                      pathname === item.href ||
+                      pathname.startsWith(`${item.href}/`) ||
+                      (item.href === "/dashboard" && pathname === "/");
+
                     return (
                       <Link
                         key={item.name}
@@ -275,25 +265,18 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
                           <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{item.name}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          {typeof item.badge === "number" && item.badge > 0 && (
-                            <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse">
-                              {item.badge}
-                            </span>
-                          )}
-                          <ChevronRight className="w-2.5 h-2.5 text-slate-500" />
-                        </div>
                       </Link>
                     );
                   })}
                 </div>
               </div>
             </div>
+            )}
           </nav>
         </div>
 
         {/* Sidebar Footer info */}
-        <div className="p-4 border-t border-[#042844] space-y-2 bg-[#042d4c]/30 text-center z-10">
+        <div className="p-4 border-t border-[#042844] space-y-2 bg-[#042d4c]/30 text-center z-10 shrink-0">
           <div className="text-[10px] text-slate-400 font-sans tracking-wider">
             {currentUser.departmentId ? `DEPT: ${currentUser.departmentName || "SECURITY"}` : "GLOBAL ACCESS"}
           </div>
@@ -301,7 +284,7 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
       </aside>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="h-screen flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         
         {/* Top Header */}
         <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between px-6 z-10 shrink-0 shadow-xs">
@@ -352,41 +335,9 @@ export default function AppLayout({ children, currentUser }: AppLayoutProps) {
         </div>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-8 bg-slate-100 dark:bg-slate-950">
+        <main className="min-h-0 flex-1 overflow-y-auto p-8 bg-slate-100 dark:bg-slate-950">
           {children}
         </main>
-      </div>
-
-      {/* Global Simulated SMTP Notification Stack */}
-      <div className="fixed bottom-6 left-6 z-[100] flex flex-col gap-3 max-w-sm w-full no-print">
-        {simulatedAlerts.map((alert) => (
-          <div 
-            key={alert.id} 
-            className="bg-slate-900 border border-slate-800 text-slate-100 p-4 rounded-lg shadow-2xl animate-slide-up flex flex-col gap-1.5 relative overflow-hidden"
-          >
-            {/* Top pulsing indicator */}
-            <div className="flex items-center justify-between">
-              <div className="text-[10px] font-sans text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
-                Simulated SMTP Alert
-              </div>
-              <button 
-                onClick={() => setSimulatedAlerts(prev => prev.filter(a => a.id !== alert.id))}
-                className="text-slate-400 hover:text-white cursor-pointer transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-200">To: {alert.to}</div>
-              <div className="text-xs font-semibold text-slate-300 mt-1">{alert.subject}</div>
-              <div 
-                className="text-[10px] text-slate-450 leading-relaxed mt-1 prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: alert.body }}
-              />
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

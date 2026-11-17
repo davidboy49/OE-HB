@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -15,11 +17,14 @@ import { ExecutionSchedulesService } from './execution-schedules.service';
 import { CreateExecutionScheduleDto } from './dto/create-execution-schedule.dto';
 import { UpdateExecutionScheduleDto } from './dto/update-execution-schedule.dto';
 import { RecordConsentDto } from './dto/record-consent.dto';
+import { ConfirmAttendeeDto } from './dto/confirm-attendee.dto';
+import { ResolveFindingRowDto } from './dto/resolve-finding-row.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
-import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { AccessScopeService } from '../common/access-scope.service';
+import { PermissionsResolverService } from '../common/permissions-resolver.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('execution-schedules')
@@ -28,11 +33,16 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 export class ExecutionSchedulesController {
   constructor(
     private readonly executionSchedulesService: ExecutionSchedulesService,
+    private readonly accessScope: AccessScopeService,
+    private readonly permissionsResolver: PermissionsResolverService,
   ) {}
 
   @Get()
-  findAll() {
-    return this.executionSchedulesService.findAll();
+  @RequirePermission('execution-schedules:view')
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.executionSchedulesService.findAll(
+      await this.accessScope.schedules(user.sub),
+    );
   }
 
   @Post()
@@ -42,12 +52,21 @@ export class ExecutionSchedulesController {
     action: 'CREATE_SCHEDULE',
     details: `Created execution schedule for project ID: ${req.body.projectId}`,
   }))
-  create(@Body() dto: CreateExecutionScheduleDto) {
-    return this.executionSchedulesService.create(dto);
+  async create(
+    @Body() dto: CreateExecutionScheduleDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('oePlan', dto.projectId, user.sub);
+    return this.executionSchedulesService.create(dto, user.name);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  @RequirePermission('execution-schedules:view')
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.findOne(id);
   }
 
@@ -75,9 +94,32 @@ export class ExecutionSchedulesController {
     @Param('id') id: string,
     @Body() dto: UpdateExecutionScheduleDto,
     @Req() req: Request,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     const oldSchedule = await this.executionSchedulesService.findOne(id);
-    const result = await this.executionSchedulesService.update(id, dto);
+
+    await this.assertReleasedScheduleLock(oldSchedule, dto, user);
+
+    // Finding rows live inside scheduleRows, so deleting one uses this broad update route.
+    // Require the dedicated capability when a findings report loses a row; otherwise a
+    // caller could bypass the UI permission by sending this PATCH directly.
+    if (
+      oldSchedule?.language === 'finding' &&
+      dto.scheduleRows !== undefined &&
+      this.hasRemovedRows(oldSchedule.scheduleRows, dto.scheduleRows)
+    ) {
+      await this.permissionsResolver.requirePermission(
+        user,
+        'execution-schedules:delete-finding-row',
+      );
+    }
+
+    const result = await this.executionSchedulesService.update(
+      id,
+      dto,
+      user.name,
+    );
 
     let action = 'UPDATE_SCHEDULE';
     let details = `Updated execution schedule ID: ${id}`;
@@ -101,6 +143,56 @@ export class ExecutionSchedulesController {
     return result;
   }
 
+  /**
+   * A RELEASED Execution Schedule (Document 2 - not a findings report or meeting, which share
+   * this table but have their own post-release flows) is locked: the only change it accepts
+   * through this route is a bare reopen back to DRAFT, which needs its own permission.
+   * Attendee confirmations and department consents have their own routes and aren't affected.
+   */
+  private async assertReleasedScheduleLock(
+    oldSchedule: { language?: string; status?: string } | null,
+    dto: UpdateExecutionScheduleDto,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    if (
+      !oldSchedule ||
+      oldSchedule.status !== 'RELEASED' ||
+      oldSchedule.language === 'finding' ||
+      oldSchedule.language === 'meeting'
+    ) {
+      return;
+    }
+    const REOPEN_KEYS = ['status', 'lastModifiedBy', 'expectedUpdatedAt'];
+    const isBareReopen =
+      dto.status === 'DRAFT' &&
+      Object.entries(dto).every(
+        ([key, value]) => value === undefined || REOPEN_KEYS.includes(key),
+      );
+    if (!isBareReopen) {
+      throw new BadRequestException(
+        'This Execution Schedule is released and locked. Reopen it before making changes.',
+      );
+    }
+    await this.permissionsResolver.requirePermission(
+      user,
+      'execution-schedules:reopen',
+    );
+  }
+
+  private hasRemovedRows(previousRows: string, nextRows: string): boolean {
+    try {
+      const previous = JSON.parse(previousRows || '[]');
+      const next = JSON.parse(nextRows || '[]');
+      return (
+        Array.isArray(previous) &&
+        Array.isArray(next) &&
+        next.length < previous.length
+      );
+    } catch {
+      return false;
+    }
+  }
+
   @Delete(':id')
   @RequirePermission('execution-schedules:delete')
   @UseInterceptors(ActivityLogInterceptor)
@@ -108,15 +200,12 @@ export class ExecutionSchedulesController {
     action: 'DELETE_SCHEDULE',
     details: `Deleted execution schedule ID: ${req.params.id}`,
   }))
-  remove(@Param('id') id: string) {
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.remove(id);
-  }
-
-  /** Public: an unauthenticated auditee scanning a physical QR code has no account. */
-  @Public()
-  @Get('qr/:qrToken')
-  findByQrToken(@Param('qrToken') qrToken: string) {
-    return this.executionSchedulesService.findByQrToken(qrToken);
   }
 
   /**
@@ -131,12 +220,13 @@ export class ExecutionSchedulesController {
     action: 'RECORD_DEPARTMENT_CONSENT',
     details: `User ${(req as any).user?.name} (${req.params.departmentId}) recorded consent status: ${req.body.status} for schedule ${req.params.id}`,
   }))
-  recordConsent(
+  async recordConsent(
     @Param('id') id: string,
     @Param('departmentId') departmentId: string,
     @Body() dto: RecordConsentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
     return this.executionSchedulesService.updateDepartmentConsent(
       id,
       departmentId,
@@ -148,6 +238,77 @@ export class ExecutionSchedulesController {
         timestamp: new Date().toISOString(),
         comments: dto.comments || '',
       },
+    );
+  }
+
+  /**
+   * Records that one attendee confirmed attendance - a single atomic write to just that key
+   * (see ExecutionSchedulesService.confirmAttendee), unlike the generic PATCH above which
+   * replaces the whole record and would silently drop a concurrent confirmation from someone
+   * else. Same permission as the generic edit route, plus: you may only confirm your own
+   * attendance unless you hold `execution-schedules:confirm-others` (previously only enforced
+   * in the UI).
+   */
+  @Patch(':id/attendee-confirmation')
+  @RequirePermission('execution-schedules:update')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'CONFIRM_ATTENDEE',
+    details: `${req.body.attendeeName} confirmed attendance on schedule ID: ${req.params.id}`,
+  }))
+  async confirmAttendee(
+    @Param('id') id: string,
+    @Body() dto: ConfirmAttendeeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
+    const isOwnName =
+      dto.attendeeName.trim().toLowerCase() === user.name.trim().toLowerCase();
+    if (!isOwnName) {
+      const granted = await this.permissionsResolver.getEffectivePermissions(
+        user.sub,
+      );
+      if (!granted.includes('execution-schedules:confirm-others')) {
+        throw new ForbiddenException(
+          'Only the attendee or a user with confirm-others permission can confirm this attendance.',
+        );
+      }
+    }
+    return this.executionSchedulesService.confirmAttendee(
+      id,
+      dto.attendeeName,
+      user.name,
+    );
+  }
+
+  /**
+   * Lets a caller who holds ONLY `execution-schedules:resolve-finding` (not
+   * `execution-schedules:update`) fill in one finding row's corrective action and mark it
+   * resolved, without being able to touch anything else on the report - see
+   * ResolveFindingRowDto for the exact field whitelist. `assertVisible` reuses the caller's
+   * `execution-schedules:view` scope, which is what naturally limits a DEPARTMENT-scoped
+   * group to their own department's reports while an ALL-scoped group (e.g. OE Team) can
+   * resolve rows on any department's report - no separate department check needed here.
+   */
+  @Patch(':id/finding-rows/:rowId/resolve')
+  @RequirePermission('execution-schedules:resolve-finding')
+  @UseInterceptors(ActivityLogInterceptor)
+  @LogActivity((req) => ({
+    action: 'RESOLVE_FINDING_ROW',
+    details: `Resolved finding row ${req.params.rowId} on schedule ID: ${req.params.id}`,
+  }))
+  async resolveFindingRow(
+    @Param('id') id: string,
+    @Param('rowId') rowId: string,
+    @Body() dto: ResolveFindingRowDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('schedule', id, user.sub);
+    return this.executionSchedulesService.resolveFindingRow(
+      id,
+      rowId,
+      dto,
+      user.name,
     );
   }
 }

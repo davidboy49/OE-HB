@@ -55,3 +55,6 @@ frontend/.env
 # prisma generated client
 backend/src/generated/prisma
 frontend/src/generated/prisma
+
+# Headless Chrome for server-side PDF export, downloaded by npm install (see .puppeteerrc.cjs)
+.cache/

@@ -2,13 +2,13 @@
 
 import React from "react";
 import { Plus, Trash2, Tag, ChevronUp, ChevronDown } from "lucide-react";
-import type { AuditPlanItem } from "@auditdesk/shared";
+import type { PlanItem } from "@oeportal/shared";
 
 interface PlanItemEditorProps {
   sectionTitle: string;
-  items: AuditPlanItem[];
-  onChange: (items: AuditPlanItem[]) => void;
-  prefix: string; // e.g. "IAP-OBJ" or "IAP-ISCP"
+  items: PlanItem[];
+  onChange: (items: PlanItem[]) => void;
+  prefix: string; // e.g. "IOE-OBJ" or "IOE-SCP"
   editable?: boolean;
   placeholder?: string;
   addBtnText?: string;
@@ -113,7 +113,7 @@ export default function PlanItemEditor({
             >
               {/* Item Header Toolbar */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700 flex items-center gap-1">
                     <Tag className="w-3 h-3 text-slate-500" />
                     {editable ? (

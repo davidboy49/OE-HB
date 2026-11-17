@@ -19,8 +19,8 @@ async function bootstrap() {
   );
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('AuditDesk API')
-    .setDescription('REST API for the AuditDesk audit management backend')
+    .setTitle('OE Portal API')
+    .setDescription('REST API for the OE Portal backend')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

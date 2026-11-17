@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   Users, 
   User as UserIcon,
@@ -20,26 +20,33 @@ import {
   Unlock,
   BadgeCheck,
   CheckCircle2,
-  QrCode
+  CheckCircle,
+  XCircle,
+  Send,
 } from "lucide-react";
 import type {
   User,
-  AuditProject,
+  OePlan,
   OpenMeeting,
   ScheduleRow,
   Department,
-  AuditPlan
-} from "@auditdesk/shared";
-import { clientApi } from "@/lib/apiClient";
+  Project,
+  PlanItem
+} from "@oeportal/shared";
+import { clientApi, ApiError } from "@/lib/apiClient";
 import { RBAC } from "@/lib/auth";
+import { fmt as printFmt } from "@/components/print/print-kit";
+import SessionPrintDocument, { type SessionPrintData } from "@/components/print/session-print-document";
 import ActionToolbar from "@/components/ui/action-toolbar";
 import RichEditor from "@/components/ui/rich-editor";
 import MultiSelect from "@/components/ui/multi-select";
+import TablePagination, { useClientPagination } from "@/components/ui/table-pagination";
+import { SortableTh, useTableSort } from "@/components/ui/sortable-header";
 import PlanItemEditor from "@/components/ui/plan-item-editor";
-import { parsePlanItems } from "@auditdesk/shared";
-import QRCodeModal from "@/components/ui/qr-code-modal";
-import AuditPlanSelect from "@/components/ui/audit-plan-select";
-import QRCode from "qrcode";
+import MeetingResponsesPanel from "@/components/ui/meeting-responses-panel";
+import { parsePlanItems, resolveInheritedPlanContent } from "@oeportal/shared";
+import OePlanSelect, { formatOePlanOption } from "@/components/ui/oe-plan-select";
+import { exportReportPdf } from "@/components/print/export-pdf";
 
 // Helper to format date strings for display
 const formatDateString = (dateStr: string) => {
@@ -125,10 +132,10 @@ const pruneConfirmations = (attendeeNames: string[], confirmations: Record<strin
 
 interface MeetingsClientProps {
   initialSchedules: OpenMeeting[];
-  projects: AuditProject[];
+  projects: OePlan[];
   users: User[];
   departments: Department[];
-  auditPlans?: AuditPlan[];
+  plannedEngagements?: Project[];
   currentUser: User;
 }
 
@@ -137,7 +144,7 @@ export default function MeetingsClient({
   projects, 
   users, 
   departments,
-  auditPlans = [],
+  plannedEngagements = [],
   currentUser 
 }: MeetingsClientProps) {
   const [schedules, setSchedules] = useState<OpenMeeting[]>(initialSchedules);
@@ -148,6 +155,10 @@ export default function MeetingsClient({
 
   // Selection & Modal
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  // The updatedAt of the meeting as last loaded/saved; sent back as expectedUpdatedAt so the
+  // server can refuse a save if someone else changed the meeting in the meantime, instead of
+  // silently overwriting their edit (see MeetingsService.update).
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   
@@ -157,17 +168,15 @@ export default function MeetingsClient({
   const [address, setAddress] = useState("HB-HQ");
   const [visitNumber, setVisitNumber] = useState("01");
   const [actualVisitDate, setActualVisitDate] = useState("");
-  const [auditPeriod, setAuditPeriod] = useState("");
+  const [oePeriod, setOePeriod] = useState("");
   const [leadExecution, setLeadExecution] = useState("");
   const [teamMembers, setTeamMembers] = useState("");
   const [additionalAttendees, setAdditionalAttendees] = useState("");
   const [standards, setStandards] = useState("Meeting Alignment Agenda");
   const [objectives, setObjectives] = useState("");
   const [scope, setScope] = useState("");
-  const [departmentConcern, setDepartmentConcern] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
   const [rows, setRows] = useState<ScheduleRow[]>([]);
-  const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "RELEASED">("DRAFT");
+  const [meetingStatus, setMeetingStatus] = useState<"DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED">("DRAFT");
   const [attendeeConfirmations, setAttendeeConfirmations] = useState<Record<string, AttendeeConfirmation>>({});
   // Active row index for card editing
   const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
@@ -178,40 +187,6 @@ export default function MeetingsClient({
 
   // Feedback notifier
   const [feedback, setFeedback] = useState<string | null>(null);
-
-  // QR Code Modal State
-  const [qrModalOpen, setQrModalOpen] = useState<boolean>(false);
-  const [qrModalData, setQrModalData] = useState<{
-    qrToken: string;
-    projectTitle: string;
-    projectCode: string;
-    departments: string;
-  } | null>(null);
-
-  // Mini QR State
-  const [miniQrDataUrl, setMiniQrDataUrl] = useState<string>("");
-
-  useEffect(() => {
-    if (isModalOpen && modalMode === "edit" && selectedScheduleId) {
-      const activeSch = schedules.find(s => s.id === selectedScheduleId);
-      if (activeSch?.qrToken) {
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const url = `${origin}/meetings/scan/${activeSch.qrToken}`;
-        QRCode.toDataURL(url, {
-          width: 120,
-          margin: 1,
-          color: {
-            dark: "#05375c",
-            light: "#FFFFFF"
-          }
-        })
-        .then(urlData => setMiniQrDataUrl(urlData))
-        .catch(err => console.error("Failed to generate mini QR", err));
-        return;
-      }
-    }
-    setMiniQrDataUrl("");
-  }, [isModalOpen, modalMode, selectedScheduleId, schedules]);
 
   // Custom dialog alert states
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -249,7 +224,7 @@ export default function MeetingsClient({
   const additionalAttendeesArray = additionalAttendees ? additionalAttendees.split(",").map(s => s.trim()).filter(Boolean) : [];
   const setAdditionalAttendeesArray = (vals: string[]) => setAdditionalAttendees(vals.join(", "));
 
-  // Helper to format Department with its Version (just like Annual Plan > Audit Plan)
+  // Helper to format Department with its Version (just like Annual Plan > OE Plan)
   const getDepartmentWithVersion = (deptStr: string, projId?: string): string => {
     if (!deptStr) return "";
     const proj = projId ? projects.find(p => p.id === projId) : null;
@@ -259,24 +234,24 @@ export default function MeetingsClient({
       // If dept already has a version pattern like "Finance - V1", return as-is
       if (/\s*-\s*V\d+/i.test(dept)) return dept;
 
-      // 1. Check if linked project has an explicit auditPlanId
-      if (proj?.auditPlanId) {
-        const ap = auditPlans.find(a => a.id === proj.auditPlanId);
+      // 1. Check if linked project has an explicit projectId
+      if (proj?.projectId) {
+        const ap = plannedEngagements.find(a => a.id === proj.projectId);
         if (ap && (ap.topic.toLowerCase() === dept.toLowerCase() || depts.length === 1)) {
           return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
         }
       }
 
-      // 2. Check if linked project has an annualPlanId with matching audit plan topic
+      // 2. Check if linked project has an annualPlanId with matching OE plan topic
       if (proj?.annualPlanId) {
-        const ap = auditPlans.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === dept.toLowerCase());
+        const ap = plannedEngagements.find(a => a.annualPlanId === proj.annualPlanId && a.topic.toLowerCase() === dept.toLowerCase());
         if (ap) {
           return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
         }
       }
 
-      // 3. Match by topic across all audit plans
-      const ap = auditPlans.find(a => a.topic.toLowerCase() === dept.toLowerCase());
+      // 3. Match by topic across all OE plans
+      const ap = plannedEngagements.find(a => a.topic.toLowerCase() === dept.toLowerCase());
       if (ap) {
         return `${dept} - ${ap.version || "V1"}${ap.isApproved ? "" : " (Draft)"}`;
       }
@@ -286,24 +261,44 @@ export default function MeetingsClient({
     }).join(", ");
   };
 
-  const confirmedAttendeeCount = additionalAttendeesArray.filter(name => attendeeConfirmations[name]).length;
-  const normalizeAttendeeName = (name: string) => name.trim().toLowerCase();
-  const canConfirmAttendee = (attendeeName: string) => currentUser.role === "ADMIN" || normalizeAttendeeName(attendeeName) === normalizeAttendeeName(currentUser.name);
+  // Lookups used to resolve each OE Plan's linked Project (and its Business Unit's short ID,
+  // e.g. "HB") for the BU-Department-Version pill / Project name text shown by OePlanSelect
+  // (see formatOePlanOption).
+  const linkedProjectsById = useMemo(
+    () => Object.fromEntries(plannedEngagements.map(p => [p.id, p])),
+    [plannedEngagements]
+  );
+  const departmentsById = useMemo(
+    () => Object.fromEntries(departments.map(d => [d.id, d])),
+    [departments]
+  );
+
+  // The linked OE Plan's pill/Project name. A viewer without oe-plans:view gets no OE Plan list,
+  // so fall back to the code/name the meeting API carries rather than "Unknown OE Plan".
+  const selectedMeetingObj = schedules.find(m => m.id === selectedScheduleId);
+  const linkedOePlanDisplay = (() => {
+    const p = projects.find(proj => proj.id === selectedProjectId);
+    if (p) return formatOePlanOption(p, linkedProjectsById, departmentsById);
+    if (selectedMeetingObj?.projectCode || selectedMeetingObj?.projectName) {
+      return { pill: selectedMeetingObj.projectCode || "", text: selectedMeetingObj.projectName || "" };
+    }
+    return null;
+  })();
 
   // Options derived from users in system
   const userOptions = users.map(u => ({
     value: u.name,
     label: u.name,
-    subLabel: `${u.role.replace("_", " ")}${u.email ? ` - ${u.email}` : ""}`
+    subLabel: u.email ?? "",
   }));
 
   const isProjectMember = (proj: any) => {
     if (!proj) return false;
-    if (currentUser.role === "ADMIN") return true;
-    if (proj.leadAuditorId === currentUser.id || proj.leadAuditorId === currentUser.name) return true;
-    const auditorsList = proj.auditorNames ? proj.auditorNames.split(",").map((s: string) => s.trim()) : [];
-    if (auditorsList.includes(currentUser.name)) return true;
-    if (proj.auditorIds?.includes(currentUser.id)) return true;
+    if (currentUser.grants?.["oe-plans:view"] === "ALL") return true;
+    if (proj.leaderId === currentUser.id || proj.leaderId === currentUser.name) return true;
+    const membersList = proj.memberNames ? proj.memberNames.split(",").map((s: string) => s.trim()) : [];
+    if (membersList.includes(currentUser.name)) return true;
+    if (proj.memberIds?.includes(currentUser.id)) return true;
     const picList = proj.deptPicIds ? proj.deptPicIds.split(",") : [];
     if (picList.includes(currentUser.id) || picList.includes(currentUser.name)) return true;
     return false;
@@ -311,13 +306,51 @@ export default function MeetingsClient({
 
   const isScheduleOrMeetingAllowed = (sched: any) => {
     if (!sched) return false;
-    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.grants?.["meetings:view"] === "ALL") return true;
     if (sched.ownerName === currentUser.name || sched.lastModifiedBy === currentUser.name) return true;
     const proj = projects.find(p => p.id === sched.projectId);
     return isProjectMember(proj);
   };
 
+  // A CLOSED OE Plan freezes everything under it (the server refuses changes too).
+  const isPlanClosedFor = (projectId?: string) => projects.find(p => p.id === projectId)?.status === "CLOSED";
+  const isPlanClosed = isPlanClosedFor(selectedProjectId);
   const canManage = RBAC.can(currentUser, "meetings:create") || RBAC.can(currentUser, "meetings:update") || RBAC.can(currentUser, "meetings:delete");
+  const canSubmitMeeting = RBAC.can(currentUser, "meetings:submit");
+  const canApproveMeeting = RBAC.can(currentUser, "meetings:approve");
+
+  // The report Export PDF prints: current editor values (unsaved edits included), resolved to text.
+  const buildPrintData = (): SessionPrintData => {
+    const filled = (items: PlanItem[]) => items.filter(i => i.text.trim());
+    const project = projects.find(p => p.id === selectedProjectId);
+    const code = project?.code ?? selectedMeetingObj?.projectCode ?? "";
+    const name = project?.name ?? selectedMeetingObj?.projectName ?? "";
+    const dash = (v: string) => v || "—";
+    return {
+      kind: "Open Meeting",
+      title: [code, name].filter(Boolean).join(" · "),
+      statusLabel: meetingStatus === "RELEASED" ? "Released" : meetingStatus === "SUBMITTED_FOR_APPROVAL" ? "Submitted for approval" : "Draft",
+      figures: [
+        ["Visit", dash(visitNumber)],
+        ["Actual visit date", dash(actualVisitDate ? formatDateString(actualVisitDate) : "")],
+        ["OE period", dash(oePeriod.split(" to ").map(d => printFmt(d) || d).join(" to "))],
+        ["Attendees", String(additionalAttendeesArray.length)],
+      ],
+      details: [
+        ["Department", dash(departmentsStr)],
+        ["Address", dash(address)],
+        ["Lead execution", dash(leadExecution)],
+        ["Team members", dash(teamMembers)],
+        ["Standards", dash(standards)],
+      ],
+      objectives: filled(parsePlanItems(objectives, "IOE-OBJ")),
+      scopeItems: filled(parsePlanItems(scope, "IOE-SCP")),
+      attendees: additionalAttendeesArray.map(a => {
+        const c = attendeeConfirmations[a];
+        return { name: a, status: c ? `Confirmed ${c.confirmedAt ? formatDateString(c.confirmedAt.slice(0, 10)) : ""}${c.confirmedBy ? ` by ${c.confirmedBy}` : ""}`.trim() : "Pending" };
+      }),
+    };
+  };
 
   const showFeedback = (msg: string) => {
     setFeedback(msg);
@@ -329,8 +362,14 @@ export default function MeetingsClient({
     setSelectedProjectId(projId);
     const proj = projects.find(p => p.id === projId);
     if (proj) {
-      setObjectives(proj.objectives || "");
-      setScope(proj.scope || "");
+      // Resolve inherited objectives/scope from the linked Planned Engagement -
+      // OePlan.objectives/scope alone can be empty or stale.
+      const linkedPlannedEngagement = proj.projectId
+        ? plannedEngagements.find(a => a.id === proj.projectId)
+        : null;
+      const inherited = resolveInheritedPlanContent(proj, linkedPlannedEngagement);
+      setObjectives(inherited.objectives);
+      setScope(inherited.scope);
       if (proj.departments) {
         setDepartmentsStr(proj.departments);
       }
@@ -340,15 +379,15 @@ export default function MeetingsClient({
       
       const parsedEnd = proj.endDate ? proj.endDate.split("T")[0] : "";
       const period = parsedStart && parsedEnd ? `${parsedStart} to ${parsedEnd}` : parsedStart || parsedEnd || "";
-      setAuditPeriod(period);
+      setOePeriod(period);
       
-      // Auto-derive Lead Auditor from project
-      const leadUser = users.find(u => u.id === proj.leadAuditorId || u.name === proj.leadAuditorId);
-      const leadName = leadUser ? leadUser.name : (proj.leadAuditorId || "");
+      // Auto-derive OE Leader from project
+      const leadUser = users.find(u => u.id === proj.leaderId || u.name === proj.leaderId);
+      const leadName = leadUser ? leadUser.name : (proj.leaderId || "");
 
-      // Auto-derive Auditors from project
-      const auditorNamesClean = proj.auditorNames
-        ? proj.auditorNames.split(",").map(s => {
+      // Auto-derive OE Members from project
+      const memberNamesClean = proj.memberNames
+        ? proj.memberNames.split(",").map(s => {
             const clean = s.trim();
             const u = users.find(user => user.name === clean || user.id === clean);
             return u ? u.name : clean;
@@ -365,7 +404,7 @@ export default function MeetingsClient({
         : "";
 
       setLeadExecution(leadName);
-      setTeamMembers(auditorNamesClean);
+      setTeamMembers(memberNamesClean);
       setAdditionalAttendees(attendeesClean);
     }
   };
@@ -375,19 +414,20 @@ export default function MeetingsClient({
     setSelectedScheduleId(null);
     setSelectedProjectId("");
     setDepartmentsStr("");
-    setAddress("");
-    setVisitNumber("");
+    // address/visitNumber/standards have no form inputs of their own here -
+    // they're required by the backend, so blanking them (as opposed to
+    // resetting to sensible defaults) made every new meeting fail to save.
+    setAddress("HB-HQ");
+    setVisitNumber("01");
     setActualVisitDate("");
-    setAuditPeriod("");
+    setOePeriod("");
     setLeadExecution("");
     setTeamMembers("");
     setAdditionalAttendees("");
-    setStandards("");
+    setStandards("Meeting Alignment Agenda");
     setObjectives("");
     setScope("");
-    setDepartmentConcern("");
     setRows([]);
-    setAttachments([]);
     setMeetingStatus("DRAFT");
     setAttendeeConfirmations({});
     setIsModalOpen(true);
@@ -400,7 +440,7 @@ export default function MeetingsClient({
     setAddress(sched.address);
     setVisitNumber(sched.visitNumber);
     setActualVisitDate(sched.actualVisitDate);
-    setAuditPeriod(sched.auditPeriod);
+    setOePeriod(sched.oePeriod);
     setLeadExecution(sched.leadExecution);
     setTeamMembers(sched.teamMembers);
     setAdditionalAttendees(sched.additionalAttendees);
@@ -409,8 +449,6 @@ export default function MeetingsClient({
     setAttendeeConfirmations(parseAttendeeConfirmations(sched.attendeeConfirmations));
     setObjectives(sched.objectives);
     setScope(sched.scope);
-    setDepartmentConcern((sched as any).departmentConcern || "");
-    setAttachments(sched.attachments ? JSON.parse(sched.attachments) : []);
     
     try {
       setRows(JSON.parse(sched.scheduleRows));
@@ -418,6 +456,7 @@ export default function MeetingsClient({
       setRows([]);
     }
     setSelectedScheduleId(sched.id);
+    setLoadedUpdatedAt(sched.updatedAt || null);
     setIsModalOpen(true);
   };
 
@@ -436,15 +475,21 @@ export default function MeetingsClient({
     }
   }, [schedules]);
 
-  const persistMeetingSchedule = async (targetStatus: "DRAFT" | "RELEASED", options: { closeAfterSave?: boolean; sendReleaseNotification?: boolean } = {}) => {
-    if (meetingStatus === "RELEASED" && targetStatus !== "DRAFT") {
-      showFeedback("This meeting record is already released. Reopen it before making edits.");
-      return false;
+  // Saves field edits as DRAFT. Release now only happens via the Submit ->
+  // Approve workflow below, not directly from here.
+  // Returns the saved record's id on success, or null on failure. Callers that
+  // chain a status transition right after saving (e.g. Submit for Approval)
+  // need the id directly - selectedScheduleId won't reflect a just-created
+  // record's id until the next render, since setSelectedScheduleId is async.
+  const persistMeetingSchedule = async (options: { closeAfterSave?: boolean } = {}): Promise<string | null> => {
+    if (meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL") {
+      showFeedback("This meeting report is locked. Reopen it, or wait for the approval decision, before making edits.");
+      return null;
     }
 
     if (!selectedProjectId || !departmentsStr || !actualVisitDate) {
       showFeedback("Please fill in the required fields (Project, Departments, Date).");
-      return false;
+      return null;
     }
 
     const payload = {
@@ -453,18 +498,16 @@ export default function MeetingsClient({
       address,
       visitNumber,
       actualVisitDate,
-      auditPeriod,
+      oePeriod,
       leadExecution,
       teamMembers,
       additionalAttendees,
       attendeeConfirmations: JSON.stringify(pruneConfirmations(additionalAttendeesArray, attendeeConfirmations)),
       standards,
-      status: targetStatus,
+      status: "DRAFT",
       objectives,
       scope,
-      departmentConcern,
       scheduleRows: JSON.stringify(rows),
-      attachments: JSON.stringify(attachments),
       ownerName: modalMode === "create" ? currentUser.name : (schedules.find(x => x.id === selectedScheduleId)?.ownerName || currentUser.name),
       lastModifiedBy: currentUser.name
     };
@@ -472,120 +515,115 @@ export default function MeetingsClient({
     try {
       let savedId = selectedScheduleId;
       const shouldClose = options.closeAfterSave ?? false;
-      const notifyRelease = options.sendReleaseNotification ?? false;
 
       if (modalMode === "create") {
         const result = await clientApi<OpenMeeting>("/meetings", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        if (!result) return false;
+        if (!result) return null;
         savedId = result.id || savedId;
         setSelectedScheduleId(savedId || null);
-        setMeetingStatus(targetStatus);
+        setMeetingStatus("DRAFT");
       } else {
-        if (!selectedScheduleId) return false;
+        if (!selectedScheduleId) return null;
         const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: loadedUpdatedAt || undefined }),
         });
-        if (!result) return false;
+        if (!result) return null;
         savedId = result.id || savedId;
-        setMeetingStatus(targetStatus);
+        setMeetingStatus("DRAFT");
+        setLoadedUpdatedAt(result.updatedAt || null);
       }
 
       const fresh = await clientApi<OpenMeeting[]>("/meetings");
       setSchedules(fresh);
 
-      if (targetStatus === "RELEASED" && savedId && notifyRelease) {
-        await clientApi(`/notifications/send-meeting-release/${savedId}`, { method: "POST" });
-      }
-
-      showFeedback(targetStatus === "RELEASED"
-        ? "Open meeting report released and locked."
-        : (modalMode === "create" ? "Open meeting record generated successfully." : "Open meeting changes saved."));
+      showFeedback(modalMode === "create" ? "Open meeting record generated successfully." : "Open meeting changes saved.");
 
       if (shouldClose) {
         setIsModalOpen(false);
       }
 
-      return true;
+      return savedId ?? null;
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Save failed: ${err.message || err.toString()}`);
-      return false;
+      if (err instanceof ApiError && err.status === 409) {
+        showFeedback("Someone else saved changes to this meeting first. Reload it and re-apply your edit.");
+      } else {
+        showFeedback(`Save failed: ${err.message || err.toString()}`);
+      }
+      return null;
     }
   };
 
   const handleSaveSchedule = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    await persistMeetingSchedule("DRAFT", { closeAfterSave: false, sendReleaseNotification: false });
+    await persistMeetingSchedule({ closeAfterSave: false });
   };
 
-  const handleReleaseSchedule = async () => {
-    await persistMeetingSchedule("RELEASED", { closeAfterSave: false, sendReleaseNotification: true });
-  };
-
-  const handleConfirmAttendee = async (attendeeName: string) => {
-    if (!selectedScheduleId) {
-      showFeedback("Save and release the meeting before confirming attendance.");
-      return;
-    }
-
-    if (meetingStatus !== "RELEASED") {
-      showFeedback("Attendance can only be confirmed after the meeting is released.");
-      return;
-    }
-
-    if (!canConfirmAttendee(attendeeName)) {
-      showFeedback("Only the attendee or an Admin can confirm this attendance.");
-      return;
-    }
-
-    if (attendeeConfirmations[attendeeName]) {
-      showFeedback(`${attendeeName} is already confirmed.`);
-      return;
-    }
-
-    const nextConfirmations = pruneConfirmations(additionalAttendeesArray, {
-      ...attendeeConfirmations,
-      [attendeeName]: {
-        confirmedAt: new Date().toISOString(),
-        confirmedBy: currentUser.name
-      }
+  const updateMeetingStatus = async (scheduleId: string, targetStatus: "DRAFT" | "SUBMITTED_FOR_APPROVAL" | "RELEASED") => {
+    return clientApi<OpenMeeting>(`/meetings/${scheduleId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: targetStatus }),
     });
+  };
 
+  const handleSubmitForApproval = async () => {
+    const savedId = await persistMeetingSchedule({ closeAfterSave: false });
+    if (!savedId) return;
     try {
-      const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          attendeeConfirmations: JSON.stringify(nextConfirmations),
-          lastModifiedBy: currentUser.name
-        }),
-      });
-
+      const result = await updateMeetingStatus(savedId, "SUBMITTED_FOR_APPROVAL");
       if (result) {
-        setAttendeeConfirmations(nextConfirmations);
+        setMeetingStatus("SUBMITTED_FOR_APPROVAL");
         const fresh = await clientApi<OpenMeeting[]>("/meetings");
         setSchedules(fresh);
-        showFeedback(`${attendeeName} confirmed attendance.`);
+        showFeedback("Open meeting report submitted for approval.");
       }
     } catch (err: any) {
       console.error(err);
-      showFeedback(`Confirmation failed: ${err.message || err.toString()}`);
+      showFeedback(`Submit failed: ${err.message || err.toString()}`);
+    }
+  };
+
+  const handleApproveSchedule = async () => {
+    if (!selectedScheduleId) return;
+    try {
+      const result = await updateMeetingStatus(selectedScheduleId, "RELEASED");
+      if (result) {
+        setMeetingStatus("RELEASED");
+        const fresh = await clientApi<OpenMeeting[]>("/meetings");
+        setSchedules(fresh);
+        await clientApi(`/notifications/send-meeting-release/${selectedScheduleId}`, { method: "POST" });
+        showFeedback("Open meeting report approved and released.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Approve failed: ${err.message || err.toString()}`);
+    }
+  };
+
+  const handleRejectSchedule = async () => {
+    if (!selectedScheduleId) return;
+    try {
+      const result = await updateMeetingStatus(selectedScheduleId, "DRAFT");
+      if (result) {
+        setMeetingStatus("DRAFT");
+        const fresh = await clientApi<OpenMeeting[]>("/meetings");
+        setSchedules(fresh);
+        showFeedback("Open meeting report sent back for revision.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Reject failed: ${err.message || err.toString()}`);
     }
   };
 
   const handleReopenSchedule = async () => {
     if (!selectedScheduleId) return;
     try {
-      const result = await clientApi<OpenMeeting>(`/meetings/${selectedScheduleId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          status: "DRAFT",
-          lastModifiedBy: currentUser.name
-        }),
-      });
+      const result = await updateMeetingStatus(selectedScheduleId, "DRAFT");
       if (result) {
         setMeetingStatus("DRAFT");
         const fresh = await clientApi<OpenMeeting[]>("/meetings");
@@ -705,6 +743,15 @@ export default function MeetingsClient({
     const matchesProject = projectFilter === "ALL" || s.projectId === projectFilter;
     return matchesSearch && matchesProject;
   });
+  const tableSort = useTableSort(filteredSchedules, {
+    code: (s) => s.projectCode,
+    project: (s) => s.projectName,
+    departments: (s) => getDepartmentWithVersion(s.departments, s.projectId),
+    date: (s) => s.actualVisitDate,
+    facilitator: (s) => s.leadExecution,
+    status: (s) => s.status,
+  });
+  const pagination = useClientPagination(tableSort.sorted, "meetings-page-size", `${searchQuery}|${projectFilter}|${tableSort.id}`);
 
   const projectFilterOptions = projects.map(p => ({
     label: `ID: ${p.code} - ${p.name}`,
@@ -712,7 +759,7 @@ export default function MeetingsClient({
   }));
 
   const activeSchedule = schedules.find(x => x.id === selectedScheduleId);
-  const isLocked = meetingStatus === "RELEASED";
+  const isLocked = isPlanClosed || meetingStatus === "RELEASED" || meetingStatus === "SUBMITTED_FOR_APPROVAL";
 
   return (
     <div className="space-y-6">
@@ -751,7 +798,7 @@ export default function MeetingsClient({
           <ActionToolbar
             onCreate={openCreateModal}
             onEdit={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? () => openEditModal(activeSchedule) : undefined}
-            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) ? handleDeleteSchedule : undefined}
+            onDelete={selectedScheduleId && activeSchedule && isScheduleOrMeetingAllowed(activeSchedule) && !isPlanClosedFor(activeSchedule.projectId) ? handleDeleteSchedule : undefined}
             onRefresh={() => {
               setSearchQuery("");
               setProjectFilter("ALL");
@@ -772,12 +819,12 @@ export default function MeetingsClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-sans font-bold">
                 <tr>
-                  <th className="px-6 py-4">OE Plan Code</th>
-                  <th className="px-6 py-4">Project Name</th>
-                  <th className="px-6 py-4">Department(s)</th>
-                  <th className="px-6 py-4">Meeting Date</th>
-                  <th className="px-6 py-4">Facilitator</th>
-                  <th className="px-6 py-4">Status</th>
+                  <SortableTh label="OE Plan Code" sortKey="code" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Project Name" sortKey="project" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Department(s)" sortKey="departments" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Meeting Date" sortKey="date" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Facilitator" sortKey="facilitator" sort={tableSort.sort} onSort={tableSort.toggle} />
+                  <SortableTh label="Status" sortKey="status" sort={tableSort.sort} onSort={tableSort.toggle} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -788,7 +835,7 @@ export default function MeetingsClient({
                     </td>
                   </tr>
                 ) : (
-                  filteredSchedules.map((s) => (
+                  pagination.pageItems.map((s) => (
                     <tr 
                       key={s.id} 
                       onClick={() => setSelectedScheduleId(s.id === selectedScheduleId ? null : s.id)}
@@ -825,6 +872,11 @@ export default function MeetingsClient({
                               <CheckCircle2 className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
                               Released
                             </>
+                          ) : s.status === "SUBMITTED_FOR_APPROVAL" ? (
+                            <>
+                              <Send className="w-3.5 h-3.5 text-slate-500" />
+                              Pending Approval
+                            </>
                           ) : (
                             <>
                               <Clock className="w-3.5 h-3.5 text-slate-400" />
@@ -839,13 +891,22 @@ export default function MeetingsClient({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            emptyLabel="No meetings found"
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
         </div>
       </div>
 
       {/* Edit/Create Popup Modal Styled Like Word Document */}
       {isModalOpen && (
         <div id="scoping-modal-root" className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 flex justify-center z-50 overflow-y-auto p-4 md:p-8 animate-fade-in no-print-backdrop">
-          <div className="bg-white dark:bg-slate-955 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
+          <div className="plan-screen bg-white dark:bg-slate-955 w-full max-w-[98vw] xl:max-w-[98vw] rounded-lg shadow-2xl flex flex-col overflow-hidden h-fit border border-slate-200 dark:border-slate-850 scoping-modal-container">
             
             {/* Modal Header */}
             <div className="px-8 py-5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -875,6 +936,11 @@ export default function MeetingsClient({
                             <CheckCircle2 className="w-3 h-3 text-slate-600 dark:text-slate-400" />
                             Released
                           </>
+                        ) : meetingStatus === "SUBMITTED_FOR_APPROVAL" ? (
+                          <>
+                            <Send className="w-3 h-3 text-slate-500" />
+                            Pending Approval
+                          </>
                         ) : (
                           <>
                             <Clock className="w-3 h-3 text-slate-400" />
@@ -900,12 +966,12 @@ export default function MeetingsClient({
               <div className="flex items-center gap-2.5 shrink-0 no-print">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void exportReportPdf()}
                   className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold rounded cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" /> Export PDF
                 </button>
-                {!isLocked ? (
+                {meetingStatus === "DRAFT" && !isPlanClosed && (
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
@@ -913,7 +979,35 @@ export default function MeetingsClient({
                   >
                     <Save className="w-3.5 h-3.5" /> Save Changes
                   </button>
-                ) : (
+                )}
+                {meetingStatus === "DRAFT" && !isPlanClosed && canSubmitMeeting && (
+                  <button
+                    type="button"
+                    onClick={handleSubmitForApproval}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold rounded cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Submit for Approval
+                  </button>
+                )}
+                {meetingStatus === "SUBMITTED_FOR_APPROVAL" && !isPlanClosed && canApproveMeeting && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleApproveSchedule}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold rounded cursor-pointer"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRejectSchedule}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white hover:bg-red-700 text-xs font-bold rounded cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Reject
+                    </button>
+                  </>
+                )}
+                {meetingStatus === "RELEASED" && !isPlanClosed && canApproveMeeting && (
                   <button
                     type="button"
                     onClick={handleReopenSchedule}
@@ -922,15 +1016,6 @@ export default function MeetingsClient({
                     <Unlock className="w-3.5 h-3.5" /> Reopen
                   </button>
                 )}
-                {!isLocked ? (
-                  <button
-                    type="button"
-                    onClick={handleReleaseSchedule}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 text-xs font-bold rounded cursor-pointer"
-                  >
-                    <Lock className="w-3.5 h-3.5" /> Release
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
@@ -942,12 +1027,12 @@ export default function MeetingsClient({
             </div>
 
             {/* Modal Scrollable Body */}
-            <form onSubmit={handleSaveSchedule} className={`p-8 space-y-8 overflow-y-auto max-h-[86vh] ${isLocked ? "opacity-70" : ""}`}>
+            <form onSubmit={handleSaveSchedule} className="p-8 space-y-8 overflow-y-auto max-h-[86vh]">
               
-              {/* Linked Audit Plan Card */}
+              {/* Linked OE Plan Card */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 p-5 shadow-sm">
                 
-                {/* Linked Audit Plan Left section */}
+                {/* Linked OE Plan Left section */}
                 <div className="w-full">
                   <div className="flex border border-slate-250 dark:border-slate-800 rounded-lg h-12 items-center">
                     <div className="bg-slate-50 dark:bg-slate-900/60 px-4 h-full flex items-center font-roboto font-bold text-xs text-slate-700 dark:text-slate-355 border-r border-slate-250 dark:border-slate-800 shrink-0 w-36 rounded-l-lg">
@@ -955,24 +1040,26 @@ export default function MeetingsClient({
                     </div>
                     <div className="px-4 h-full flex items-center flex-1 bg-white dark:bg-slate-950">
                       {modalMode === "create" ? (
-                        <AuditPlanSelect
-                          projects={projects.filter(p => isProjectMember(p) && p.status !== "CLOSED")}
+                        <OePlanSelect
+                          projects={projects.filter(p => isProjectMember(p) && p.status === "RELEASED")}
                           selectedProjectId={selectedProjectId}
                           onSelect={handleProjectSelect}
                           placeholder="Choose OE Plan..."
+                          linkedProjectsById={linkedProjectsById}
+                          departmentsById={departmentsById}
                         />
                       ) : (
                         <div className="flex items-center gap-2 overflow-hidden">
                           {(() => {
-                            const p = projects.find(proj => proj.id === selectedProjectId);
-                            if (!p) return <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Unknown OE Plan</span>;
+                            if (!linkedOePlanDisplay) return <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Unknown OE Plan</span>;
+                            const { pill, text } = linkedOePlanDisplay;
                             return (
                               <>
                                 <span className="shrink-0 text-[11px] font-mono bg-[#05375c]/10 dark:bg-sky-500/10 text-[#05375c] dark:text-sky-300 border border-[#05375c]/20 dark:border-sky-500/20 px-2 py-0.5 rounded font-semibold select-none">
-                                  {p.code}
+                                  {pill}
                                 </span>
                                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                                  {p.name}
+                                  {text}
                                 </span>
                               </>
                             );
@@ -989,6 +1076,20 @@ export default function MeetingsClient({
                 <div className="overflow-x-auto border border-slate-350 dark:border-slate-800 rounded-md">
                   <table className="w-full border-collapse text-xs">
                     <tbody>
+                      {/* Row 0: Project Name */}
+                      <tr className="border-b border-slate-300 dark:border-slate-800/80">
+                        <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
+                          Project Name:
+                        </td>
+                        <td colSpan={3} className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-950">
+                          {linkedOePlanDisplay?.text || (
+                            <span className="text-slate-400 font-normal italic">
+                              Select an OE Plan to auto-derive project name
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+
                       {/* Row 1: Department */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="w-1/4 px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
@@ -1014,6 +1115,7 @@ export default function MeetingsClient({
                           <input 
                             type="date" 
                             required
+                            disabled={isLocked}
                             value={actualVisitDate}
                             onChange={(e) => setActualVisitDate(e.target.value)}
                             placeholder="20 July 2026"
@@ -1033,6 +1135,7 @@ export default function MeetingsClient({
                             options={userOptions}
                             placeholder="Select facilitators..."
                             disabled={isLocked}
+                            plainWhenDisabled
                           />
                         </td>
                       </tr>
@@ -1053,49 +1156,8 @@ export default function MeetingsClient({
                             options={userOptions}
                             placeholder="Select attendees..."
                             disabled={isLocked}
+                            plainWhenDisabled
                           />
-                          {additionalAttendeesArray.length > 0 && (
-                            <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/50 p-3 space-y-3">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Attendance Confirmation</span>
-                                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">{confirmedAttendeeCount}/{additionalAttendeesArray.length} confirmed</span>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                {additionalAttendeesArray.map((attendeeName) => {
-                                  const confirmation = attendeeConfirmations[attendeeName];
-                                  const canConfirm = canConfirmAttendee(attendeeName);
-                                  const confirmedAt = confirmation?.confirmedAt
-                                    ? new Date(confirmation.confirmedAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                                    : "";
-
-                                  return (
-                                    <div key={attendeeName} className="flex items-center justify-between gap-3 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2">
-                                      <div className="min-w-0">
-                                        <div className="truncate text-xs font-bold text-slate-800 dark:text-slate-100">{attendeeName}</div>
-                                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                                          {confirmation ? `Confirmed by ${confirmation.confirmedBy} on ${confirmedAt}` : "Pending confirmation"}
-                                        </div>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleConfirmAttendee(attendeeName)}
-                                        disabled={Boolean(confirmation) || !canConfirm || !selectedScheduleId || !isLocked}
-                                        className={`shrink-0 inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-bold transition-colors ${confirmation
-                                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                                          : canConfirm && selectedScheduleId && isLocked
-                                            ? "bg-[#05375c] text-white hover:bg-[#074776] cursor-pointer"
-                                            : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 cursor-not-allowed"
-                                        }`}
-                                      >
-                                        {confirmation && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                        {confirmation ? "Confirmed" : !selectedScheduleId ? "Save First" : !isLocked ? "Release First" : canConfirm ? "Confirm" : "Waiting"}
-                                      </button>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
                         </td>
                       </tr>
                       {/* Row 10: OPE Objectives */}
@@ -1106,9 +1168,9 @@ export default function MeetingsClient({
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
                             sectionTitle="Objectives"
-                            items={parsePlanItems(objectives, "IAP-OBJ")}
+                            items={parsePlanItems(objectives, "IOE-OBJ")}
                             onChange={() => {}}
-                            prefix="IAP-OBJ"
+                            prefix="IOE-OBJ"
                             editable={false}
                             hideHeader={true}
                           />
@@ -1118,33 +1180,34 @@ export default function MeetingsClient({
                       {/* Row 11: OPE Scope */}
                       <tr className="border-b border-slate-300 dark:border-slate-800/80">
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
-                          Audit Scope:
+                          OE Scope:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
                           <PlanItemEditor 
-                            sectionTitle="Audit Scope"
-                            items={parsePlanItems(scope, "IAP-ISCP")}
+                            sectionTitle="OE Scope"
+                            items={parsePlanItems(scope, "IOE-SCP")}
                             onChange={() => {}}
-                            prefix="IAP-ISCP"
+                            prefix="IOE-SCP"
                             editable={false}
                             hideHeader={true}
                           />
                         </td>
                       </tr>
 
-                      {/* Row 12: Department Concern */}
+                      {/* Row 12: Department responses (each user in the department answers on their own) */}
                       <tr>
                         <td className="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 font-bold border-r border-slate-300 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 align-top">
                           The Concern of the Department Owner:
                         </td>
                         <td colSpan={3} className="px-4 py-3">
-                          <RichEditor 
-                            value={departmentConcern}
-                            onChange={setDepartmentConcern}
-                            placeholder="Add concerns of the department owner..."
-                            editorClassName="min-h-[120px] max-h-[250px]"
-                            editable={!isLocked}
-                          />
+                          {modalMode === "edit" && selectedScheduleId && meetingStatus === "RELEASED" ? (
+                            <MeetingResponsesPanel meetingId={selectedScheduleId} />
+                          ) : (
+                            <p className="text-xs italic text-slate-400">
+                              Each person in the department answers on their own, from the Annual Plan QR code, once this meeting is
+                              approved and released.
+                            </p>
+                          )}
                         </td>
                       </tr>
 
@@ -1153,76 +1216,19 @@ export default function MeetingsClient({
                 </div>
               </div>
 
-              {/* Attachments Section */}
-              <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-sm font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  Attachments
-                </h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    disabled={isLocked}
-                    className="block w-full text-xs text-slate-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-xs file:font-semibold
-                      file:bg-[#0066cc]/10 file:text-[#0066cc]
-                      hover:file:bg-[#0066cc]/20
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                    "
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const base64 = event.target?.result;
-                        if (typeof base64 === 'string') {
-                          setAttachments([...attachments, {
-                            id: Date.now().toString(),
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            data: base64
-                          }]);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = ''; // reset input
-                    }}
-                  />
-                  {attachments.length > 0 && (
-                    <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
-                      {attachments.map((att) => (
-                        <li key={att.id} className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <div className="flex items-center gap-3">
-                            <FileDown className="w-4 h-4 text-slate-400" />
-                            <a href={att.data} download={att.name} className="text-sm font-medium text-[#0066cc] hover:underline">
-                              {att.name}
-                            </a>
-                            <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                          </div>
-                          {!isLocked && canManage && (
-                            <button
-                              type="button"
-                              onClick={() => setAttachments(attachments.filter(a => a.id !== att.id))}
-                              className="p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-
               {/* PDF Print Footer Note */}
               <div className="border-t border-slate-200 dark:border-slate-800 pt-4 text-[12px] font-roboto text-slate-400 leading-relaxed italic">
                 Note: Alignment agendas and decision minutes represent binding milestones of coordinated department.
-                {isLocked && <span className="not-italic text-amber-600 dark:text-amber-300">This record is released and locked. Use Reopen to edit.</span>}
+                {isPlanClosed ? (
+                  <span className="not-italic text-amber-600 dark:text-amber-300">The linked OE Plan is closed, so this record is read-only. Reopen the plan to edit.</span>
+                ) : isLocked && <span className="not-italic text-amber-600 dark:text-amber-300">This record is released and locked. Use Reopen to edit.</span>}
               </div>
             </form>
+          </div>
+
+          {/* Print-only report: what Export PDF prints instead of the editor above */}
+          <div className="plan-print-root">
+            <SessionPrintDocument data={buildPrintData()} />
           </div>
         </div>
       )}
@@ -1265,17 +1271,6 @@ export default function MeetingsClient({
         </div>
       )}
 
-      {/* Universal QR Code Modal */}
-      {qrModalData && (
-        <QRCodeModal
-          isOpen={qrModalOpen}
-          onClose={() => setQrModalOpen(false)}
-          qrToken={qrModalData.qrToken}
-          projectTitle={qrModalData.projectTitle}
-          projectCode={qrModalData.projectCode}
-          departments={qrModalData.departments}
-        />
-      )}
 
     </div>
   );

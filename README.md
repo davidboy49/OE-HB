@@ -1,6 +1,6 @@
-# 🔍 AuditDesk - Modern Audit Management System
+# 🔍 OE Portal - Operational Excellence Management System
 
-AuditDesk is a comprehensive Audit Management web application. It streamlines the entire internal and external audit lifecycle from initial planning to execution tracking, findings management, meeting records, and reporting.
+OE Portal is a comprehensive Operational Excellence (OE) management web application. It streamlines the entire OE lifecycle from initial planning to execution tracking, findings management, meeting records, and reporting.
 
 This repo is a fresh rework of the original [AuditDesk](https://github.com/davidboy49/AuditDesk) Next.js monolith, split into an independent **frontend** and **backend** in one monorepo.
 
@@ -8,12 +8,12 @@ This repo is a fresh rework of the original [AuditDesk](https://github.com/david
 
 ## ✨ Features
 
-- **📋 Audit Planning & Scoping**: Define audit projects, scope, risk analysis, timeline, and lead auditor assignments.
-- **📅 Execution Schedules**: Organize site visits, daily audit activities, attendees, and schedule sign-offs.
-- **⚠️ Findings & CAR/PAR Tracking**: Record audit findings with severity ratings (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), recommendations, and corrective action plans.
+- **📋 OE Planning & Scoping**: Define OE plans, scope, risk analysis, timeline, and lead member assignments.
+- **📅 Execution Schedules**: Organize site visits, daily OE activities, attendees, and schedule sign-offs.
+- **⚠️ Findings & CAR/PAR Tracking**: Record OE findings with severity ratings (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), recommendations, and corrective action plans.
 - **🤝 Meetings & Minutes**: Document opening and closing meeting discussions with TipTap rich text editing and attendance confirmations.
-- **🏢 Departments & User Management**: Role-Based Access Control (RBAC) supporting `ADMIN`, `LEAD_AUDITOR`, `AUDITOR`, and `AUDITEE`, plus per-`UserGroup` granular permissions (create/update/delete, per domain) that an admin can tick on and off.
-- **📜 Audit Trail & Activity Logs**: Record all system actions for compliance and history tracking.
+- **🏢 Departments & User Management**: Role-Based Access Control (RBAC) supporting `ADMIN`, `OE_LEADER`, `OE_MEMBER`, and `DEPT_PIC`, plus per-`UserGroup` granular permissions (create/update/delete, per domain) that an admin can tick on and off.
+- **📜 Activity Log & Activity Logs**: Record all system actions for compliance and history tracking.
 - **📑 OpenAPI & Swagger Documentation**: REST API with interactive Swagger UI served by the backend.
 
 ---
@@ -55,6 +55,7 @@ This repo is a fresh rework of the original [AuditDesk](https://github.com/david
 
 - Node.js 20+
 - A PostgreSQL database - either local via Docker, or any remote/managed instance
+- On Linux servers: the system libraries headless Chrome needs, for **Export PDF** (see [PDF export](#-pdf-export-headless-chrome) below)
 
 ### 1. Install dependencies (all workspaces)
 
@@ -109,6 +110,33 @@ This runs the backend (`http://localhost:3001`) and frontend (`http://localhost:
 
 ---
 
+## 🖨️ PDF export (headless Chrome)
+
+**Export PDF** on the Plan, Schedule, Meeting and Findings pages is printed on the server by headless Chrome (`frontend/src/app/api/pdf/route.ts`), so the PDF has real, selectable text - the same output as Ctrl+P.
+
+- **The browser itself installs with `npm install`.** The `puppeteer` package downloads Chrome's headless shell into `.cache/puppeteer/` in the repo (configured in `.puppeteerrc.cjs`; the folder is git-ignored). No separate browser install.
+- **Fonts are bundled with the app** (Roboto, plus Noto Sans Khmer for Khmer text), so nothing needs installing for fonts either.
+- **A new Linux server only needs Chrome's system libraries.** On Ubuntu/Debian:
+
+  ```bash
+  sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+  ```
+
+  (On Ubuntu 22.04 / Debian 12 and older, use `libasound2` instead of `libasound2t64`.)
+
+To check a server is ready, this should print nothing:
+
+```bash
+ldd .cache/puppeteer/chrome-headless-shell/*/chrome-headless-shell-linux64/chrome-headless-shell | grep "not found"
+```
+
+If the `.cache/puppeteer` folder is missing (e.g. `npm install` ran with `--ignore-scripts`), download it with `npx puppeteer browsers install chrome-headless-shell` from the repo root.
+
+If Chrome can't start, Export PDF still works: the browser falls back to an image-based PDF (text not selectable) and the frontend log shows `[pdf] server-side export failed`. Chrome uses about 400 MB while exporting and shuts down after 5 idle minutes; exports run one at a time.
+
+---
+
 ## 📚 API & Documentation
 
 - **Interactive Swagger UI**: [`http://localhost:3001/api-docs`](http://localhost:3001/api-docs)
@@ -118,4 +146,4 @@ This runs the backend (`http://localhost:3001`) and frontend (`http://localhost:
 
 ## 📄 License
 
-Private & Proprietary - AuditDesk Project.
+Private & Proprietary - OE Portal Project.

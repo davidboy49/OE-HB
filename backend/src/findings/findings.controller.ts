@@ -15,16 +15,25 @@ import { UpdateFindingStatusDto } from './dto/update-finding-status.dto';
 import { ActivityLogInterceptor } from '../common/interceptors/activity-log.interceptor';
 import { LogActivity } from '../common/decorators/log-activity.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AccessScopeService } from '../common/access-scope.service';
+import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('findings')
 @ApiBearerAuth()
 @Controller('findings')
 export class FindingsController {
-  constructor(private readonly findingsService: FindingsService) {}
+  constructor(
+    private readonly findingsService: FindingsService,
+    private readonly accessScope: AccessScopeService,
+  ) {}
 
   @Get()
-  findAll() {
-    return this.findingsService.findAll();
+  @RequirePermission('findings:view')
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.findingsService.findAll(
+      await this.accessScope.findings(user.sub),
+    );
   }
 
   @Post()
@@ -34,7 +43,15 @@ export class FindingsController {
     action: 'CREATE_FINDING',
     details: `Created finding "${req.body.title}" under execution schedule ID: ${req.body.executionScheduleId}`,
   }))
-  create(@Body() dto: CreateFindingDto) {
+  async create(
+    @Body() dto: CreateFindingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible(
+      'schedule',
+      dto.executionScheduleId,
+      user.sub,
+    );
     return this.findingsService.create(
       dto.title,
       dto.description,
@@ -42,7 +59,7 @@ export class FindingsController {
       dto.status,
       dto.recommendation,
       dto.executionScheduleId,
-      dto.auditorId,
+      dto.memberId,
     );
   }
 
@@ -53,7 +70,12 @@ export class FindingsController {
     action: 'UPDATE_FINDING',
     details: `Updated finding ID: ${req.params.id}`,
   }))
-  update(@Param('id') id: string, @Body() dto: UpdateFindingDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateFindingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('finding', id, user.sub);
     return this.findingsService.update(id, dto);
   }
 
@@ -64,7 +86,12 @@ export class FindingsController {
     action: 'UPDATE_FINDING_STATUS',
     details: `Updated finding ID: ${req.params.id} status to ${req.body.status}`,
   }))
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateFindingStatusDto) {
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateFindingStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.accessScope.assertVisible('finding', id, user.sub);
     return this.findingsService.updateStatus(id, dto.status);
   }
 }

@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Server-side PDF export (src/app/api/pdf) drives headless Chrome; load it with plain require.
+  serverExternalPackages: ["puppeteer"],
   async redirects() {
     return [
       {

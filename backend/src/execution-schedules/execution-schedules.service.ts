@@ -1,14 +1,39 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Optional,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  FindingAttachmentsService,
+  rowIdsOf,
+} from './attachments/finding-attachments.service';
 import { Prisma } from '../generated/prisma/client';
+import {
+  assertOePlanReleased,
+  assertParentOePlanNotClosed,
+} from '../common/assert-oe-plan-status';
+import {
+  PlanItemsService,
+  PLAN_ITEM_OWNER,
+} from '../common/plan-items.service';
+
+const CONFLICT_MESSAGE =
+  'Someone else changed this Execution Schedule after you loaded it. Reload and try again.';
 
 export interface CreateExecutionScheduleInput {
+  /** The Individual OE Plan this schedule belongs to. Called `projectId` in the API for
+   * backward compatibility with existing clients - it is not a Project (see Prisma's
+   * `oePlanId`, which is what it is actually stored as). */
   projectId: string;
   departments: string;
   address: string;
   visitNumber: string;
   actualVisitDate: string;
-  auditPeriod: string;
+  oePeriod: string;
   leadExecution: string;
   teamMembers: string;
   additionalAttendees: string;
@@ -19,7 +44,6 @@ export interface CreateExecutionScheduleInput {
   objectives: string;
   scope: string;
   scheduleRows: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
 }
@@ -29,7 +53,7 @@ export interface UpdateExecutionScheduleInput {
   address?: string;
   visitNumber?: string;
   actualVisitDate?: string;
-  auditPeriod?: string;
+  oePeriod?: string;
   leadExecution?: string;
   teamMembers?: string;
   additionalAttendees?: string;
@@ -40,9 +64,18 @@ export interface UpdateExecutionScheduleInput {
   objectives?: string;
   scope?: string;
   scheduleRows?: string;
-  attachments?: string;
   ownerName?: string;
   lastModifiedBy?: string;
+  /** See UpdateExecutionScheduleDto - when given, rejects the write if the schedule has been
+   * changed since this timestamp instead of silently overwriting the other change. */
+  expectedUpdatedAt?: string;
+}
+
+export interface ResolveFindingRowInput {
+  correctiveFinalDate?: string;
+  correctiveFinalRemarks?: string;
+  resolve?: boolean;
+  expectedUpdatedAt?: string;
 }
 
 export interface DepartmentConsentInput {
@@ -52,6 +85,8 @@ export interface DepartmentConsentInput {
   acceptedByUserEmail: string;
   timestamp: string;
   comments?: string;
+  /** That department's own Concern of the Department Owner - independent per department, submitted by whoever signs off for it. */
+  departmentConcern?: string;
 }
 
 /**
@@ -60,19 +95,43 @@ export interface DepartmentConsentInput {
  */
 @Injectable()
 export class ExecutionSchedulesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planItems: PlanItemsService,
+    // Optional so unit tests that don't exercise attachments can construct the service bare.
+    @Optional() private readonly attachments?: FindingAttachmentsService,
+  ) {}
 
-  /** Mirrors dbService.assertProjectNotClosed (dbService.ts:29-35). */
-  private async assertProjectNotClosed(projectId?: string): Promise<void> {
-    if (!projectId) return;
-    const proj = await this.prisma.auditProject.findUnique({
-      where: { id: projectId },
-    });
-    if (proj && proj.status === 'CLOSED') {
-      throw new Error(
-        'This Audit Plan is CLOSED. No modifications or new records can be linked to a closed audit plan.',
+  /**
+   * Finding rows' files live in FindingAttachment, not in scheduleRows. Merges each live file
+   * list into its row as `attachments` (metadata only - downloads go through the attachment
+   * route) for every findings report in `dtos`.
+   */
+  private async withAttachments<
+    T extends { id: string; language?: string; scheduleRows?: string },
+  >(dtos: T[]): Promise<T[]> {
+    const findingIds = dtos
+      .filter((d) => d.language === 'finding')
+      .map((d) => d.id);
+    if (!this.attachments || findingIds.length === 0) return dtos;
+    const bySchedule = await this.attachments.metaBySchedule(findingIds);
+    return dtos.map((d) => {
+      if (d.language !== 'finding') return d;
+      let rows: unknown;
+      try {
+        rows = JSON.parse(d.scheduleRows || '[]');
+      } catch {
+        return d;
+      }
+      if (!Array.isArray(rows)) return d;
+      const byRow = bySchedule.get(d.id);
+      const merged = rows.map((r: { id?: string }) =>
+        r && typeof r === 'object'
+          ? { ...r, attachments: (r.id && byRow?.get(r.id)) || [] }
+          : r,
       );
-    }
+      return { ...d, scheduleRows: JSON.stringify(merged) };
+    });
   }
 
   /**
@@ -106,18 +165,29 @@ export class ExecutionSchedulesService {
       .$executeRaw`UPDATE "ExecutionSchedule" SET "attendeeConfirmations" = ${attendeeConfirmations} WHERE id = ${id}`;
   }
 
-  /** Shared response shape used by findAll/create/findOne (dbService.ts:730-757, 795-822, 831-858). */
-  private toDto(s: any, attendeeConfirmationsOverride?: string): any {
+  /**
+   * Shared response shape used by findAll/create/findOne (dbService.ts:730-757, 795-822,
+   * 831-858). `projectId`/`projectName`/`projectCode` are kept as the API's field names for
+   * backward compatibility, even though they describe the parent Individual OE Plan
+   * (`oePlanId` in the database), not a Project.
+   */
+  private toDto(
+    s: any,
+    attendeeConfirmationsOverride?: string,
+    objectivesOverride?: string,
+    scopeOverride?: string,
+    dataRequestItems?: string,
+  ): any {
     return {
       id: s.id,
-      projectId: s.projectId,
-      projectName: s.project?.name,
-      projectCode: s.project?.code,
+      projectId: s.oePlanId,
+      projectName: s.oePlan?.name,
+      projectCode: s.oePlan?.code,
       departments: s.departments,
       address: s.address,
       visitNumber: s.visitNumber,
       actualVisitDate: s.actualVisitDate,
-      auditPeriod: s.auditPeriod,
+      oePeriod: s.oePeriod,
       leadExecution: s.leadExecution,
       teamMembers: s.teamMembers,
       additionalAttendees: s.additionalAttendees,
@@ -126,10 +196,12 @@ export class ExecutionSchedulesService {
       standards: s.standards,
       language: s.language,
       status: s.status,
-      objectives: s.objectives,
-      scope: s.scope,
+      objectives: objectivesOverride ?? '[]',
+      scope: scopeOverride ?? '[]',
+      // The parent OE Plan's Data Request list. scheduleRows[].dataRequest only holds ids into
+      // it, and a schedule viewer may not hold oe-plans:view to look the text up themselves.
+      dataRequestItems: dataRequestItems ?? '[]',
       scheduleRows: s.scheduleRows,
-      attachments: s.attachments,
       ownerName: s.ownerName,
       lastModifiedBy: s.lastModifiedBy,
       qrToken: s.qrToken ?? s.id,
@@ -141,106 +213,181 @@ export class ExecutionSchedulesService {
     };
   }
 
-  async findAll(): Promise<any[]> {
+  /** `where` is the caller's view scope (see AccessScopeService). */
+  async findAll(
+    where: Prisma.ExecutionScheduleWhereInput = {},
+  ): Promise<any[]> {
     const schedules = await this.prisma.executionSchedule.findMany({
-      include: { project: true },
+      where: { isDeleted: false, ...where },
+      include: { oePlan: true },
       orderBy: { createdAt: 'desc' },
     });
-    const confirmationMap = await this.getScheduleAttendeeConfirmations(
-      schedules.map((s) => s.id),
+    const ids = schedules.map((s) => s.id);
+    const oePlanIds = [...new Set(schedules.map((s) => s.oePlanId))];
+    const [confirmationMap, objectivesById, scopeById, dataRequestsByPlanId] =
+      await Promise.all([
+        this.getScheduleAttendeeConfirmations(ids),
+        this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, ids),
+        this.planItems.readMany(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, ids),
+        this.planItems.readMany(
+          PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+          oePlanIds,
+        ),
+      ]);
+    return this.withAttachments(
+      schedules.map((s) =>
+        this.toDto(
+          s,
+          confirmationMap[s.id],
+          objectivesById.get(s.id),
+          scopeById.get(s.id),
+          dataRequestsByPlanId.get(s.oePlanId),
+        ),
+      ),
     );
-    return schedules.map((s) => this.toDto(s, confirmationMap[s.id]));
   }
 
-  async create(data: CreateExecutionScheduleInput): Promise<any> {
-    await this.assertProjectNotClosed(data.projectId);
+  /** The owner is always the authenticated creator (actorName), never a client-supplied value. */
+  async create(
+    data: CreateExecutionScheduleInput,
+    actorName: string,
+  ): Promise<any> {
+    await assertOePlanReleased(this.prisma, data.projectId);
 
-    const { attendeeConfirmations, ...createData } = data;
+    const {
+      attendeeConfirmations,
+      projectId,
+      objectives,
+      scope,
+      ...createData
+    } = data;
     const s = await this.prisma.executionSchedule.create({
-      data: createData,
-      include: { project: true },
+      // Spread first so a client-supplied ownerName/lastModifiedBy is overridden.
+      data: {
+        ...createData,
+        oePlanId: projectId,
+        ownerName: actorName,
+        lastModifiedBy: actorName,
+      },
+      include: { oePlan: true },
     });
-    await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
-    return this.toDto(s, attendeeConfirmations);
+    await Promise.all([
+      this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type,
+        s.id,
+        objectives,
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type,
+        s.id,
+        scope,
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.prefix,
+      ),
+    ]);
+    const [dto] = await this.withAttachments([
+      this.toDto(s, attendeeConfirmations, objectives, scope),
+    ]);
+    return dto;
   }
 
   async findOne(id: string): Promise<any | null> {
     const s = await this.prisma.executionSchedule.findUnique({
       where: { id },
-      include: { project: true },
+      include: { oePlan: true },
     });
-    if (!s) return null;
-    const confirmationMap = await this.getScheduleAttendeeConfirmations([id]);
-    return this.toDto(s, confirmationMap[s.id]);
+    if (!s || s.isDeleted) return null;
+    const [confirmationMap, objectives, scope, dataRequestItems] =
+      await Promise.all([
+        this.getScheduleAttendeeConfirmations([id]),
+        this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
+        this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
+        this.planItems.readOne(
+          PLAN_ITEM_OWNER.OEPLAN_DATA_REQUEST.type,
+          s.oePlanId,
+        ),
+      ]);
+    const [dto] = await this.withAttachments([
+      this.toDto(s, confirmationMap[s.id], objectives, scope, dataRequestItems),
+    ]);
+    return dto;
   }
 
   /**
-   * dbService.getExecutionScheduleByQrToken (dbService.ts:1339-1420). Resolves by qrToken,
-   * id, projectId or project code, then merges departments/consents across sibling
-   * schedules on the same project.
+   * Atomically merges one key into a JSON-map column, entirely inside a single UPDATE
+   * statement (Postgres's `jsonb_set` does the read-modify-write under the row's own lock).
+   * This is what makes it safe against two people writing two different keys of the same
+   * column at once - unlike the read-in-application-code/JSON.parse/mutate/JSON.stringify/
+   * write-back pattern this replaces, where the second writer's save silently discards
+   * whatever the first writer just added, because it never saw it.
    */
-  async findByQrToken(qrToken: string): Promise<any | null> {
-    const s = await this.prisma.executionSchedule.findFirst({
-      where: {
-        OR: [
-          { qrToken },
-          { id: qrToken },
-          { projectId: qrToken },
-          { project: { code: qrToken } },
-        ],
-      },
-      include: { project: true },
-    });
-    if (!s) return null;
-
-    let mergedDepartments = s.departments;
-    let mergedConsents: Record<string, any> = {};
-    try {
-      mergedConsents = JSON.parse(s.departmentConsents || '{}');
-    } catch {
-      mergedConsents = {};
+  private async mergeJsonColumn(
+    column: 'departmentConsents' | 'attendeeConfirmations',
+    id: string,
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    const json = JSON.stringify(value);
+    if (column === 'departmentConsents') {
+      await this.prisma.$executeRaw`
+        UPDATE "ExecutionSchedule"
+        SET "departmentConsents" = jsonb_set(
+          COALESCE("departmentConsents", '{}')::jsonb, ARRAY[${key}]::text[], ${json}::jsonb, true
+        )::text
+        WHERE id = ${id}
+      `;
+    } else {
+      await this.prisma.$executeRaw`
+        UPDATE "ExecutionSchedule"
+        SET "attendeeConfirmations" = jsonb_set(
+          COALESCE("attendeeConfirmations", '{}')::jsonb, ARRAY[${key}]::text[], ${json}::jsonb, true
+        )::text
+        WHERE id = ${id}
+      `;
     }
-
-    if (s.projectId) {
-      const siblingSchedules = await this.prisma.executionSchedule.findMany({
-        where: { projectId: s.projectId },
-      });
-
-      if (s.project?.departments) {
-        mergedDepartments = s.project.departments;
-      } else {
-        const deptSet = new Set<string>();
-        siblingSchedules.forEach((sib) => {
-          (sib.departments || '').split(',').forEach((d) => {
-            const clean = d.trim();
-            if (clean) deptSet.add(clean);
-          });
-        });
-        if (deptSet.size > 0)
-          mergedDepartments = Array.from(deptSet).join(', ');
-      }
-
-      for (const sib of siblingSchedules) {
-        try {
-          const sibConsents = JSON.parse(sib.departmentConsents || '{}');
-          Object.assign(mergedConsents, sibConsents);
-        } catch {
-          // ignore invalid json
-        }
-      }
-    }
-
-    const confirmationMap = await this.getScheduleAttendeeConfirmations([s.id]);
-    return {
-      ...this.toDto(s, confirmationMap[s.id]),
-      departments: mergedDepartments,
-      departmentConsents: JSON.stringify(mergedConsents),
-    };
   }
 
   /**
-   * dbService.updateDepartmentConsent (dbService.ts:1422-1463). Records a single
-   * department's consent decision and fans it out to sibling schedules on the same project.
+   * Gives every row in a `scheduleRows` JSON array a stable `id` if it doesn't already have
+   * one (and drops any client-sent `attachments` list), so resolveFindingRow (and anything else that needs to target a single row) has
+   * something to match on. Runs on every ordinary save, so rows saved before this field
+   * existed pick up an id the next time anyone touches the report - no migration needed.
+   * Returns the input unchanged (not re-serialized) when nothing needed backfilling.
+   */
+  private backfillRowIds(scheduleRows: string): string {
+    let rows: unknown;
+    try {
+      rows = JSON.parse(scheduleRows);
+    } catch {
+      return scheduleRows;
+    }
+    if (!Array.isArray(rows)) return scheduleRows;
+    let changed = false;
+    const withIds = rows.map((r) => {
+      if (!r || typeof r !== 'object') return r;
+      let row = r as { id?: string; attachments?: unknown };
+      if (!row.id) {
+        changed = true;
+        row = { ...row, id: randomUUID() };
+      }
+      // A row's files live in FindingAttachment (see withAttachments); whatever list the
+      // client echoes back is never stored, so it can't resurrect or drop files.
+      if (row.attachments !== undefined) {
+        changed = true;
+        const { attachments: _ignored, ...rest } = row;
+        row = rest;
+      }
+      return row;
+    });
+    return changed ? JSON.stringify(withIds) : scheduleRows;
+  }
+
+  /**
+   * Records a single department's consent decision and fans it out to sibling schedules on
+   * the same OE Plan. Each write is a single atomic jsonb_set (see mergeJsonColumn) rather
+   * than a parse/mutate/stringify round trip, so two departments consenting at the same
+   * moment can never make one of them disappear.
    */
   async updateDepartmentConsent(
     scheduleId: string,
@@ -250,92 +397,291 @@ export class ExecutionSchedulesService {
     const s = await this.prisma.executionSchedule.findUnique({
       where: { id: scheduleId },
     });
-    if (!s) throw new NotFoundException('Execution Schedule not found');
-
-    let consents: Record<string, any> = {};
-    try {
-      consents = JSON.parse(s.departmentConsents || '{}');
-    } catch {
-      consents = {};
+    if (!s || s.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
     }
-    consents[departmentId] = consentObj;
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
 
-    const updated = await this.prisma.executionSchedule.update({
-      where: { id: scheduleId },
-      data: { departmentConsents: JSON.stringify(consents) },
-      include: { project: true },
-    });
+    await this.mergeJsonColumn(
+      'departmentConsents',
+      scheduleId,
+      departmentId,
+      consentObj,
+    );
 
-    if (s.projectId) {
-      const siblingSchedules = await this.prisma.executionSchedule.findMany({
-        where: { projectId: s.projectId, NOT: { id: scheduleId } },
+    if (s.oePlanId) {
+      const siblings = await this.prisma.executionSchedule.findMany({
+        where: {
+          oePlanId: s.oePlanId,
+          isDeleted: false,
+          NOT: { id: scheduleId },
+        },
+        select: { id: true },
       });
-      for (const sib of siblingSchedules) {
-        let sibConsents: Record<string, any> = {};
-        try {
-          sibConsents = JSON.parse(sib.departmentConsents || '{}');
-        } catch {
-          sibConsents = {};
-        }
-        sibConsents[departmentId] = consentObj;
-        await this.prisma.executionSchedule.update({
-          where: { id: sib.id },
-          data: { departmentConsents: JSON.stringify(sibConsents) },
-        });
+      for (const sib of siblings) {
+        await this.mergeJsonColumn(
+          'departmentConsents',
+          sib.id,
+          departmentId,
+          consentObj,
+        );
       }
     }
 
-    return {
-      ...updated,
-      projectName: updated.project?.name,
-      projectCode: updated.project?.code,
-    };
+    return this.findOne(scheduleId);
+  }
+
+  /**
+   * Records that one attendee confirmed their attendance, without touching any other field -
+   * in particular it never re-triggers the "an edit sends the record back to DRAFT" rule that
+   * the generic `update()` below applies, since confirming attendance is not editing content.
+   */
+  async confirmAttendee(
+    scheduleId: string,
+    attendeeName: string,
+    confirmedBy: string,
+  ): Promise<any> {
+    const s = await this.findOne(scheduleId);
+    if (!s) throw new NotFoundException('Execution Schedule not found');
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
+
+    await this.mergeJsonColumn(
+      'attendeeConfirmations',
+      scheduleId,
+      attendeeName,
+      {
+        confirmedAt: new Date().toISOString(),
+        confirmedBy,
+      },
+    );
+    return this.findOne(scheduleId);
+  }
+
+  /**
+   * Merges only the corrective-action fields of ONE finding row, identified by its stable
+   * `id` (see backfillRowIds) rather than array index - the field whitelist here (see
+   * ResolveFindingRowDto) is what lets `execution-schedules:resolve-finding` be granted
+   * without `execution-schedules:update`: a caller with only the former can never reach any
+   * other row, or any other field of this row, through this method.
+   *
+   * Unlike departmentConsents/attendeeConfirmations, `scheduleRows` is a JSON-stringified
+   * ARRAY in a plain String column, not a keyed map - so there's no jsonb_set-on-a-key to
+   * reach for here, and this is a read-modify-write like the generic `update()` below. When
+   * `expectedUpdatedAt` is given, the write is a compare-and-swap so a genuine concurrent
+   * conflict is rejected (409) rather than one side's change silently vanishing.
+   */
+  async resolveFindingRow(
+    scheduleId: string,
+    rowId: string,
+    patch: ResolveFindingRowInput,
+    actorName: string,
+  ): Promise<any> {
+    const target = await this.prisma.executionSchedule.findUnique({
+      where: { id: scheduleId },
+      select: { scheduleRows: true, isDeleted: true },
+    });
+    if (!target || target.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
+    }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', scheduleId);
+
+    let rows: any[];
+    try {
+      rows = JSON.parse(target.scheduleRows || '[]');
+    } catch {
+      rows = [];
+    }
+    const index = Array.isArray(rows)
+      ? rows.findIndex((r) => r?.id === rowId)
+      : -1;
+    if (index === -1) {
+      throw new NotFoundException(
+        "Finding row not found - if this report hasn't been saved since row-level " +
+          'resolving was added, ask an editor to open and save it once, then try again.',
+      );
+    }
+
+    // Resolve is one-way here: the resolver can't undo it or re-stamp it with a new
+    // user/time. Undoing is an editor action, done through the generic update().
+    if (patch.resolve === false) {
+      throw new BadRequestException(
+        'A resolution can only be undone by a report editor.',
+      );
+    }
+    if (patch.resolve === true && rows[index].correctiveFinalUser) {
+      throw new ConflictException(
+        `This finding row was already resolved by ${rows[index].correctiveFinalUser}.`,
+      );
+    }
+
+    const row = { ...rows[index] };
+    if (patch.correctiveFinalDate !== undefined)
+      row.correctiveFinalDate = patch.correctiveFinalDate;
+    if (patch.correctiveFinalRemarks !== undefined)
+      row.correctiveFinalRemarks = patch.correctiveFinalRemarks;
+    if (patch.resolve === true) {
+      row.correctiveFinalUser = actorName;
+      row.correctiveFinalDatetime = new Date().toISOString();
+    }
+    rows[index] = row;
+    const scheduleRows = JSON.stringify(rows);
+
+    if (patch.expectedUpdatedAt !== undefined) {
+      const { count } = await this.prisma.executionSchedule.updateMany({
+        where: { id: scheduleId, updatedAt: new Date(patch.expectedUpdatedAt) },
+        data: { scheduleRows, lastModifiedBy: actorName },
+      });
+      if (count === 0) throw new ConflictException(CONFLICT_MESSAGE);
+    } else {
+      await this.prisma.executionSchedule.update({
+        where: { id: scheduleId },
+        data: { scheduleRows, lastModifiedBy: actorName },
+      });
+    }
+
+    return this.findOne(scheduleId);
   }
 
   /**
    * dbService.updateExecutionSchedule (dbService.ts:1464-1518).
-   * NOTE: the source's return shape here deliberately omits attachments/qrToken/
+   * NOTE: the source's return shape here deliberately omits qrToken/
    * departmentConsents (unlike findAll/create/findOne) - preserved as-is for parity
    * rather than "fixed", since other code may already depend on this exact shape.
+   *
+   * When `expectedUpdatedAt` is given, the write is a compare-and-swap: it only lands if
+   * nobody has touched the schedule since that timestamp. This is what protects scheduleRows -
+   * an ordered list, not a keyed map, so there's no per-field atomic merge to reach for the
+   * way there is above - from two people's edits silently overwriting one another; the second
+   * save is refused instead of quietly winning, so the loser can reload and re-apply their
+   * change to the current version rather than lose it without ever knowing.
    */
-  async update(id: string, data: UpdateExecutionScheduleInput): Promise<any> {
-    const { attendeeConfirmations, ...updateData } = data;
-    const s = await this.prisma.executionSchedule.update({
+  async update(
+    id: string,
+    data: UpdateExecutionScheduleInput,
+    actorName: string,
+  ): Promise<any> {
+    // A soft-deleted schedule is not found, full stop - a plain edit must never resurrect its
+    // content by writing to a row that's supposed to be gone.
+    const target = await this.prisma.executionSchedule.findUnique({
       where: { id },
-      data: updateData,
-      include: { project: true },
+      select: { isDeleted: true, language: true, scheduleRows: true },
     });
-    await this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations);
-    return {
-      id: s.id,
-      projectId: s.projectId,
-      projectName: s.project.name,
-      projectCode: s.project.code,
-      departments: s.departments,
-      address: s.address,
-      visitNumber: s.visitNumber,
-      actualVisitDate: s.actualVisitDate,
-      auditPeriod: s.auditPeriod,
-      leadExecution: s.leadExecution,
-      teamMembers: s.teamMembers,
-      additionalAttendees: s.additionalAttendees,
-      attendeeConfirmations:
-        attendeeConfirmations ?? s.attendeeConfirmations ?? '{}',
-      standards: s.standards,
-      language: s.language,
-      status: s.status,
-      objectives: s.objectives,
-      scope: s.scope,
-      scheduleRows: s.scheduleRows,
-      ownerName: s.ownerName,
-      lastModifiedBy: s.lastModifiedBy,
-      createdAt: s.createdAt.toISOString(),
-      updatedAt: s.updatedAt.toISOString(),
-    };
+    if (!target || target.isDeleted) {
+      throw new NotFoundException('Execution Schedule not found');
+    }
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', id);
+
+    // ownerName is set once at creation and never changes; lastModifiedBy is the authenticated editor.
+    const {
+      attendeeConfirmations,
+      expectedUpdatedAt,
+      objectives,
+      scope,
+      ...updateData
+    } = data;
+    delete updateData.ownerName;
+    if (updateData.scheduleRows !== undefined) {
+      updateData.scheduleRows = this.backfillRowIds(updateData.scheduleRows);
+    }
+
+    if (expectedUpdatedAt !== undefined) {
+      const { count } = await this.prisma.executionSchedule.updateMany({
+        where: { id, updatedAt: new Date(expectedUpdatedAt) },
+        data: { ...updateData, lastModifiedBy: actorName },
+      });
+      if (count === 0) {
+        const exists = await this.prisma.executionSchedule.findUnique({
+          where: { id },
+          select: { id: true },
+        });
+        if (!exists)
+          throw new NotFoundException('Execution Schedule not found');
+        throw new ConflictException(CONFLICT_MESSAGE);
+      }
+    }
+
+    const s = await (expectedUpdatedAt !== undefined
+      ? this.prisma.executionSchedule.findUniqueOrThrow({
+          where: { id },
+          include: { oePlan: true },
+        })
+      : this.prisma.executionSchedule.update({
+          where: { id },
+          data: { ...updateData, lastModifiedBy: actorName },
+          include: { oePlan: true },
+        }));
+    // Files of finding rows this save removed go with them (soft delete, like the rows'
+    // other audit data). Only rows that existed before - never a row still being drafted.
+    const removedRowIds =
+      target.language === 'finding' && updateData.scheduleRows !== undefined
+        ? [...rowIdsOf(target.scheduleRows)].filter(
+            (rowId) => !rowIdsOf(updateData.scheduleRows).has(rowId),
+          )
+        : [];
+    await Promise.all([
+      this.attachments?.removeForRows(id, removedRowIds),
+      this.updateScheduleAttendeeConfirmations(s.id, attendeeConfirmations),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type,
+        id,
+        objectives,
+        PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.prefix,
+      ),
+      this.planItems.writeList(
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type,
+        id,
+        scope,
+        PLAN_ITEM_OWNER.SCHEDULE_SCOPE.prefix,
+      ),
+    ]);
+    // Re-read rather than trust `objectives`/`scope` directly: this may be a partial update
+    // that didn't touch them, and they must still reflect their current, unchanged value.
+    const [finalObjectives, finalScope] = await Promise.all([
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_OBJECTIVE.type, id),
+      this.planItems.readOne(PLAN_ITEM_OWNER.SCHEDULE_SCOPE.type, id),
+    ]);
+    const [dto] = await this.withAttachments([
+      {
+        id: s.id,
+        projectId: s.oePlanId,
+        projectName: s.oePlan.name,
+        projectCode: s.oePlan.code,
+        departments: s.departments,
+        address: s.address,
+        visitNumber: s.visitNumber,
+        actualVisitDate: s.actualVisitDate,
+        oePeriod: s.oePeriod,
+        leadExecution: s.leadExecution,
+        teamMembers: s.teamMembers,
+        additionalAttendees: s.additionalAttendees,
+        attendeeConfirmations:
+          attendeeConfirmations ?? s.attendeeConfirmations ?? '{}',
+        standards: s.standards,
+        language: s.language,
+        status: s.status,
+        objectives: finalObjectives,
+        scope: finalScope,
+        scheduleRows: s.scheduleRows,
+        ownerName: s.ownerName,
+        lastModifiedBy: s.lastModifiedBy,
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      },
+    ]);
+    return dto;
   }
 
+  /**
+   * Soft delete: hard-deleting used to cascade-destroy this schedule's Findings (real audit
+   * records) with no undo. `isDeleted` rows are excluded from findAll() and treated as
+   * not-found everywhere else in this service - nothing is actually removed from the database.
+   */
   async remove(id: string): Promise<boolean> {
-    await this.prisma.executionSchedule.delete({ where: { id } });
-    return true;
+    await assertParentOePlanNotClosed(this.prisma, 'schedule', id);
+    const { count } = await this.prisma.executionSchedule.updateMany({
+      where: { id, isDeleted: false },
+      data: { isDeleted: true },
+    });
+    return count > 0;
   }
 }

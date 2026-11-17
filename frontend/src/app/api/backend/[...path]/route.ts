@@ -11,15 +11,18 @@ async function proxy(req: NextRequest, path: string[]): Promise<NextResponse> {
   const init: RequestInit = {
     method: req.method,
     headers: {
-      "Content-Type": "application/json",
+      // Pass the caller's own type through - a multipart upload (finding attachments) carries
+      // its boundary in it. JSON stays the default for callers that don't set one.
+      "Content-Type": req.headers.get("content-type") ?? "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     cache: "no-store",
   };
 
   if (req.method !== "GET" && req.method !== "HEAD") {
-    const body = await req.text();
-    if (body) init.body = body;
+    // Raw bytes, not text(): decoding a binary upload as UTF-8 would corrupt it.
+    const body = await req.arrayBuffer();
+    if (body.byteLength > 0) init.body = body;
   }
 
   const backendRes = await fetch(targetUrl, init);
@@ -29,8 +32,14 @@ async function proxy(req: NextRequest, path: string[]): Promise<NextResponse> {
     const payload = await backendRes.json().catch(() => null);
     return NextResponse.json(payload, { status: backendRes.status });
   }
-  const text = await backendRes.text();
-  return new NextResponse(text, { status: backendRes.status });
+  // Anything else (e.g. an attachment download) streams through untouched, with the headers
+  // the browser needs to save it under its real name.
+  const headers = new Headers();
+  for (const name of ["content-type", "content-length", "content-disposition"]) {
+    const value = backendRes.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new NextResponse(backendRes.body, { status: backendRes.status, headers });
 }
 
 type RouteContext = { params: Promise<{ path: string[] }> };
